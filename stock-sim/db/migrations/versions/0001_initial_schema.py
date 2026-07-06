@@ -65,8 +65,8 @@ def upgrade() -> None:
         sa.Column("description", sa.String()),
         sa.Column("shares_outstanding", sa.BigInteger(), nullable=False),
         sa.Column("free_float_pct", sa.Numeric(), nullable=False),
-        sa.Column("beta_market", sa.Numeric(), nullable=False),
-        sa.Column("beta_sector", sa.Numeric(), nullable=False),
+        sa.Column("beta_market", sa.Numeric(10, 4), nullable=False),
+        sa.Column("beta_sector", sa.Numeric(10, 4), nullable=False),
         sa.Column("current_price", sa.Numeric()),
         sa.Column("intrinsic_value", sa.Numeric()),
         sa.Column("intrinsic_score", sa.Numeric()),
@@ -121,7 +121,7 @@ def upgrade() -> None:
         "industry_factor_weights",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("industry_id", sa.Integer(), sa.ForeignKey("industries.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("factor_key", sa.String(80), nullable=False),
+        sa.Column("factor_key", sa.String(80), sa.ForeignKey("factor_definitions.key"), nullable=False),
         sa.Column("weight", sa.Numeric(), nullable=False),
         *_timestamps(),
         sa.UniqueConstraint("industry_id", "factor_key", name="uq_industry_factor_weights_industry_factor"),
@@ -313,6 +313,15 @@ def upgrade() -> None:
     op.create_index(
         "ix_price_history_timeline_date", "price_history", ["timeline_id", "sim_date"]
     )
+    op.create_index(
+        "ix_price_history_company_timeline_date", "price_history", ["company_id", "timeline_id", "sim_date"]
+    )
+
+    op.create_index("ix_news_feed_timeline_date", "news_feed", ["timeline_id", "sim_date"])
+    op.create_index(
+        "ix_price_driver_scores_company_timeline_date", "price_driver_scores",
+        ["company_id", "timeline_id", "sim_date"]
+    )
 
     op.create_table(
         "price_driver_scores",
@@ -371,11 +380,13 @@ def upgrade() -> None:
         sa.Column("event_id", sa.Integer(), sa.ForeignKey("market_events.id", ondelete="RESTRICT"), nullable=False),
         sa.Column("timeline_id", sa.Integer(), sa.ForeignKey("timelines.id", ondelete="CASCADE"), nullable=False),
         sa.Column("scope_ref", sa.Integer(), nullable=False),
+        sa.Column("scope_type", sa.String(20), nullable=False),
         sa.Column("sim_date", sa.Date(), nullable=False),
         sa.Column("resolved_severity", sa.Numeric(), nullable=False),
         sa.Column("applied_effects", postgresql.JSONB(), nullable=False),
         sa.Column("expires_on", sa.Date(), nullable=False),
         *_timestamps(),
+        sa.CheckConstraint("scope_type in ('company', 'industry', 'market')", name="ck_event_instances_scope_type"),
     )
 
     op.create_table(
@@ -405,6 +416,10 @@ def upgrade() -> None:
             "source_event_instance_id", sa.Integer(), sa.ForeignKey("event_instances.id", ondelete="SET NULL")
         ),
         *_timestamps(),
+        sa.CheckConstraint(
+            "company_id is not null or industry_id is not null",
+            name="ck_news_feed_target_exists"
+        ),
     )
 
     op.create_table(
@@ -435,7 +450,7 @@ def upgrade() -> None:
         sa.Column("portfolio_id", sa.Integer(), sa.ForeignKey("portfolios.id", ondelete="CASCADE"), nullable=False),
         sa.Column("company_id", sa.Integer(), sa.ForeignKey("companies.id", ondelete="CASCADE"), nullable=False),
         sa.Column("sim_date", sa.Date(), nullable=False),
-        sa.Column("side", sa.String(4), nullable=False),
+        sa.Column("side", sa.String(10), nullable=False),
         sa.Column("quantity", sa.Numeric(), nullable=False),
         sa.Column("price", sa.Numeric(), nullable=False),
         sa.Column("fees", sa.Numeric(), nullable=False),
@@ -466,20 +481,26 @@ def upgrade() -> None:
         *_timestamps(),
     )
 
+    op.create_index("ix_notifications_payload_gin", "notifications", ["payload"], postgresql_using="gin")
+
 
 def downgrade() -> None:
+    op.drop_index("ix_notifications_payload_gin", table_name="notifications")
     op.drop_table("notifications")
     op.drop_table("watchlists")
     op.drop_table("transactions")
     op.drop_table("holdings")
     op.drop_table("portfolios")
+    op.drop_index("ix_news_feed_timeline_date", table_name="news_feed")
     op.drop_table("news_feed")
     op.drop_table("news_templates")
     op.drop_table("event_instances")
     op.drop_table("market_events")
     op.drop_table("economic_cycle_states")
+    op.drop_index("ix_price_driver_scores_company_timeline_date", table_name="price_driver_scores")
     op.drop_table("price_driver_scores")
     op.drop_index("ix_price_history_timeline_date", table_name="price_history")
+    op.drop_index("ix_price_history_company_timeline_date", table_name="price_history")
     op.drop_table("price_history")
     op.drop_table("simulation_state")
     op.drop_table("timelines")

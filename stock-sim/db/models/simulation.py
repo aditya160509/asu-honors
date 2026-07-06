@@ -28,5 +28,5 @@ class SimulationState(Base, TimestampMixin):
     current_sim_date: Mapped[date] = mapped_column(Date, nullable=False)
     tick_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     is_running: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Future: FK → config_snapshots.id when snapshot table is created
     config_snapshot_id: Mapped[int | None] = mapped_column()
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)

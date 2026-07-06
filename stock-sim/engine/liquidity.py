@@ -13,12 +13,12 @@ def order_imbalance(demand: float, supply: float) -> float:
 
 def demand_from_pressure(base_volume: float, price_pressure: float, sensitivity: float) -> float:
     """Section 6.K — demand scales up with positive price pressure."""
-    return base_volume * max(0.0, 1 + sensitivity * price_pressure)
+    return base_volume * max(1.0, 1 + sensitivity * price_pressure)
 
 
 def supply_from_pressure(base_volume: float, price_pressure: float, sensitivity: float) -> float:
     """Section 6.K — supply scales up with negative price pressure."""
-    return base_volume * max(0.0, 1 - sensitivity * price_pressure)
+    return base_volume * max(1.0, 1 - sensitivity * price_pressure)
 
 
 def daily_volume(base_volume: float, free_float_pct: float, imbalance: float) -> float:

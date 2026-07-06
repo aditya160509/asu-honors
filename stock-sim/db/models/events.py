@@ -37,10 +37,15 @@ class EventInstance(Base, TimestampMixin):
     event_id: Mapped[int] = mapped_column(ForeignKey("market_events.id", ondelete="RESTRICT"), nullable=False)
     timeline_id: Mapped[int] = mapped_column(ForeignKey("timelines.id", ondelete="CASCADE"), nullable=False)
     scope_ref: Mapped[int] = mapped_column(nullable=False)
+    scope_type: Mapped[str] = mapped_column(String(20), nullable=False)
     sim_date: Mapped[date] = mapped_column(Date, nullable=False)
     resolved_severity: Mapped[float] = mapped_column(Numeric, nullable=False)
     applied_effects: Mapped[dict] = mapped_column(JSONType, nullable=False)
     expires_on: Mapped[date] = mapped_column(Date, nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("scope_type in ('company', 'industry', 'market')", name="ck_event_instances_scope_type"),
+    )
 
 
 class NewsTemplate(Base, TimestampMixin):
@@ -69,4 +74,11 @@ class NewsFeed(Base, TimestampMixin):
     severity: Mapped[float] = mapped_column(Numeric, nullable=False)
     source_event_instance_id: Mapped[int | None] = mapped_column(
         ForeignKey("event_instances.id", ondelete="SET NULL")
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "company_id is not null or industry_id is not null",
+            name="ck_news_feed_target_exists"
+        ),
     )

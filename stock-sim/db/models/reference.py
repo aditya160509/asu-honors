@@ -1,6 +1,6 @@
 from typing import Optional
 
-from sqlalchemy import CheckConstraint, ForeignKey, Numeric, String, UniqueConstraint
+from sqlalchemy import BigInteger, CheckConstraint, ForeignKey, Numeric, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from db.models.base import Base, TimestampMixin
@@ -39,10 +39,10 @@ class Company(Base, TimestampMixin):
     industry_id: Mapped[int] = mapped_column(ForeignKey("industries.id", ondelete="RESTRICT"), nullable=False)
     logo_url: Mapped[Optional[str]] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(String)
-    shares_outstanding: Mapped[int] = mapped_column()
+    shares_outstanding: Mapped[int] = mapped_column(BigInteger)
     free_float_pct: Mapped[float] = mapped_column(Numeric)
-    beta_market: Mapped[float] = mapped_column(Numeric)
-    beta_sector: Mapped[float] = mapped_column(Numeric)
+    beta_market: Mapped[float] = mapped_column(Numeric(10, 4))
+    beta_sector: Mapped[float] = mapped_column(Numeric(10, 4))
 
     # Denormalized latest values; source of truth lives in the time-series tables.
     current_price: Mapped[Optional[float]] = mapped_column(Numeric)
@@ -116,7 +116,7 @@ class IndustryFactorWeight(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     industry_id: Mapped[int] = mapped_column(ForeignKey("industries.id", ondelete="CASCADE"), nullable=False)
-    factor_key: Mapped[str] = mapped_column(String(80), nullable=False)
+    factor_key: Mapped[str] = mapped_column(String(80), ForeignKey("factor_definitions.key"), nullable=False)
     weight: Mapped[float] = mapped_column(Numeric, nullable=False)
 
     industry: Mapped["Industry"] = relationship(back_populates="factor_weights")

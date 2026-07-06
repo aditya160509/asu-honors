@@ -8,6 +8,10 @@ def decay(rho: float, days_elapsed: int) -> float:
     return math.exp(-rho * days_elapsed)
 
 
+def _clamp(value: float, lo: float = -1.0, hi: float = 1.0) -> float:
+    return max(lo, min(hi, value))
+
+
 def apply_effect_to_drivers(
     driver_values: dict[str, float],
     effect_profile: dict[str, float],
@@ -19,12 +23,13 @@ def apply_effect_to_drivers(
 
     effect_profile maps driver_key -> base effect magnitude (signed).
     Returns a new dict; does not mutate the input.
+    All driver values are clamped to [-1, 1] after applying effects.
     """
     decay_factor = decay(rho, days_elapsed)
     updated = dict(driver_values)
     for driver_key, base_effect in effect_profile.items():
         delta = base_effect * severity * decay_factor
-        updated[driver_key] = updated.get(driver_key, 0.0) + delta
+        updated[driver_key] = _clamp(updated.get(driver_key, 0.0) + delta)
     return updated
 
 

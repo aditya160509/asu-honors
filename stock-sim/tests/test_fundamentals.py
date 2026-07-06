@@ -55,3 +55,33 @@ def test_gross_margin():
 
 def test_free_cash_flow_margin():
     assert fnd.free_cash_flow_margin(free_cash_flow=150, revenue=1000) == 0.15
+
+
+def test_operating_margin_zero_revenue_returns_inf():
+    result = fnd.operating_margin(ebit=100, revenue=0)
+    assert result == float("inf") or math.isinf(result)
+
+
+def test_roic_zero_invested_capital():
+    result = fnd.roic(ebit=100, tax_rate=0.25, invested_capital=0)
+    assert result == float("inf") or math.isinf(result)
+
+
+def test_roe_zero_equity():
+    result = fnd.roe(net_profit=50, shareholders_equity=0)
+    assert result == float("inf") or math.isinf(result)
+
+
+def test_net_debt_to_ebitda_zero_ebitda():
+    result = fnd.net_debt_to_ebitda(total_debt=100, cash_and_equivalents=50, ebitda=0)
+    assert result == float("inf") or math.isinf(result)
+
+
+def test_interest_coverage_zero_interest():
+    result = fnd.interest_coverage(ebit=100, interest_expense=0)
+    assert result == float("inf") or math.isinf(result)
+
+
+def test_current_ratio_zero_liabilities():
+    result = fnd.current_ratio(current_assets=100, current_liabilities=0)
+    assert result == float("inf") or math.isinf(result)

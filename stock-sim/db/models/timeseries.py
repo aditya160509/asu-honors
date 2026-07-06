@@ -1,6 +1,6 @@
 from datetime import date
 
-from sqlalchemy import CheckConstraint, Date, ForeignKey, Numeric, String, UniqueConstraint
+from sqlalchemy import BigInteger, CheckConstraint, Date, ForeignKey, Numeric, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from db.models.base import Base, TimestampMixin
@@ -20,7 +20,7 @@ class PriceHistory(Base, TimestampMixin):
     high: Mapped[float] = mapped_column(Numeric, nullable=False)
     low: Mapped[float] = mapped_column(Numeric, nullable=False)
     close: Mapped[float] = mapped_column(Numeric, nullable=False)
-    volume: Mapped[int] = mapped_column(nullable=False)
+    volume: Mapped[int] = mapped_column(BigInteger, nullable=False)
     intrinsic_value: Mapped[float] = mapped_column(Numeric, nullable=False)
     order_imbalance: Mapped[float] = mapped_column(Numeric, nullable=False)
 

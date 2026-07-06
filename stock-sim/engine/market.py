@@ -29,8 +29,8 @@ def price_from_gap(iv: float, y: float) -> float:
     return iv * np.exp(y)
 
 
-def _default_size_factor(market_cap: float) -> float:
-    return 1.0 / np.sqrt(max(market_cap, 1.0))
+def _default_size_factor(market_cap: float, ref_cap: float = 1e9) -> float:
+    return (ref_cap / max(market_cap, 1.0)) ** 0.25
 
 
 def _default_leverage_factor(leverage: float) -> float:
@@ -46,7 +46,8 @@ def company_volatility(
 ) -> float:
     """Section 6.I — company volatility = sigma_ind * f_size(market_cap) * f_lev(leverage).
 
-    f_size decreases with market cap (smaller caps are more volatile);
+    f_size decreases with market cap (smaller caps are more volatile),
+    normalised so a 1B cap company gets factor 1.0;
     f_lev increases with leverage. Defaults are sane placeholders when
     industry-specific curves aren't supplied.
     """

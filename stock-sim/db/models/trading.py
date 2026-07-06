@@ -65,7 +65,7 @@ class Transaction(Base, TimestampMixin):
     portfolio_id: Mapped[int] = mapped_column(ForeignKey("portfolios.id", ondelete="CASCADE"), nullable=False)
     company_id: Mapped[int] = mapped_column(ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
     sim_date: Mapped[date] = mapped_column(Date, nullable=False)
-    side: Mapped[str] = mapped_column(String(4), nullable=False)
+    side: Mapped[str] = mapped_column(String(10), nullable=False)
     quantity: Mapped[float] = mapped_column(Numeric, nullable=False)
     price: Mapped[float] = mapped_column(Numeric, nullable=False)
     fees: Mapped[float] = mapped_column(Numeric, nullable=False)
