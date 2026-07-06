@@ -84,8 +84,8 @@ def seed(session: Session) -> None:
             pretax_income = ebit - interest_expense
             tax = pretax_income * 0.25 if pretax_income > 0 else 0
             net_profit = pretax_income - tax
-            eps = net_profit / company.shares_outstanding if company.shares_outstanding > 0 else 0
             shares_diluted = company.shares_outstanding * rng.uniform(1.0, 1.05)
+            eps = net_profit / shares_diluted if shares_diluted > 0 else 0
 
             # ── Cash Flow Statement ──────────────────────────────────
             operating_cash_flow = net_profit * rng.uniform(0.80, 1.50)

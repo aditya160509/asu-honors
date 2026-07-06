@@ -24,6 +24,8 @@ def roe(net_profit: float, shareholders_equity: float) -> float:
 
 def asset_turnover(revenue: float, total_assets: float) -> float:
     """Section 4.4 — Asset Turnover = Revenue / Total Assets."""
+    if total_assets == 0:
+        return float("inf")
     return revenue / total_assets
 
 
@@ -146,3 +148,45 @@ def payout_sustainability(
         return 100.0
     # 0.6 < payout <= 0.8
     return (0.8 - payout) / 0.2 * 100.0
+
+
+# ── Banking-specific metrics (Section 4.4.1) ──────────────────────
+
+
+def net_interest_margin(
+    interest_income: float,
+    interest_expense: float,
+    avg_earning_assets: float,
+) -> float:
+    """Section 4.4.1 — NIM = (Interest Income - Interest Expense) / Average Earning Assets."""
+    if avg_earning_assets == 0:
+        return float("inf")
+    return (interest_income - interest_expense) / avg_earning_assets
+
+
+def cost_to_income(operating_expenses: float, total_income: float) -> float:
+    """Section 4.4.1 — Cost-to-Income Ratio = Operating Expenses / Total Income (lower better)."""
+    if total_income == 0:
+        return float("inf")
+    return operating_expenses / total_income
+
+
+def roa(net_profit: float, total_assets: float) -> float:
+    """Section 4.4.1 — ROA = Net Profit / Total Assets."""
+    if total_assets == 0:
+        return float("inf")
+    return net_profit / total_assets
+
+
+def capital_adequacy_ratio(equity: float, risk_weighted_assets: float) -> float:
+    """Section 4.4.1 — CAR = Equity / Risk-Weighted Assets (regulatory minimum ~8%)."""
+    if risk_weighted_assets == 0:
+        return float("inf")
+    return equity / risk_weighted_assets
+
+
+def npa_ratio(non_performing_loans: float, total_loans: float) -> float:
+    """Section 4.4.1 — NPA Ratio = Non-Performing Loans / Total Loans (lower better)."""
+    if total_loans == 0:
+        return float("inf")
+    return non_performing_loans / total_loans

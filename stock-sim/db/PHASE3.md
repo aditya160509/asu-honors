@@ -1,7 +1,7 @@
 # Phase 3 — Database: Status & Checklist
 
 > **PRD ref:** Sections 7, 7.10, 13 (Phase 3, steps 10–13)
-> **Last updated:** 2026-07-06 (audit complete)
+> **Last updated:** 2026-07-06 (all issues resolved — 10/10)
 
 ---
 
@@ -10,7 +10,7 @@
 - All **28 tables** modeled in SQLAlchemy 2.0 under `db/models/`
 - **Alembic scaffolding** — `alembic.ini`, `db/migrations/env.py`, `script.py.mako`
 - **Initial migration** `0001_initial_schema.py` — creates all 28 tables in FK-safe order with indexes and CHECK constraints
-- All models import cleanly — verified with `pytest` (88 tests pass)
+- All models import cleanly — verified with `pytest` (96 tests pass)
 
 ### Review fixes applied
 - All constraint/index issues from code review fixed in models + migration
@@ -28,7 +28,7 @@
 
 | Step | What | Count | Status | File |
 |------|------|-------|--------|------|
-| 11.1 | `config_parameters`, `factor_definitions` | 18 params + 33 factors | ✅ Done | `seed_config.py` |
+| 11.1 | `config_parameters`, `factor_definitions` | 18 params + 38 factors (5 banking) | ✅ Done | `seed_config.py` |
 | 11.2 | `industries` + pillar weights | 15 industries + 75 pillar weights | ✅ Done | `seed_industries.py` |
 | 11.3 | `companies` (identity, shares/float, betas, tickers) | 150 companies | ✅ Done | `seed_companies.py` |
 | 11.4 | `income_statement` / `balance_sheet` / `cash_flow_statement` + consensus | 600 rows each (150×4 quarters) | ✅ Done | `seed_financials.py` |
@@ -55,6 +55,9 @@
 | Σ-weights = 1.0 validation | Pillar weight sums not enforced | App-level check in seed_industries.py | ✅ Fixed |
 | `industry_factor_weights` not seeded | Industry-specific moat factor weights not set | Added to seed_industries.py | ✅ Fixed |
 | Demo passwords are plaintext ("demo") | Auth will break | Now bcrypt-hashed in seed_demo.py | ✅ Fixed |
+| `notification.type` shadows built-in | Lint/code quality | Migration 0003 renames to `notification_type` | ✅ Fixed |
+| Banking subfactor_set unused | Banking FQ scores wrong | 5 banking metric functions + branching in seed pipeline | ✅ Fixed |
+| No tick orchestrator tests | Zero tests for core engine | `test_tick.py` with 8 tests | ✅ Fixed |
 
 ---
 

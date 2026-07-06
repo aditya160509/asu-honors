@@ -24,6 +24,10 @@ def test_asset_turnover_basic():
     assert fnd.asset_turnover(revenue=800, total_assets=400) == 2.0
 
 
+def test_asset_turnover_zero_assets_returns_inf():
+    assert fnd.asset_turnover(revenue=800, total_assets=0) == float("inf")
+
+
 def test_cash_conversion_cycle():
     dso = fnd.days_sales_outstanding(receivables=100, revenue=1000, period_days=365)
     dio = fnd.days_inventory_outstanding(inventory=50, cogs=600, period_days=365)

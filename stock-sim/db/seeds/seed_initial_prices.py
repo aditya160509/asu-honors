@@ -36,15 +36,20 @@ from db.models import (
 from engine.fundamentals import (
     accruals_ratio,
     asset_turnover,
+    capital_adequacy_ratio,
     cash_conversion_cycle,
+    cost_to_income,
     current_ratio,
     days_inventory_outstanding,
     days_payables_outstanding,
     days_sales_outstanding,
     interest_coverage,
     net_debt_to_ebitda,
+    net_interest_margin,
+    npa_ratio,
     operating_margin,
     payout_sustainability,
+    roa,
     roe,
     roic,
 )
@@ -95,10 +100,34 @@ def _load_company_data(session: Session) -> dict:
     )
 
 
+
 def _compute_raw_metrics(
     inc: IncomeStatement, bal: BalanceSheet, cf: CashFlowStatement,
+    subfactor_set: str = "standard",
 ) -> dict[str, float]:
     """Compute all FQ raw metrics from one company's financials."""
+    if subfactor_set == "financials":
+        ni = float(inc.net_profit)
+        ta = float(bal.total_assets)
+        se = float(bal.shareholders_equity)
+        interest_income = float(inc.revenue)
+        interest_expense = float(inc.interest_expense)
+        avg_earning_assets = ta
+        op_ex = float(inc.operating_expenses)
+        nii = interest_income - interest_expense
+        ocf = float(cf.operating_cash_flow)
+        div = float(cf.dividends_paid)
+        loans = ta * 0.6
+        npl = loans * 0.02
+        return dict(
+            net_interest_margin=net_interest_margin(interest_income, interest_expense, avg_earning_assets),
+            cost_to_income=cost_to_income(op_ex, nii),
+            roa=roa(ni, ta),
+            capital_adequacy_ratio=capital_adequacy_ratio(se, loans),
+            npa_ratio=npa_ratio(npl, loans),
+            payout_sustainability=payout_sustainability(div, ni, ocf),
+        )
+
     r = float(inc.revenue)
     cogs = float(inc.cogs)
     ebit = float(inc.ebit)
@@ -165,25 +194,34 @@ def seed(session: Session) -> None:
         if not all([inc, bal, cf, seed_cfs]):
             continue
 
-        raw = _compute_raw_metrics(inc, bal, cf)
-        rows.append(dict(company=company, raw=raw, seed_cfs=seed_cfs))
+        sset = d["industries"][company.industry_id].subfactor_set
+        raw = _compute_raw_metrics(inc, bal, cf, subfactor_set=sset)
+        rows.append(dict(company=company, raw=raw, seed_cfs=seed_cfs, subfactor_set=sset))
     if not rows:
         msg = "No companies with complete financial data found — run seed_financials.py first."
         raise ValueError(msg)
 
-    fq_subfactor_keys = d["fq_subfactor_keys"]
+    all_fq_keys = d["fq_subfactor_keys"]
     fq_percentiles: dict[str, np.ndarray] = {}
-    for key in fq_subfactor_keys:
-        vals = np.array([_safe_finite(r["raw"].get(key, 0.0)) for r in rows])
+    for key in all_fq_keys:
+        relevant = [r for r in rows if key in r["raw"]]
+        if not relevant:
+            continue
+        vals = np.array([_safe_finite(r["raw"][key]) for r in relevant])
         lower = d["fq_directions"].get(key, "higher_better") == "lower_better"
         scores = percentile_rank_scores(vals, lower_is_better=lower)
         fq_percentiles[key] = scores
-        for i, r in enumerate(rows):
-            r.setdefault("fq_subscores", {})[key] = float(scores[i])
+        score_idx = 0
+        for r in rows:
+            if key in r["raw"]:
+                r.setdefault("fq_subscores", {})[key] = float(scores[score_idx])
+                score_idx += 1
 
     fq_subscores_all = []
-    for row_i, r in enumerate(rows):
+    for r in rows:
         company = r["company"]
+        if company.current_price is not None and company.current_price > 0:
+            continue
         ind_id = company.industry_id
         fq = financial_quality_composite(
             r["fq_subscores"], d["industry_pw"].get(ind_id, {}), d["subfactor_pillar"]
@@ -198,8 +236,7 @@ def seed(session: Session) -> None:
             float(ind.baseline_pe), iscore, growth, beta_pe, beta_g,
             float(ind.pe_min), float(ind.pe_max),
         )
-        inc_actual = d["income_map"].get(company.id)
-        eps_val = float(inc_actual.eps) if inc_actual else 0.0
+        eps_val = float(inc.eps) if inc else 0.0
         iv = intrinsic_value_per_share(fpe, eps_val)
 
         initial_gap = rng.gauss(0, 0.03)
@@ -223,9 +260,10 @@ def seed(session: Session) -> None:
             pillar = d["subfactor_pillar"][sub_key]
             pw = d["industry_pw"].get(ind_id, {})
             pw_this_pillar = pw.get(pillar, 0.0)
-            n_in_pillar = sum(1 for k in fq_subfactor_keys if d["subfactor_pillar"].get(k) == pillar)
+            sub_key_set = [k for k in r["raw"] if k in all_fq_keys]
+            n_in_pillar = sum(1 for k in sub_key_set if d["subfactor_pillar"].get(k) == pillar)
             applied_w = pw_this_pillar / n_in_pillar if n_in_pillar else 0.0
-            peer_pct = float(fq_percentiles[sub_key][row_i]) if sub_key in fq_percentiles else 50.0
+            peer_pct = float(fq_percentiles.get(sub_key, np.array([50.0]))[0]) if sub_key in fq_percentiles else 50.0
             fq_subscores_all.append(FinancialQualitySubscore(
                 company_id=company.id, fiscal_period=FISCAL_PERIOD,
                 subfactor_key=sub_key,
@@ -262,7 +300,7 @@ def seed(session: Session) -> None:
                 sim_date=FIRST_SIM_DATE,
                 open=round(r["price"], 4), high=round(r["price"] * 1.01, 4),
                 low=round(r["price"] * 0.99, 4), close=round(r["price"], 4),
-                volume=int(r["market_cap"] * 0.001),
+                volume=max(1000, int(r["market_cap"] * 0.001 * rng.uniform(0.5, 1.5))),
                 intrinsic_value=round(r["intrinsic_value"], 4),
                 order_imbalance=0.0,
             ))

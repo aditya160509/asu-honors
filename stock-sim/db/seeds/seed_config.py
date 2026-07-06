@@ -364,6 +364,47 @@ def seed(session: Session) -> None:
             direction="mid_band",
             formula_ref="payout_sustainability",
         ),
+        # ── Banking-specific FQ sub-factors (subfactor_set='financials') ──
+        FactorDefinition(
+            key="net_interest_margin",
+            display_name="Net Interest Margin",
+            factor_type="fq_sub",
+            pillar="profitability",
+            direction="higher_better",
+            formula_ref="net_interest_margin",
+        ),
+        FactorDefinition(
+            key="cost_to_income",
+            display_name="Cost-to-Income Ratio",
+            factor_type="fq_sub",
+            pillar="efficiency",
+            direction="lower_better",
+            formula_ref="cost_to_income",
+        ),
+        FactorDefinition(
+            key="roa",
+            display_name="Return on Assets",
+            factor_type="fq_sub",
+            pillar="profitability",
+            direction="higher_better",
+            formula_ref="roa",
+        ),
+        FactorDefinition(
+            key="capital_adequacy_ratio",
+            display_name="Capital Adequacy Ratio",
+            factor_type="fq_sub",
+            pillar="leverage_solvency",
+            direction="higher_better",
+            formula_ref="capital_adequacy_ratio",
+        ),
+        FactorDefinition(
+            key="npa_ratio",
+            display_name="NPA Ratio",
+            factor_type="fq_sub",
+            pillar="leverage_solvency",
+            direction="lower_better",
+            formula_ref="npa_ratio",
+        ),
         # ── Price Drivers ──────────────────────────────────────────
         FactorDefinition(
             key="value_opportunity",

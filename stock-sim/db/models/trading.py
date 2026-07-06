@@ -95,7 +95,7 @@ class Notification(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    type: Mapped[str] = mapped_column(String(60), nullable=False)
+    notification_type: Mapped[str] = mapped_column(String(60), nullable=False)
     payload: Mapped[dict] = mapped_column(JSONType, nullable=False)
     sim_date: Mapped[date] = mapped_column(Date, nullable=False)
     read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
