@@ -95,19 +95,23 @@ python3 -m pytest tests/ -v          # run tests
 
 ---
 
-## What's next — Phase 3 seed scripts
+## Run seed data
 
-Once everyone has Postgres running, the next work is **writing seed data** in order:
+Once the migration is complete, run the seed scripts (in dependency order):
 
 | # | Script | What it does |
 |---|--------|-------------|
-| 1 | `db/seeds/seed_config.py` | Insert config_parameters, factor_definitions, industry_pillar_weights |
+| 1 | `db/seeds/seed_config.py` | Insert config_parameters and factor_definitions |
 | 2 | `db/seeds/seed_industries.py` | Insert 15 industries (banking, IT, pharma, etc.) with baseline PEs, volatility |
 | 3 | `db/seeds/seed_companies.py` | Insert 150 companies with tickers, shares, betas, moat subscores |
 | 4 | `db/seeds/seed_financials.py` | Insert placeholder income/balance/cashflow statements |
-| 5 | `db/seeds/seed_events.py` | Insert 150+ market event types + news templates |
-| 6 | Wire engine → DB | Run engine once to compute FQ, FairPE, IV, first price row |
-| 7 | `db/seeds/seed_demo.py` | Insert demo users, portfolios, sample transactions |
+| 5 | `db/seeds/seed_events.py` | Insert 25 market event types + 15 news templates |
+| 6 | `db/seeds/seed_demo.py` | Insert demo users, portfolios, sample transactions |
+
+Run all at once:
+```bash
+python3 db/seeds/run_all.py
+```
 
 Each seed script is **idempotent** — running it twice produces the same result.
 

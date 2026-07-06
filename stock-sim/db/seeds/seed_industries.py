@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
-from db.models import Industry, IndustryPillarWeight
+from db.models import Industry, IndustryFactorWeight, IndustryPillarWeight
 
 
 INDUSTRIES = [
@@ -107,6 +107,57 @@ PILLAR_WEIGHTS = [
     (15, "earnings_quality", 0.25),
 ]
 
+# Industry-specific top-level factor weight overrides.
+# Industry → (management_quality, moat_score, financial_quality, fcf_quality, growth_potential)
+# Each tuple sums to 1.0. Falls back to global defaults when NULL in the DB.
+INDUSTRY_FACTOR_WEIGHTS: dict[int, tuple[float, float, float, float, float]] = {
+    1:  (0.30, 0.15, 0.30, 0.10, 0.15),   # Banking: management + FQ weighted
+    2:  (0.20, 0.25, 0.10, 0.10, 0.35),   # IT: growth + moat heavy
+    3:  (0.20, 0.30, 0.20, 0.05, 0.25),   # Pharma: moat (patents) + growth
+    4:  (0.20, 0.30, 0.20, 0.15, 0.15),   # FMCG: moat (brand) + FCF
+    5:  (0.25, 0.15, 0.30, 0.10, 0.20),   # Auto: FQ (capital intensive)
+    6:  (0.20, 0.25, 0.30, 0.10, 0.15),   # Energy: moat (resources) + FQ
+    7:  (0.20, 0.20, 0.35, 0.15, 0.10),   # Utilities: FQ + low growth
+    8:  (0.20, 0.20, 0.30, 0.10, 0.20),   # Metals: FQ (capex heavy)
+    9:  (0.25, 0.15, 0.30, 0.10, 0.20),   # Construction: management + FQ
+    10: (0.20, 0.20, 0.25, 0.20, 0.15),   # Real Estate: FQ + FCF (REIT structure)
+    11: (0.25, 0.20, 0.30, 0.10, 0.15),   # Telecom: FQ + management
+    12: (0.20, 0.25, 0.15, 0.15, 0.25),   # Retail: growth + moat (brand)
+    13: (0.25, 0.20, 0.25, 0.10, 0.20),   # Industrials: balanced
+    14: (0.20, 0.25, 0.25, 0.10, 0.20),   # Chemicals: moat (IP) + FQ
+    15: (0.20, 0.25, 0.15, 0.10, 0.30),   # Media: growth + moat (content)
+}
+
+FACTOR_KEYS = [
+    "management_quality",
+    "moat_score",
+    "financial_quality",
+    "fcf_quality",
+    "growth_potential",
+]
+
+
+def validate_pillar_weights() -> None:
+    """Verify each industry's pillar weights sum to 1.0."""
+    sums: dict[int, float] = {}
+    for ind_id, pillar, weight in PILLAR_WEIGHTS:
+        sums[ind_id] = sums.get(ind_id, 0.0) + weight
+    for ind_id, total in sums.items():
+        if abs(total - 1.0) > 1e-9:
+            raise ValueError(
+                f"Industry {ind_id} pillar weights sum to {total}, expected 1.0"
+            )
+
+    for ind_id, weights in INDUSTRY_FACTOR_WEIGHTS.items():
+        total = sum(weights)
+        if abs(total - 1.0) > 1e-9:
+            raise ValueError(
+                f"Industry {ind_id} factor weights sum to {total}, expected 1.0"
+            )
+
+
+validate_pillar_weights()
+
 
 def seed(session: Session) -> None:
     for i, ind in enumerate(INDUSTRIES, start=1):
@@ -134,6 +185,16 @@ def seed(session: Session) -> None:
             session.add(IndustryPillarWeight(
                 industry_id=ind_id, pillar=pillar, weight=weight,
             ))
+
+    for ind_id, weights in INDUSTRY_FACTOR_WEIGHTS.items():
+        for factor_key, weight in zip(FACTOR_KEYS, weights):
+            existing = session.query(IndustryFactorWeight).filter_by(
+                industry_id=ind_id, factor_key=factor_key
+            ).first()
+            if existing is None:
+                session.add(IndustryFactorWeight(
+                    industry_id=ind_id, factor_key=factor_key, weight=weight,
+                ))
 
 
 def main() -> None:

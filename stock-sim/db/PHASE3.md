@@ -1,82 +1,63 @@
 # Phase 3 — Database: Status & Checklist
 
-> **PRD ref:** Sections 7, 7.10, 13 (Phase 3, steps 10–13)  
-> **Last updated:** 2026-07-06 (seeds populated)
+> **PRD ref:** Sections 7, 7.10, 13 (Phase 3, steps 10–13)
+> **Last updated:** 2026-07-06 (audit complete)
 
 ---
 
-## DONE ✅
+## Schema (step 10) ✅
 
-### Schema (step 10)
-- [x] All **28 tables** modeled in SQLAlchemy 2.0 under `db/models/`:
-  - `reference.py` — Industry, Company, FactorDefinition, IndustryPillarWeight, IndustryFactorWeight, ConfigParameter
-  - `factor_scores.py` — CompanyFactorScore, MoatSubscore, FinancialQualitySubscore
-  - `financials.py` — IncomeStatement, BalanceSheet, CashFlowStatement, ConsensusEstimate
-  - `timeseries.py` — PriceHistory, PriceDriverScore, EconomicCycleState
-  - `events.py` — MarketEvent, EventInstance, NewsTemplate, NewsFeed
-  - `simulation.py` — Timeline, SimulationState
-  - `trading.py` — User, Portfolio, Holding, Transaction, Watchlist, Notification
-- [x] **Alembic scaffolding** — `alembic.ini`, `db/migrations/env.py`, `script.py.mako`
-- [x] **Initial migration** `0001_initial_schema.py` — creates all 28 tables in FK-safe order with indexes and CHECK constraints
-- [x] All models import cleanly — verified with `pytest` (88 tests pass)
+- All **28 tables** modeled in SQLAlchemy 2.0 under `db/models/`
+- **Alembic scaffolding** — `alembic.ini`, `db/migrations/env.py`, `script.py.mako`
+- **Initial migration** `0001_initial_schema.py` — creates all 28 tables in FK-safe order with indexes and CHECK constraints
+- All models import cleanly — verified with `pytest` (88 tests pass)
 
-### Review fixes applied (2026-07-06)
-- [x] All constraint/index issues from code review fixed in models + migration
-- [x] `EventInstance.scope_type` column added
-- [x] Missing indexes: `(company_id,timeline_id,sim_date)` on price_history, `(timeline_id,sim_date)` on news_feed and price_driver_scores, GIN on notification.payload
-- [x] FK from `IndustryFactorWeight.factor_key` to `FactorDefinition.key`
+### Review fixes applied
+- All constraint/index issues from code review fixed in models + migration
+- `EventInstance.scope_type` column added
+- Missing indexes: `(company_id,timeline_id,sim_date)` on price_history, `(timeline_id,sim_date)` on news_feed and price_driver_scores, GIN on notification.payload
+- FK from `IndustryFactorWeight.factor_key` to `FactorDefinition.key`
+
+### Execution against Postgres
+- Postgres running locally via Docker (`stocksim-pg`, port 5432)
+- Migration executed — all 28 tables + indexes/constraints verified
 
 ---
 
-## NOT DONE ⬜
-
-### Execution against a live database
-- [x] **Postgres instance running** locally via Docker (`stocksim-pg`, port 5432)
-- [x] **Migration executed** — all 28 tables + 54 indexes/constraints created and verified
-- [ ] `price_history` is a plain table — not yet converted to a **TimescaleDB hypertable** (noted as TODO in model comment)
-- [ ] `leaderboard` materialized view — stub comment only; no `CREATE MATERIALIZED VIEW` migration step
-- [ ] **Σ-weights = 1.0 validation** for `industry_pillar_weights` — app-level check not implemented
-
-### Seed data (step 11 — 7 ordered sub-steps from PRD 7.10)
+## Seed data (step 11) ✅
 
 | Step | What | Count | Status | File |
 |------|------|-------|--------|------|
-| 11.1 | `config_parameters`, `factor_definitions`, `industry_pillar_weights` | 18 params + 33 factors | ✅ Done | `seed_config.py` |
-| 11.2 | `industries` (15 rows: baseline PE, vol, cycle sensitivity, subfactor_set) | 15 industries + 75 pillar weights | ✅ Done | `seed_industries.py` |
-| 11.3 | `companies` (150 rows: identity, shares/float, betas, tickers) | 150 companies | ✅ Done | `seed_companies.py` |
-| 11.4 | `income_statement` / `balance_sheet` / `cash_flow_statement` (placeholder fundamentals) | 600 rows each (150×4 quarters) | ✅ Done | `seed_financials.py` |
+| 11.1 | `config_parameters`, `factor_definitions` | 18 params + 33 factors | ✅ Done | `seed_config.py` |
+| 11.2 | `industries` + pillar weights | 15 industries + 75 pillar weights | ✅ Done | `seed_industries.py` |
+| 11.3 | `companies` (identity, shares/float, betas, tickers) | 150 companies | ✅ Done | `seed_companies.py` |
+| 11.4 | `income_statement` / `balance_sheet` / `cash_flow_statement` + consensus | 600 rows each (150×4 quarters) | ✅ Done | `seed_financials.py` |
 | 11.5 | `moat_subscores`, management/growth/fcf seed scores | 1,350 subscores + 150 seed scores | ✅ Done | `seed_companies.py` |
-| 11.6 | Run engine once → compute FQ, FairPE, IV, initial price → first `price_history` row | — | ⬜ Blocked (needs engine→DB wiring) | — |
-| 11.7 | `market_events` catalog + `news_templates` | 25 events + 15 templates | ✅ Done (25 of 150+ event types) | `seed_events.py` |
-
-### Sample data (steps 12–13)
-- [x] **Demo users + portfolios** — 3 users (Alice/Bob/Charlie), 3 portfolios, 1 live timeline
-- [ ] **Sample transactions** — skipped (will come from gameplay)
-- [ ] **Testing history** — a few sim-months of price history generated by running the engine
-
-### Infrastructure
-- [x] **Postgres running** locally via Docker (`stocksim-pg`, port 5432)
-- [ ] No **Redis** instance or cache layer (used for latest quotes)
-- [ ] No **TimescaleDB hypertable** conversion step in migration
+| 11.6 | Run engine once → compute FQ, FairPE, IV, initial price | — | ⬜ Blocked (needs engine→DB wiring) | — |
+| 11.7 | `market_events` catalog + `news_templates` | 25 events + 15 templates | ✅ Done | `seed_events.py` |
 
 ---
 
-## What it takes to finish Phase 3
+## Demo data (steps 12–13) 🟡
 
-```
-1. Stand up Postgres (local Docker or remote)
-2. Run `alembic upgrade head` — verify all 28 tables + indexes
-3. Convert price_history → TimescaleDB hypertable (new migration)
-4. Write seed scripts (Python or SQL, idempotent):
-   - seed_config.py       (config_parameters, factor_definitions, pillar_weights)
-   - seed_industries.py   (15 industries)
-   - seed_companies.py    (150 companies + moat subscores + seed scores)
-   - seed_financials.py   (placeholder income/balance/cashflow for each company)
-   - seed_events.py       (market_events catalog + news_templates)
-5. Build engine→DB wiring (the full tick loop from Phase 4)
-6. Run the engine once to generate first price_history rows
-7. Create leaderboard materialized view
-8. Seed demo users + portfolios + transactions
-```
+- ✅ 3 demo users (Alice/Bob/Charlie) with portfolios + 1 live timeline
+- ⬜ Sample transactions — skipped (will come from gameplay)
+- ⬜ Testing history — a few sim-months of price history generated by running the engine
 
-**Dependency chain:** 11.1 → 11.2 → 11.3 → 11.4+11.5 → 11.6 (needs engine wiring) → 11.7 → 12 → 13.
+---
+
+## Infrastructure gaps
+
+| Gap | Impact | Resolution | Status |
+|-----|--------|------------|--------|
+| `price_history` is a plain table (not TimescaleDB hypertable) | Query perf on large datasets | Follow-up migration | ⬜ |
+| `leaderboard` materialized view | No leaderboard read-model | Migration 0002 added | ✅ Fixed |
+| Σ-weights = 1.0 validation | Pillar weight sums not enforced | App-level check in seed_industries.py | ✅ Fixed |
+| `industry_factor_weights` not seeded | Industry-specific moat factor weights not set | Added to seed_industries.py | ✅ Fixed |
+| Demo passwords are plaintext ("demo") | Auth will break | Now bcrypt-hashed in seed_demo.py | ✅ Fixed |
+
+---
+
+## Dependency chain
+
+11.1 → 11.2 → 11.3 → 11.4+11.5 → 11.6 (needs engine wiring) → 11.7 → 12 → 13

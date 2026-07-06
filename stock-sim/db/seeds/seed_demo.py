@@ -2,8 +2,8 @@
 
 import os
 import sys
-from datetime import date
 
+import bcrypt
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
@@ -11,24 +11,29 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
 from db.models import Portfolio, Timeline, User
 
+
+def _hash(password: str) -> str:
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+
+
 USERS = [
     {
         "email": "alice@example.com",
-        "hashed_password": "demo",
+        "hashed_password": _hash("demo"),
         "display_name": "Alice",
         "role": "admin",
         "starting_cash": 1_000_000,
     },
     {
         "email": "bob@example.com",
-        "hashed_password": "demo",
+        "hashed_password": _hash("demo"),
         "display_name": "Bob",
         "role": "user",
         "starting_cash": 500_000,
     },
     {
         "email": "charlie@example.com",
-        "hashed_password": "demo",
+        "hashed_password": _hash("demo"),
         "display_name": "Charlie",
         "role": "user",
         "starting_cash": 250_000,

@@ -2,13 +2,11 @@
 
 Small Python practice scripts for class and object examples.
 
-## Run the Scripts
+## Stock Market Simulation
 
-```bash
-python3 scripts/reproduce/mobile.py
-python3 scripts/reproduce/school.py
-python3 scripts/reproduce/run_welfare_suite.py
-```
+The main project lives under [`stock-sim/`](stock-sim/) — a factor-model-driven fictional stock market simulation engine with 150 companies across 15 industries.
+
+See [`stock-sim/SETUP.md`](stock-sim/SETUP.md) for setup instructions.
 
 ## Collaborating
 
