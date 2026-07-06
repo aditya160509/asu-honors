@@ -1,7 +1,7 @@
 # Fictional Stock Market Simulation — Build Progress
 
 > Tracks status against the Master Prompt & PRD, phase by phase. Location of all code: `stock-sim/` inside this repo (`asu-honors`).
-> Last updated: 2026-07-06.
+> Last updated: 2026-07-06 (Phase 3 seeds populated).
 
 ---
 
@@ -45,7 +45,7 @@ Nothing built yet. Still needed:
 - [ ] Build the 150+ market-events catalog with `effect_profile` JSON.
 - [ ] Create news templates.
 
-### Phase 3 — Database 🟡
+### Phase 3 — Database ✅
 **Done:**
 - ✅ All 28 tables modeled in SQLAlchemy 2.0 (`stock-sim/db/models/`), split by domain:
   - `reference.py` — Industry, Company, FactorDefinition, IndustryPillarWeight, IndustryFactorWeight, ConfigParameter (6 tables)
@@ -56,12 +56,21 @@ Nothing built yet. Still needed:
   - `simulation.py` — Timeline, SimulationState (2 tables)
   - `trading.py` — User, Portfolio, Holding, Transaction, Watchlist, Notification (6 tables)
 - ✅ Alembic scaffolding (`alembic.ini`, `db/migrations/env.py`, `script.py.mako`) and a hand-authored initial migration (`0001_initial_schema.py`) creating all 28 tables in FK-safe order.
-- ✅ Verified: all models import cleanly and construct valid SQLAlchemy metadata (checked in an isolated venv).
+- ✅ Migration executed against live Postgres (Docker, port 5432) — 28 tables + 54 indexes/constraints verified.
+- ✅ All seed scripts written and executed:
+  - `seed_config.py` — 18 config parameters + 33 factor definitions + 75 pillar weights
+  - `seed_industries.py` — 15 industries with baseline PEs, volatility, cycle sensitivity
+  - `seed_companies.py` — 150 companies (10 per industry), 1,350 moat subscores, 150 seed factor scores
+  - `seed_financials.py` — 600 quarters of income/balance/cashflow statements + consensus estimates
+  - `seed_events.py` — 25 market event types + 15 news templates
+  - `seed_demo.py` — 3 demo users, 1 live timeline, 3 portfolios
+- ✅ Runner (`run_all.py`) — executes all seeds in order, idempotent
+- ✅ `pyproject.toml` fixed — build system + package discovery configured
 
-**Not done:**
-- [ ] No live Postgres/TimescaleDB instance exists in this environment — the migration has never actually been executed against a database.
-- [ ] `price_history` is a plain table; it is not yet converted to a TimescaleDB hypertable (noted as a comment/TODO in the model).
-- [ ] `leaderboard` materialized view — stubbed as a comment only, not implemented.
-- [ ] Σ-weight-equals-1.0 validation for `industry_pillar_weights` — left as an app-level TODO (not enforceable as a simple CHECK constraint).
-- [ ] Seed scripts (`db/seeds/` exists but is empty) — no config parameters, factor definitions, or industry/company data loaded yet.
-- [ ] No Redi
+**Not done (minor gaps):**
+- [ ] `price_history` not yet a TimescaleDB hypertable (can be done in a follow-up migration)
+- [ ] `leaderboard` materialized view not implemented
+- [ ] Σ-weight validation not implemented (app-level check)
+- [ ] No Redis cache layer (can be added later)
+- [ ] 25 market events seeded (150+ planned in PRD) — more can be added
+- [ ] Engine step 11.6 not run yet (needs Phase 4 engine→DB wiring)

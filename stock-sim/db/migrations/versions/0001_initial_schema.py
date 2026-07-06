@@ -317,12 +317,6 @@ def upgrade() -> None:
         "ix_price_history_company_timeline_date", "price_history", ["company_id", "timeline_id", "sim_date"]
     )
 
-    op.create_index("ix_news_feed_timeline_date", "news_feed", ["timeline_id", "sim_date"])
-    op.create_index(
-        "ix_price_driver_scores_company_timeline_date", "price_driver_scores",
-        ["company_id", "timeline_id", "sim_date"]
-    )
-
     op.create_table(
         "price_driver_scores",
         sa.Column("id", sa.Integer(), primary_key=True),
@@ -338,6 +332,10 @@ def upgrade() -> None:
             "company_id", "timeline_id", "sim_date", "driver_key",
             name="uq_price_driver_scores_company_timeline_date_driver",
         ),
+    )
+    op.create_index(
+        "ix_price_driver_scores_company_timeline_date", "price_driver_scores",
+        ["company_id", "timeline_id", "sim_date"]
     )
 
     op.create_table(
@@ -421,6 +419,7 @@ def upgrade() -> None:
             name="ck_news_feed_target_exists"
         ),
     )
+    op.create_index("ix_news_feed_timeline_date", "news_feed", ["timeline_id", "sim_date"])
 
     op.create_table(
         "portfolios",

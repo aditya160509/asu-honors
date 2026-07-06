@@ -1,0 +1,504 @@
+"""Seed market events and news templates."""
+
+import os
+import sys
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
+
+from db.models import MarketEvent, NewsTemplate
+
+MARKET_EVENTS = [
+    {
+        "name": "CEO Resignation",
+        "category": "leadership",
+        "scope": "company",
+        "severity_range": "10..50",
+        "sentiment": "negative",
+        "duration_days": 15,
+        "decay_rate": 0.15,
+        "probability_weight": 0.02,
+        "effect_profile": {
+            "drivers": {"news_severity": -0.4, "guidance": -0.5},
+            "factor_scores": {"management_quality": -5},
+        },
+    },
+    {
+        "name": "Product Launch Success",
+        "category": "product",
+        "scope": "company",
+        "severity_range": "20..60",
+        "sentiment": "positive",
+        "duration_days": 20,
+        "decay_rate": 0.10,
+        "probability_weight": 0.04,
+        "effect_profile": {
+            "drivers": {"news_severity": 0.5, "technical_momentum": 0.3},
+            "factor_scores": {"growth_potential": 3, "innovation": 5},
+        },
+    },
+    {
+        "name": "Product Recall",
+        "category": "product",
+        "scope": "company",
+        "severity_range": "30..70",
+        "sentiment": "negative",
+        "duration_days": 25,
+        "decay_rate": 0.12,
+        "probability_weight": 0.03,
+        "effect_profile": {
+            "drivers": {"news_severity": -0.6, "guidance": -0.7},
+            "factor_scores": {"moat_score": -3, "management_quality": -2},
+        },
+    },
+    {
+        "name": "Earnings Beat",
+        "category": "earnings",
+        "scope": "company",
+        "severity_range": "10..40",
+        "sentiment": "positive",
+        "duration_days": 10,
+        "decay_rate": 0.20,
+        "probability_weight": 0.15,
+        "effect_profile": {
+            "drivers": {"earnings_surprise": 0.5, "news_severity": 0.3},
+        },
+    },
+    {
+        "name": "Earnings Miss",
+        "category": "earnings",
+        "scope": "company",
+        "severity_range": "15..50",
+        "sentiment": "negative",
+        "duration_days": 12,
+        "decay_rate": 0.18,
+        "probability_weight": 0.12,
+        "effect_profile": {
+            "drivers": {"earnings_surprise": -0.5, "news_severity": -0.4},
+        },
+    },
+    {
+        "name": "Dividend Hike",
+        "category": "dividend",
+        "scope": "company",
+        "severity_range": "5..25",
+        "sentiment": "positive",
+        "duration_days": 8,
+        "decay_rate": 0.25,
+        "probability_weight": 0.06,
+        "effect_profile": {
+            "drivers": {"news_severity": 0.3, "guidance": 0.2},
+            "factor_scores": {"fcf_quality": 2},
+        },
+    },
+    {
+        "name": "Dividend Cut",
+        "category": "dividend",
+        "scope": "company",
+        "severity_range": "15..45",
+        "sentiment": "negative",
+        "duration_days": 15,
+        "decay_rate": 0.15,
+        "probability_weight": 0.04,
+        "effect_profile": {
+            "drivers": {"news_severity": -0.5, "guidance": -0.6},
+            "factor_scores": {"fcf_quality": -5},
+        },
+    },
+    {
+        "name": "Patent Granted",
+        "category": "legal",
+        "scope": "company",
+        "severity_range": "10..40",
+        "sentiment": "positive",
+        "duration_days": 30,
+        "decay_rate": 0.08,
+        "probability_weight": 0.03,
+        "effect_profile": {
+            "drivers": {"news_severity": 0.4, "technical_momentum": 0.2},
+            "factor_scores": {"moat_score": 4, "intangibles": 8, "growth_potential": 2},
+        },
+    },
+    {
+        "name": "Lawsuits Filed",
+        "category": "legal",
+        "scope": "company",
+        "severity_range": "20..60",
+        "sentiment": "negative",
+        "duration_days": 40,
+        "decay_rate": 0.05,
+        "probability_weight": 0.02,
+        "effect_profile": {
+            "drivers": {"news_severity": -0.5},
+            "factor_scores": {"management_quality": -3},
+        },
+    },
+    {
+        "name": "Guidance Raised",
+        "category": "guidance",
+        "scope": "company",
+        "severity_range": "10..30",
+        "sentiment": "positive",
+        "duration_days": 15,
+        "decay_rate": 0.15,
+        "probability_weight": 0.08,
+        "effect_profile": {
+            "drivers": {"guidance": 0.6, "news_severity": 0.3},
+        },
+    },
+    {
+        "name": "Regulatory Change",
+        "category": "regulation",
+        "scope": "industry",
+        "severity_range": "20..60",
+        "sentiment": "negative",
+        "duration_days": 45,
+        "decay_rate": 0.06,
+        "probability_weight": 0.05,
+        "effect_profile": {
+            "drivers": {"news_severity": -0.4, "economic_outlook": -0.2},
+            "factor_scores": {"growth_potential": -3},
+        },
+    },
+    {
+        "name": "Industry Boom",
+        "category": "macro",
+        "scope": "industry",
+        "severity_range": "20..50",
+        "sentiment": "positive",
+        "duration_days": 40,
+        "decay_rate": 0.07,
+        "probability_weight": 0.04,
+        "effect_profile": {
+            "drivers": {"news_severity": 0.4, "economic_outlook": 0.3},
+            "factor_scores": {"growth_potential": 4},
+        },
+    },
+    {
+        "name": "Supply Chain Disruption",
+        "category": "operations",
+        "scope": "industry",
+        "severity_range": "15..45",
+        "sentiment": "negative",
+        "duration_days": 30,
+        "decay_rate": 0.10,
+        "probability_weight": 0.06,
+        "effect_profile": {
+            "drivers": {"news_severity": -0.3, "guidance": -0.4},
+            "factor_scores": {"financial_quality": -2},
+        },
+    },
+    {
+        "name": "Trade Tariff Imposed",
+        "category": "trade",
+        "scope": "industry",
+        "severity_range": "20..50",
+        "sentiment": "negative",
+        "duration_days": 60,
+        "decay_rate": 0.04,
+        "probability_weight": 0.03,
+        "effect_profile": {
+            "drivers": {"news_severity": -0.5, "economic_outlook": -0.3},
+        },
+    },
+    {
+        "name": "Technology Breakthrough",
+        "category": "technology",
+        "scope": "industry",
+        "severity_range": "15..45",
+        "sentiment": "positive",
+        "duration_days": 35,
+        "decay_rate": 0.08,
+        "probability_weight": 0.03,
+        "effect_profile": {
+            "drivers": {"news_severity": 0.4, "technical_momentum": 0.3},
+            "factor_scores": {"growth_potential": 5, "innovation": 6},
+        },
+    },
+    {
+        "name": "Labor Strike",
+        "category": "labor",
+        "scope": "industry",
+        "severity_range": "20..50",
+        "sentiment": "negative",
+        "duration_days": 20,
+        "decay_rate": 0.12,
+        "probability_weight": 0.02,
+        "effect_profile": {
+            "drivers": {"news_severity": -0.4, "guidance": -0.5},
+        },
+    },
+    {
+        "name": "Commodity Price Spike",
+        "category": "commodity",
+        "scope": "industry",
+        "severity_range": "15..55",
+        "sentiment": "mixed",
+        "duration_days": 25,
+        "decay_rate": 0.10,
+        "probability_weight": 0.05,
+        "effect_profile": {
+            "drivers": {"news_severity": 0.2, "economic_outlook": -0.2},
+            "factor_scores": {"financial_quality": -2},
+        },
+    },
+    {
+        "name": "Consolidation Wave (M&A)",
+        "category": "strategy",
+        "scope": "industry",
+        "severity_range": "10..35",
+        "sentiment": "positive",
+        "duration_days": 30,
+        "decay_rate": 0.09,
+        "probability_weight": 0.03,
+        "effect_profile": {
+            "drivers": {"news_severity": 0.3, "technical_momentum": 0.2},
+            "factor_scores": {"moat_score": 3},
+        },
+    },
+    {
+        "name": "Interest Rate Hike",
+        "category": "monetary",
+        "scope": "market",
+        "severity_range": "30..70",
+        "sentiment": "negative",
+        "duration_days": 30,
+        "decay_rate": 0.08,
+        "probability_weight": 0.06,
+        "effect_profile": {
+            "drivers": {"economic_outlook": -0.5, "news_severity": -0.3},
+        },
+    },
+    {
+        "name": "Interest Rate Cut",
+        "category": "monetary",
+        "scope": "market",
+        "severity_range": "20..50",
+        "sentiment": "positive",
+        "duration_days": 25,
+        "decay_rate": 0.10,
+        "probability_weight": 0.04,
+        "effect_profile": {
+            "drivers": {"economic_outlook": 0.5, "news_severity": 0.3},
+        },
+    },
+    {
+        "name": "Recession Fears",
+        "category": "macro",
+        "scope": "market",
+        "severity_range": "40..80",
+        "sentiment": "negative",
+        "duration_days": 60,
+        "decay_rate": 0.04,
+        "probability_weight": 0.03,
+        "effect_profile": {
+            "drivers": {"economic_outlook": -0.7, "news_severity": -0.5, "institutional_buying": -0.4},
+            "factor_scores": {"growth_potential": -5},
+        },
+    },
+    {
+        "name": "Bull Market Rally",
+        "category": "macro",
+        "scope": "market",
+        "severity_range": "20..50",
+        "sentiment": "positive",
+        "duration_days": 35,
+        "decay_rate": 0.07,
+        "probability_weight": 0.04,
+        "effect_profile": {
+            "drivers": {"economic_outlook": 0.4, "technical_momentum": 0.5, "institutional_buying": 0.4},
+        },
+    },
+    {
+        "name": "Geopolitical Crisis",
+        "category": "geopolitics",
+        "scope": "market",
+        "severity_range": "40..80",
+        "sentiment": "negative",
+        "duration_days": 45,
+        "decay_rate": 0.05,
+        "probability_weight": 0.02,
+        "effect_profile": {
+            "drivers": {"economic_outlook": -0.6, "news_severity": -0.6, "institutional_buying": -0.5},
+        },
+    },
+    {
+        "name": "Central Bank Policy Shift",
+        "category": "monetary",
+        "scope": "market",
+        "severity_range": "15..45",
+        "sentiment": "mixed",
+        "duration_days": 20,
+        "decay_rate": 0.12,
+        "probability_weight": 0.04,
+        "effect_profile": {
+            "drivers": {"economic_outlook": 0.2, "news_severity": 0.2},
+        },
+    },
+    {
+        "name": "Natural Disaster Impact",
+        "category": "disaster",
+        "scope": "market",
+        "severity_range": "30..70",
+        "sentiment": "negative",
+        "duration_days": 20,
+        "decay_rate": 0.10,
+        "probability_weight": 0.01,
+        "effect_profile": {
+            "drivers": {"news_severity": -0.5, "economic_outlook": -0.3},
+        },
+    },
+]
+
+NEWS_TEMPLATES = [
+    {
+        "category": "leadership",
+        "sentiment": "negative",
+        "severity_band": "medium",
+        "linked_event_category": "leadership",
+        "linked_driver": "news_severity",
+        "template_text": "{company} CEO {name} resigns amid {reason}. Shares expected to face pressure.",
+    },
+    {
+        "category": "product",
+        "sentiment": "positive",
+        "severity_band": "high",
+        "linked_event_category": "product",
+        "linked_driver": "news_severity",
+        "template_text": "{company} launches {product_name}, analysts call it a game-changer.",
+    },
+    {
+        "category": "product",
+        "sentiment": "negative",
+        "severity_band": "high",
+        "linked_event_category": "product",
+        "linked_driver": "news_severity",
+        "template_text": "{company} recalls {product_name} due to {defect}. Stock under pressure.",
+    },
+    {
+        "category": "earnings",
+        "sentiment": "positive",
+        "severity_band": "medium",
+        "linked_event_category": "earnings",
+        "linked_driver": "earnings_surprise",
+        "template_text": "{company} beats estimates: EPS of {eps} vs consensus of {consensus}.",
+    },
+    {
+        "category": "earnings",
+        "sentiment": "negative",
+        "severity_band": "medium",
+        "linked_event_category": "earnings",
+        "linked_driver": "earnings_surprise",
+        "template_text": "{company} misses estimates: EPS of {eps} misses consensus of {consensus}.",
+    },
+    {
+        "category": "dividend",
+        "sentiment": "positive",
+        "severity_band": "low",
+        "linked_event_category": "dividend",
+        "linked_driver": "news_severity",
+        "template_text": "{company} raises dividend by {pct}% to {amount} per share.",
+    },
+    {
+        "category": "dividend",
+        "sentiment": "negative",
+        "severity_band": "medium",
+        "linked_event_category": "dividend",
+        "linked_driver": "news_severity",
+        "template_text": "{company} slashes dividend. Yield drops to {pct}%.",
+    },
+    {
+        "category": "legal",
+        "sentiment": "positive",
+        "severity_band": "medium",
+        "linked_event_category": "legal",
+        "linked_driver": "news_severity",
+        "template_text": "{company} awarded key patent for {technology}. Competitive moat strengthened.",
+    },
+    {
+        "category": "legal",
+        "sentiment": "negative",
+        "severity_band": "medium",
+        "linked_event_category": "legal",
+        "linked_driver": "news_severity",
+        "template_text": "Class-action lawsuit filed against {company} over {allegation}.",
+    },
+    {
+        "category": "macro",
+        "sentiment": "negative",
+        "severity_band": "high",
+        "linked_event_category": "macro",
+        "linked_driver": "economic_outlook",
+        "template_text": "Recession fears intensify as {indicator} signals contraction.",
+    },
+    {
+        "category": "monetary",
+        "sentiment": "negative",
+        "severity_band": "medium",
+        "linked_event_category": "monetary",
+        "linked_driver": "economic_outlook",
+        "template_text": "Central bank raises rates by {bps} bps. Markets react negatively.",
+    },
+    {
+        "category": "monetary",
+        "sentiment": "positive",
+        "severity_band": "medium",
+        "linked_event_category": "monetary",
+        "linked_driver": "economic_outlook",
+        "template_text": "Central bank cuts rates by {bps} bps in surprise move.",
+    },
+    {
+        "category": "macro",
+        "sentiment": "positive",
+        "severity_band": "medium",
+        "linked_event_category": "macro",
+        "linked_driver": "economic_outlook",
+        "template_text": "{industry} sector enters boom cycle as demand surges.",
+    },
+    {
+        "category": "regulation",
+        "sentiment": "negative",
+        "severity_band": "medium",
+        "linked_event_category": "regulation",
+        "linked_driver": "news_severity",
+        "template_text": "New regulations hit {industry} sector. Compliance costs expected to rise.",
+    },
+    {
+        "category": "geopolitics",
+        "sentiment": "negative",
+        "severity_band": "high",
+        "linked_event_category": "geopolitics",
+        "linked_driver": "economic_outlook",
+        "template_text": "Geopolitical tensions escalate. Safe-haven assets rally on uncertainty.",
+    },
+]
+
+
+def seed(session: Session) -> None:
+    for evt in MARKET_EVENTS:
+        existing = session.query(MarketEvent).filter_by(name=evt["name"], category=evt["category"]).first()
+        if existing is None:
+            session.add(MarketEvent(**evt))
+
+    for tmpl in NEWS_TEMPLATES:
+        existing = session.query(NewsTemplate).filter_by(template_text=tmpl["template_text"]).first()
+        if existing is None:
+            session.add(NewsTemplate(**tmpl))
+
+
+def main() -> None:
+    database_url = os.environ.get(
+        "DATABASE_URL",
+        "postgresql+psycopg://stocksim:stocksim@localhost:5432/stocksim",
+    )
+    engine = create_engine(database_url)
+    with Session(engine) as session:
+        seed(session)
+        session.commit()
+    print("seed_events.py done.")
+
+
+if __name__ == "__main__":
+    main()
