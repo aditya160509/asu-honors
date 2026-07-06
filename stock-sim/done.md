@@ -1,7 +1,7 @@
 # Fictional Stock Market Simulation — Build Progress
 
 > Tracks status against the Master Prompt & PRD, phase by phase. Location of all code: `stock-sim/` inside this repo (`asu-honors`).
-> Last updated: 2026-07-06 (Phase 3 audit complete).
+> Last updated: 2026-07-06 (Phase 3 complete, step 13 pending).
 
 ---
 
@@ -59,6 +59,7 @@ All completed as seed data in Phase 3:
 | `seed_financials.py` | Income/balance/cashflow statements + consensus estimates | 600 rows each (150×4 quarters) |
 | `seed_events.py` | Market event types + news templates | 25 events + 15 templates |
 | `seed_demo.py` | Demo users, timeline, portfolios | 3 users + 1 timeline + 3 portfolios |
+| `seed_initial_prices.py` | Compute FQ, FairPE, IV, initial prices from financials | 150 price_history rows + company updates |
 
 **Known gaps:**
 - `price_history` not yet a TimescaleDB hypertable
