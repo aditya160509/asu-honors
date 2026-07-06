@@ -33,7 +33,7 @@
 | 11.3 | `companies` (identity, shares/float, betas, tickers) | 150 companies | ✅ Done | `seed_companies.py` |
 | 11.4 | `income_statement` / `balance_sheet` / `cash_flow_statement` + consensus | 600 rows each (150×4 quarters) | ✅ Done | `seed_financials.py` |
 | 11.5 | `moat_subscores`, management/growth/fcf seed scores | 1,350 subscores + 150 seed scores | ✅ Done | `seed_companies.py` |
-| 11.6 | Run engine once → compute FQ, FairPE, IV, initial price | — | ⬜ Blocked (needs engine→DB wiring) | — |
+| 11.6 | Run engine once → compute FQ, FairPE, IV, initial price | 150 companies + price_history rows | ✅ Done | `seed_initial_prices.py` |
 | 11.7 | `market_events` catalog + `news_templates` | 25 events + 15 templates | ✅ Done | `seed_events.py` |
 
 ---

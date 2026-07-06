@@ -62,7 +62,6 @@ All completed as seed data in Phase 3:
 
 **Known gaps:**
 - `price_history` not yet a TimescaleDB hypertable
-- Engine step 11.6 not run yet (needs Phase 4 engine→DB wiring)
 - Sample transactions not seeded (will come from gameplay)
 - No testing history generated (needs Phase 4 engine→DB wiring)
 
