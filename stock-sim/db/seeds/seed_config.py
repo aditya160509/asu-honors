@@ -126,6 +126,92 @@ def seed(session: Session) -> None:
             scope="global",
             description="Mean-reversion speed for speculative industries",
         ),
+        # ── Price driver weights ──────────────────────────────────────
+        ConfigParameter(
+            key="w_vo",
+            value="0.20",
+            scope="global",
+            description="Value opportunity driver weight",
+        ),
+        ConfigParameter(
+            key="w_es",
+            value="0.15",
+            scope="global",
+            description="Earnings surprise driver weight",
+        ),
+        ConfigParameter(
+            key="w_ns",
+            value="0.15",
+            scope="global",
+            description="News severity driver weight",
+        ),
+        ConfigParameter(
+            key="w_eo",
+            value="0.10",
+            scope="global",
+            description="Economic outlook driver weight",
+        ),
+        ConfigParameter(
+            key="w_g",
+            value="0.15",
+            scope="global",
+            description="Guidance driver weight",
+        ),
+        ConfigParameter(
+            key="w_tm",
+            value="0.10",
+            scope="global",
+            description="Technical momentum driver weight",
+        ),
+        ConfigParameter(
+            key="w_ib",
+            value="0.15",
+            scope="global",
+            description="Institutional buying driver weight",
+        ),
+        # ── Volume formula (PRD 6.L) ──────────────────────────────────
+        ConfigParameter(
+            key="vol_turnover_rate",
+            value="0.001",
+            scope="global",
+            description="Base turnover as fraction of market cap for volume",
+        ),
+        ConfigParameter(
+            key="vol_coeff_return",
+            value="0.5",
+            scope="global",
+            description="Volume sensitivity to absolute daily return",
+        ),
+        ConfigParameter(
+            key="vol_coeff_news",
+            value="0.3",
+            scope="global",
+            description="Volume sensitivity to news severity change",
+        ),
+        ConfigParameter(
+            key="vol_coeff_earnings",
+            value="0.2",
+            scope="global",
+            description="Additional volume multiplier on earnings days",
+        ),
+        ConfigParameter(
+            key="vol_noise_sigma",
+            value="0.1",
+            scope="global",
+            description="LogNormal noise sigma for volume stochasticity",
+        ),
+        ConfigParameter(
+            key="vol_leverage_factor",
+            value="0.3",
+            scope="global",
+            description="How much financial leverage multiplies stock volatility",
+        ),
+        ConfigParameter(
+            key="vol_max_leverage",
+            value="5.0",
+            scope="global",
+            description="Max leverage ratio used in volatility computation",
+        ),
     ]
 
     for cp in config_params:

@@ -154,7 +154,7 @@ COMPANIES = [
     (13, "SteelBridge Manufacturing", "SBM", 200_000_000, 0.55, 1.3, 1.4),
     (13, "AeroDynamic Components", "ADC", 120_000_000, 0.50, 1.4, 1.3),
     (13, "Rails & Roads Inc", "RRI", 180_000_000, 0.55, 1.0, 1.1),
-    (13, "PowerGen Equipment", "PGEQ", 150_000_000, 0.50, 1.2, 1.3),
+    (13, "PowerGen Equipment", "PGN", 150_000_000, 0.50, 1.2, 1.3),
     (13, "HydroCore Systems", "HCS", 90_000_000, 0.40, 1.3, 1.4),
     (13, "EcoBuild Technologies", "EBT", 100_000_000, 0.45, 0.9, 1.0),
     # Industry 14 – Chemicals

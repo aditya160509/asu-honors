@@ -8,7 +8,29 @@ from sqlalchemy.orm import Session
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
-from db.models import MarketEvent, NewsTemplate
+from db.models import MarketEvent, NewsTemplate, FactorDefinition
+
+VALID_LINKED_DRIVERS = {
+    "news_severity", "earnings_surprise", "economic_outlook",
+    "guidance", "technical_momentum", "value_opportunity", "institutional_buying",
+}
+
+TEMPLATE_VARIABLES = {
+    "{company}": "Company name (e.g. 'First National Bank')",
+    "{product_name}": "Product being launched/recalled",
+    "{defect}": "Defect description",
+    "{eps}": "Actual EPS value",
+    "{consensus}": "Consensus EPS estimate",
+    "{pct}": "Percentage change amount",
+    "{amount}": "Dividend amount per share",
+    "{bps}": "Basis points change",
+    "{industry}": "Industry name (e.g. 'Technology')",
+    "{name}": "Person name",
+    "{reason}": "Reason description",
+    "{allegation}": "Allegation description",
+    "{technology}": "Technology/patent description",
+    "{indicator}": "Economic indicator name",
+}
 
 MARKET_EVENTS = [
     {
@@ -20,10 +42,7 @@ MARKET_EVENTS = [
         "duration_days": 15,
         "decay_rate": 0.15,
         "probability_weight": 0.02,
-        "effect_profile": {
-            "drivers": {"news_severity": -0.4, "guidance": -0.5},
-            "factor_scores": {"management_quality": -5},
-        },
+        "effect_profile": {"news_severity": -0.4, "guidance": -0.5, "management_quality": -5},
     },
     {
         "name": "Product Launch Success",
@@ -34,10 +53,7 @@ MARKET_EVENTS = [
         "duration_days": 20,
         "decay_rate": 0.10,
         "probability_weight": 0.04,
-        "effect_profile": {
-            "drivers": {"news_severity": 0.5, "technical_momentum": 0.3},
-            "factor_scores": {"growth_potential": 3, "innovation": 5},
-        },
+        "effect_profile": {"news_severity": 0.5, "technical_momentum": 0.3, "growth_potential": 3, "innovation": 5},
     },
     {
         "name": "Product Recall",
@@ -48,10 +64,7 @@ MARKET_EVENTS = [
         "duration_days": 25,
         "decay_rate": 0.12,
         "probability_weight": 0.03,
-        "effect_profile": {
-            "drivers": {"news_severity": -0.6, "guidance": -0.7},
-            "factor_scores": {"moat_score": -3, "management_quality": -2},
-        },
+        "effect_profile": {"news_severity": -0.6, "guidance": -0.7, "moat_score": -3, "management_quality": -2},
     },
     {
         "name": "Earnings Beat",
@@ -62,9 +75,7 @@ MARKET_EVENTS = [
         "duration_days": 10,
         "decay_rate": 0.20,
         "probability_weight": 0.15,
-        "effect_profile": {
-            "drivers": {"earnings_surprise": 0.5, "news_severity": 0.3},
-        },
+        "effect_profile": {"earnings_surprise": 0.5, "news_severity": 0.3},
     },
     {
         "name": "Earnings Miss",
@@ -75,9 +86,7 @@ MARKET_EVENTS = [
         "duration_days": 12,
         "decay_rate": 0.18,
         "probability_weight": 0.12,
-        "effect_profile": {
-            "drivers": {"earnings_surprise": -0.5, "news_severity": -0.4},
-        },
+        "effect_profile": {"earnings_surprise": -0.5, "news_severity": -0.4},
     },
     {
         "name": "Dividend Hike",
@@ -88,10 +97,7 @@ MARKET_EVENTS = [
         "duration_days": 8,
         "decay_rate": 0.25,
         "probability_weight": 0.06,
-        "effect_profile": {
-            "drivers": {"news_severity": 0.3, "guidance": 0.2},
-            "factor_scores": {"fcf_quality": 2},
-        },
+        "effect_profile": {"news_severity": 0.3, "guidance": 0.2, "fcf_quality": 2},
     },
     {
         "name": "Dividend Cut",
@@ -102,10 +108,7 @@ MARKET_EVENTS = [
         "duration_days": 15,
         "decay_rate": 0.15,
         "probability_weight": 0.04,
-        "effect_profile": {
-            "drivers": {"news_severity": -0.5, "guidance": -0.6},
-            "factor_scores": {"fcf_quality": -5},
-        },
+        "effect_profile": {"news_severity": -0.5, "guidance": -0.6, "fcf_quality": -5},
     },
     {
         "name": "Patent Granted",
@@ -116,10 +119,7 @@ MARKET_EVENTS = [
         "duration_days": 30,
         "decay_rate": 0.08,
         "probability_weight": 0.03,
-        "effect_profile": {
-            "drivers": {"news_severity": 0.4, "technical_momentum": 0.2},
-            "factor_scores": {"moat_score": 4, "intangibles": 8, "growth_potential": 2},
-        },
+        "effect_profile": {"news_severity": 0.4, "technical_momentum": 0.2, "moat_score": 4, "intangibles": 8, "growth_potential": 2},
     },
     {
         "name": "Lawsuits Filed",
@@ -130,10 +130,7 @@ MARKET_EVENTS = [
         "duration_days": 40,
         "decay_rate": 0.05,
         "probability_weight": 0.02,
-        "effect_profile": {
-            "drivers": {"news_severity": -0.5},
-            "factor_scores": {"management_quality": -3},
-        },
+        "effect_profile": {"news_severity": -0.5, "management_quality": -3},
     },
     {
         "name": "Guidance Raised",
@@ -144,9 +141,7 @@ MARKET_EVENTS = [
         "duration_days": 15,
         "decay_rate": 0.15,
         "probability_weight": 0.08,
-        "effect_profile": {
-            "drivers": {"guidance": 0.6, "news_severity": 0.3},
-        },
+        "effect_profile": {"guidance": 0.6, "news_severity": 0.3},
     },
     {
         "name": "Regulatory Change",
@@ -157,10 +152,7 @@ MARKET_EVENTS = [
         "duration_days": 45,
         "decay_rate": 0.06,
         "probability_weight": 0.05,
-        "effect_profile": {
-            "drivers": {"news_severity": -0.4, "economic_outlook": -0.2},
-            "factor_scores": {"growth_potential": -3},
-        },
+        "effect_profile": {"news_severity": -0.4, "economic_outlook": -0.2, "growth_potential": -3},
     },
     {
         "name": "Industry Boom",
@@ -171,10 +163,7 @@ MARKET_EVENTS = [
         "duration_days": 40,
         "decay_rate": 0.07,
         "probability_weight": 0.04,
-        "effect_profile": {
-            "drivers": {"news_severity": 0.4, "economic_outlook": 0.3},
-            "factor_scores": {"growth_potential": 4},
-        },
+        "effect_profile": {"news_severity": 0.4, "economic_outlook": 0.3, "growth_potential": 4},
     },
     {
         "name": "Supply Chain Disruption",
@@ -185,10 +174,7 @@ MARKET_EVENTS = [
         "duration_days": 30,
         "decay_rate": 0.10,
         "probability_weight": 0.06,
-        "effect_profile": {
-            "drivers": {"news_severity": -0.3, "guidance": -0.4},
-            "factor_scores": {"financial_quality": -2},
-        },
+        "effect_profile": {"news_severity": -0.3, "guidance": -0.4, "financial_quality": -2},
     },
     {
         "name": "Trade Tariff Imposed",
@@ -199,9 +185,7 @@ MARKET_EVENTS = [
         "duration_days": 60,
         "decay_rate": 0.04,
         "probability_weight": 0.03,
-        "effect_profile": {
-            "drivers": {"news_severity": -0.5, "economic_outlook": -0.3},
-        },
+        "effect_profile": {"news_severity": -0.5, "economic_outlook": -0.3},
     },
     {
         "name": "Technology Breakthrough",
@@ -212,10 +196,7 @@ MARKET_EVENTS = [
         "duration_days": 35,
         "decay_rate": 0.08,
         "probability_weight": 0.03,
-        "effect_profile": {
-            "drivers": {"news_severity": 0.4, "technical_momentum": 0.3},
-            "factor_scores": {"growth_potential": 5, "innovation": 6},
-        },
+        "effect_profile": {"news_severity": 0.4, "technical_momentum": 0.3, "growth_potential": 5, "innovation": 6},
     },
     {
         "name": "Labor Strike",
@@ -226,9 +207,7 @@ MARKET_EVENTS = [
         "duration_days": 20,
         "decay_rate": 0.12,
         "probability_weight": 0.02,
-        "effect_profile": {
-            "drivers": {"news_severity": -0.4, "guidance": -0.5},
-        },
+        "effect_profile": {"news_severity": -0.4, "guidance": -0.5},
     },
     {
         "name": "Commodity Price Spike",
@@ -239,10 +218,7 @@ MARKET_EVENTS = [
         "duration_days": 25,
         "decay_rate": 0.10,
         "probability_weight": 0.05,
-        "effect_profile": {
-            "drivers": {"news_severity": 0.2, "economic_outlook": -0.2},
-            "factor_scores": {"financial_quality": -2},
-        },
+        "effect_profile": {"news_severity": 0.2, "economic_outlook": -0.2, "financial_quality": -2},
     },
     {
         "name": "Consolidation Wave (M&A)",
@@ -253,10 +229,7 @@ MARKET_EVENTS = [
         "duration_days": 30,
         "decay_rate": 0.09,
         "probability_weight": 0.03,
-        "effect_profile": {
-            "drivers": {"news_severity": 0.3, "technical_momentum": 0.2},
-            "factor_scores": {"moat_score": 3},
-        },
+        "effect_profile": {"news_severity": 0.3, "technical_momentum": 0.2, "moat_score": 3},
     },
     {
         "name": "Interest Rate Hike",
@@ -267,9 +240,7 @@ MARKET_EVENTS = [
         "duration_days": 30,
         "decay_rate": 0.08,
         "probability_weight": 0.06,
-        "effect_profile": {
-            "drivers": {"economic_outlook": -0.5, "news_severity": -0.3},
-        },
+        "effect_profile": {"economic_outlook": -0.5, "news_severity": -0.3},
     },
     {
         "name": "Interest Rate Cut",
@@ -280,9 +251,7 @@ MARKET_EVENTS = [
         "duration_days": 25,
         "decay_rate": 0.10,
         "probability_weight": 0.04,
-        "effect_profile": {
-            "drivers": {"economic_outlook": 0.5, "news_severity": 0.3},
-        },
+        "effect_profile": {"economic_outlook": 0.5, "news_severity": 0.3},
     },
     {
         "name": "Recession Fears",
@@ -293,10 +262,7 @@ MARKET_EVENTS = [
         "duration_days": 60,
         "decay_rate": 0.04,
         "probability_weight": 0.03,
-        "effect_profile": {
-            "drivers": {"economic_outlook": -0.7, "news_severity": -0.5, "institutional_buying": -0.4},
-            "factor_scores": {"growth_potential": -5},
-        },
+        "effect_profile": {"economic_outlook": -0.7, "news_severity": -0.5, "institutional_buying": -0.4, "growth_potential": -5},
     },
     {
         "name": "Bull Market Rally",
@@ -307,9 +273,7 @@ MARKET_EVENTS = [
         "duration_days": 35,
         "decay_rate": 0.07,
         "probability_weight": 0.04,
-        "effect_profile": {
-            "drivers": {"economic_outlook": 0.4, "technical_momentum": 0.5, "institutional_buying": 0.4},
-        },
+        "effect_profile": {"economic_outlook": 0.4, "technical_momentum": 0.5, "institutional_buying": 0.4},
     },
     {
         "name": "Geopolitical Crisis",
@@ -320,9 +284,7 @@ MARKET_EVENTS = [
         "duration_days": 45,
         "decay_rate": 0.05,
         "probability_weight": 0.02,
-        "effect_profile": {
-            "drivers": {"economic_outlook": -0.6, "news_severity": -0.6, "institutional_buying": -0.5},
-        },
+        "effect_profile": {"economic_outlook": -0.6, "news_severity": -0.6, "institutional_buying": -0.5},
     },
     {
         "name": "Central Bank Policy Shift",
@@ -333,9 +295,7 @@ MARKET_EVENTS = [
         "duration_days": 20,
         "decay_rate": 0.12,
         "probability_weight": 0.04,
-        "effect_profile": {
-            "drivers": {"economic_outlook": 0.2, "news_severity": 0.2},
-        },
+        "effect_profile": {"economic_outlook": 0.2, "news_severity": 0.2},
     },
     {
         "name": "Natural Disaster Impact",
@@ -346,9 +306,7 @@ MARKET_EVENTS = [
         "duration_days": 20,
         "decay_rate": 0.10,
         "probability_weight": 0.01,
-        "effect_profile": {
-            "drivers": {"news_severity": -0.5, "economic_outlook": -0.3},
-        },
+        "effect_profile": {"news_severity": -0.5, "economic_outlook": -0.3},
     },
 ]
 
@@ -477,12 +435,23 @@ NEWS_TEMPLATES = [
 
 
 def seed(session: Session) -> None:
+    # Validate linked_driver values against known price_driver factor definitions
+    known_drivers = set(
+        row.key for row in session.query(FactorDefinition).filter_by(factor_type="price_driver").all()
+    ) or VALID_LINKED_DRIVERS
+
     for evt in MARKET_EVENTS:
         existing = session.query(MarketEvent).filter_by(name=evt["name"], category=evt["category"]).first()
         if existing is None:
             session.add(MarketEvent(**evt))
 
     for tmpl in NEWS_TEMPLATES:
+        ld = tmpl.get("linked_driver", "")
+        if ld and ld not in known_drivers:
+            raise ValueError(
+                f"NewsTemplate linked_driver '{ld}' is not a valid price_driver key. "
+                f"Expected one of {sorted(known_drivers)}"
+            )
         existing = session.query(NewsTemplate).filter_by(template_text=tmpl["template_text"]).first()
         if existing is None:
             session.add(NewsTemplate(**tmpl))
