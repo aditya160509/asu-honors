@@ -8,15 +8,15 @@
 ## Status
 
 | Phase | Description | Status |
-|---|---|---|
+|---|---|---|---|
 | 1 | Simulation Rulebook (design) | ✅ Done |
 | 2 | Fictional Economy (150 companies, 15 industries, events, news) | ✅ Done |
 | 3 | Database (schema + migrations + seed data) | ✅ Done |
-| 4 | Simulation Engine (Python/NumPy) | 🟡 Partial — formulas done, orchestration wiring to DB not started |
+| 4 | Simulation Engine (Python/NumPy) | ✅ Done — full DB-to-engine orchestration loop, economic cycle, OHLC, events/news, 113 tests |
 | 5 | Backend APIs (FastAPI) | ⬜ Not started |
 | 6 | Basic Frontend (Next.js) | ⬜ Not started |
 | 7–9 | Feature build-out (analytics, events UI, news feed, Future Lab, notifications, polish) | ⬜ Not started |
-| 10 | Testing & Deployment | 🟡 Partial — engine unit tests exist (96 pass), nothing else tested |
+| 10 | Testing & Deployment | 🟡 Partial — engine unit tests + orchestrator integration tests exist (113 pass), nothing else tested |
 
 ---
 
@@ -72,6 +72,52 @@ All completed as seed data in Phase 3:
 - ⬜→✅ `leaderboard` materialized view added (migration 0002)
 - ⬜→✅ Σ-weights validation added (app-level check in seed_industries.py)
 
-## Phase 4–10 (not started / partial)
+## Phase 4 — Simulation Engine ✅
+
+**Completed 2026-07-07.** All items from the Phase 3 final review and PRD Section 6 are now implemented. The engine is no longer a "library of pure computation functions" — it is a **runnable simulation** with a full DB-to-engine orchestration loop.
+
+### New Modules
+
+| Module | File | Purpose |
+|--------|------|---------|
+| **Orchestrator** | `engine/orchestrator.py` | `run_tick()` — full 15-step tick loop (PRD 6.O). Loads state from DB, advances economic cycle, generates sector shocks, refreshes fundamentals quarterly, drifts IV, computes 7 drivers, runs OU price update, synthesizes OHLC, computes volume/liquidity, fires events, generates news, writes results, marks portfolios to market. `run_ticks()` — runs N consecutive ticks. |
+| **Economic Cycle** | `engine/cycle.py` | `advance_cycle_phase()` — stochastic Markov transition between expansion/peak/contraction/trough. `compute_cycle_state()` — produces market factor return, GDP growth, interest rate, sentiment per phase. `generate_sector_shocks()` — per-industry factor shocks. |
+| **OHLC Synthesis** | `engine/ohlc.py` | `synthesize_ohlc()` — produces realistic open/high/low from consecutive daily closes with intraday volatility. `apply_circuit_breaker()` — PRD 6.J ±20% daily limit and price floor. |
+| **News Manager** | `engine/news_manager.py` | `select_and_fire_events()` — probabilistic event firing from MarketEvent catalog. `generate_news()` — template-based news generation from EventInstances. |
+
+### What Each Tick Does (15 Steps)
+
+1. Load `SimulationState` for the timeline
+2. Check idempotency (skip if `price_history` exists for this date)
+3. Advance economic cycle phase → market factor return F^m, macro indicators
+4. Generate sector factor shocks F^s per industry
+5. Every 63 ticks (quarter boundary): generate new financial statements, recompute FQ cross-sectionally, recompute FairPE & IV
+6. Drift intrinsic value by daily growth rate
+7. Compute all 7 driver values per company (value_opportunity, earnings_surprise, news_severity, economic_outlook, guidance, technical_momentum, institutional_buying)
+8. Fire probabilistic events → apply effects to driver values
+9. Assemble `TickState` → call `engine.tick.run_tick()` → vectorized OU update
+10. Apply circuit breaker (±20% daily limit, price floor)
+11. Synthesize OHLC from prev_close → new_close
+12. Compute volume, order imbalance, demand/supply, liquidity score
+13. Write `price_history`, `price_driver_scores`, `economic_cycle_state` rows
+14. Update `Company` denormalized fields (current_price, market_cap, market_liquidity_score)
+15. Mark-to-market portfolios, fire events → generate news, advance `SimulationState`
+
+### Test Coverage — 113 Total (16 new integration tests)
+
+| File | Tests | Scope |
+|------|-------|-------|
+| `test_orchestrator.py` | **16** | Full loop: basic tick, idempotency, driver scores, economic cycle, multi-day, price variation, events, news, circuit breaker, OHLC, cycle phase, sector shocks, edge cases |
+| All existing tests | 97 | All pass (no regressions) |
+
+### Key Architecture Decisions
+
+- **Engine is still pure computation.** All existing engine modules (`tick.py`, `market.py`, `drivers.py`, etc.) remain pure functions with no DB knowledge. The orchestrator is the bridge.
+- **Vectorized over 150 companies.** All company data is loaded, computed, and written in batch (not one-by-one).
+- **Deterministic via seeded RNG.** Uses `random.Random(timeline.rng_seed + tick_count)` for all stochastic draws. Same seed + same timeline + same tick_count = identical results.
+- **Idempotent re-runs.** If `price_history` already has a row for a given sim_date, that tick is skipped.
+- **Config-as-data.** All coefficients come from `config_parameters` table — nothing hardcoded.
+
+## Phase 5–10
 
 See `docs/` directory for detailed phase documentation.

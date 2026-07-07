@@ -51,11 +51,17 @@ from engine.scoring import (
     moat_composite,
     percentile_rank_scores,
 )
+from engine.cycle import advance_cycle_phase, compute_cycle_state, generate_sector_shocks
+from engine.news_manager import generate_news, select_and_fire_events
+from engine.ohlc import apply_circuit_breaker, synthesize_ohlc
+from engine.orchestrator import run_tick as run_orchestrator_tick, run_ticks
 from engine.tick import CompanyTickInput, CompanyTickOutput, TickResult, TickState, run_tick
 from engine.valuation import drift_iv, fair_pe, intrinsic_value_per_share
 
 __all__ = [
     "accruals_ratio",
+    "advance_cycle_phase",
+    "apply_circuit_breaker",
     "apply_effect_to_drivers",
     "apply_effect_to_factor_scores",
     "asset_turnover",
@@ -67,6 +73,7 @@ __all__ = [
     "composite_price_pressure",
     "CompanyTickInput",
     "CompanyTickOutput",
+    "compute_cycle_state",
     "current_ratio",
     "daily_volume",
     "days_inventory_outstanding",
@@ -81,6 +88,8 @@ __all__ = [
     "fair_pe",
     "financial_quality_composite",
     "free_cash_flow_margin",
+    "generate_news",
+    "generate_sector_shocks",
     "gross_margin",
     "guidance",
     "institutional_buying",
@@ -104,8 +113,12 @@ __all__ = [
     "roa",
     "roe",
     "roic",
+    "run_orchestrator_tick",
+    "run_ticks",
     "run_tick",
+    "select_and_fire_events",
     "supply_from_pressure",
+    "synthesize_ohlc",
     "technical_momentum",
     "TickResult",
     "TickState",
