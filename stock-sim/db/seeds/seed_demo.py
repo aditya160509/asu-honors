@@ -63,6 +63,7 @@ def seed(session: Session) -> None:
             session.add(Portfolio(
                 user_id=user.id, timeline_id=1,
                 cash_balance=user_data["starting_cash"],
+                total_value=user_data["starting_cash"],
             ))
 
 

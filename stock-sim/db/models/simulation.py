@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from typing import Optional
 
 from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
@@ -11,9 +12,9 @@ class Timeline(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
-    parent_timeline_id: Mapped[int | None] = mapped_column(ForeignKey("timelines.id", ondelete="SET NULL"))
-    branch_point_sim_date: Mapped[date | None] = mapped_column(Date)
-    owner_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    parent_timeline_id: Mapped[Optional[int]] = mapped_column(ForeignKey("timelines.id", ondelete="SET NULL"))
+    branch_point_sim_date: Mapped[Optional[date]] = mapped_column(Date)
+    owner_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     rng_seed: Mapped[int] = mapped_column(Integer, nullable=False)
     is_live: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
@@ -29,4 +30,4 @@ class SimulationState(Base, TimestampMixin):
     tick_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     is_running: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     # Future: FK → config_snapshots.id when snapshot table is created
-    config_snapshot_id: Mapped[int | None] = mapped_column()
+    config_snapshot_id: Mapped[Optional[int]] = mapped_column()

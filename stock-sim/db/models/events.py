@@ -1,4 +1,5 @@
 from datetime import date
+from typing import Optional
 
 from sqlalchemy import CheckConstraint, Date, ForeignKey, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column
@@ -66,13 +67,13 @@ class NewsFeed(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(primary_key=True)
     timeline_id: Mapped[int] = mapped_column(ForeignKey("timelines.id", ondelete="CASCADE"), nullable=False)
     sim_date: Mapped[date] = mapped_column(Date, nullable=False)
-    company_id: Mapped[int | None] = mapped_column(ForeignKey("companies.id", ondelete="CASCADE"))
-    industry_id: Mapped[int | None] = mapped_column(ForeignKey("industries.id", ondelete="CASCADE"))
+    company_id: Mapped[Optional[int]] = mapped_column(ForeignKey("companies.id", ondelete="CASCADE"))
+    industry_id: Mapped[Optional[int]] = mapped_column(ForeignKey("industries.id", ondelete="CASCADE"))
     headline: Mapped[str] = mapped_column(String(300), nullable=False)
     body: Mapped[str] = mapped_column(String, nullable=False)
     sentiment: Mapped[str] = mapped_column(String(20), nullable=False)
     severity: Mapped[float] = mapped_column(Numeric, nullable=False)
-    source_event_instance_id: Mapped[int | None] = mapped_column(
+    source_event_instance_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("event_instances.id", ondelete="SET NULL")
     )
 

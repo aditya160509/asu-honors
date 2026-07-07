@@ -289,8 +289,7 @@ def upgrade() -> None:
         sa.Column("tick_count", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("is_running", sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column("config_snapshot_id", sa.Integer()),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        *_timestamps(),
         sa.UniqueConstraint("timeline_id", name="uq_simulation_state_timeline"),
     )
 

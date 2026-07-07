@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from typing import Optional
 
 from sqlalchemy import CheckConstraint, Date, DateTime, ForeignKey, Numeric, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
@@ -71,7 +72,7 @@ class Transaction(Base, TimestampMixin):
     price: Mapped[float] = mapped_column(Numeric, nullable=False)
     fees: Mapped[float] = mapped_column(Numeric, nullable=False)
     impact_applied: Mapped[float] = mapped_column(Numeric, nullable=False)
-    realized_pnl: Mapped[float | None] = mapped_column(Numeric)
+    realized_pnl: Mapped[Optional[float]] = mapped_column(Numeric)
 
     __table_args__ = (
         CheckConstraint("side in ('buy', 'sell')", name="ck_transactions_side"),
@@ -99,4 +100,4 @@ class Notification(Base, TimestampMixin):
     notification_type: Mapped[str] = mapped_column(String(60), nullable=False)
     payload: Mapped[dict] = mapped_column(JSONType, nullable=False)
     sim_date: Mapped[date] = mapped_column(Date, nullable=False)
-    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    read_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
