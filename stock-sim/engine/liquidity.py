@@ -1,6 +1,8 @@
 """Section 6.K-6.M — order imbalance, volume, liquidity score, and Kyle-lambda price impact."""
 
 import math
+import random
+from typing import Optional
 
 
 def order_imbalance(demand: float, supply: float) -> float:
@@ -24,6 +26,34 @@ def supply_from_pressure(base_volume: float, price_pressure: float, sensitivity:
 def daily_volume(base_volume: float, free_float_pct: float, imbalance: float) -> float:
     """Section 6.L — traded volume driven by float and how one-sided the order book is."""
     return base_volume * free_float_pct * (1 + abs(imbalance))
+
+
+def compute_volume_prd(
+    market_cap: float,
+    free_float_pct: float,
+    abs_return: float,
+    news_severity_delta: float,
+    is_earnings_day: bool,
+    turnover_rate: float = 0.001,
+    coeff_return: float = 0.5,
+    coeff_news: float = 0.3,
+    coeff_earnings: float = 0.2,
+    noise_sigma: float = 0.1,
+    rng: Optional[random.Random] = None,
+) -> int:
+    """Section 6.L — Volume = BaseFloatTurnover × (1 + a·|r| + b·|d_NS| + c·EarningsDayFlag) × LogNormalNoise.
+
+    BaseFloatTurnover = market_cap * free_float_pct * turnover_rate.
+    Returns minimum 1000 shares.
+    """
+    base = market_cap * free_float_pct * turnover_rate
+    multiplier = 1.0 + coeff_return * abs_return + coeff_news * news_severity_delta
+    if is_earnings_day:
+        multiplier += coeff_earnings
+    if rng is not None and noise_sigma > 0:
+        multiplier *= math.exp(rng.gauss(0, noise_sigma))
+    vol = int(base * multiplier)
+    return max(1000, vol)
 
 
 def market_liquidity_score(free_float_pct: float, avg_daily_volume: float, market_cap: float) -> float:

@@ -35,6 +35,7 @@ from engine.fundamentals import (
 )
 from engine.liquidity import (
     bid_ask_spread,
+    compute_volume_prd,
     daily_volume,
     demand_from_pressure,
     kyle_lambda_from_liquidity,
@@ -71,6 +72,7 @@ __all__ = [
     "cash_conversion_cycle",
     "company_volatility",
     "composite_price_pressure",
+    "compute_volume_prd",
     "CompanyTickInput",
     "CompanyTickOutput",
     "compute_cycle_state",

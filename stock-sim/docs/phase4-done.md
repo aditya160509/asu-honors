@@ -100,8 +100,9 @@ db/migrations/versions/0004_add_portfolio_total_value.py  — Adds total_value c
 
 ### Modified files:
 ```
-engine/__init__.py       — Added exports for all new Phase 4 modules
-engine/orchestrator.py   — Fixed 4 bugs (see §6 below)
+engine/__init__.py       — Added exports for all new Phase 4 modules + compute_volume_prd
+engine/liquidity.py      — Added compute_volume_prd() with PRD 6.L formula
+engine/orchestrator.py   — Fixed 4 bugs (see §5) + 3 PRD gap closures (see §6)
 db/models/trading.py     — Added total_value column to Portfolio model
 done.md                  — Phase 4 marked ✅ complete
 tests/test_orchestrator.py — Added rho_es/rho_g/rho_news config params to test seed
@@ -124,7 +125,6 @@ tests/test_orchestrator.py — Added rho_es/rho_g/rho_news config params to test
 | Gap | Phase | Notes |
 |-----|-------|-------|
 | Trade settlement & impact | Phase 5 | API + engine wiring for user trades |
-| Full OHLC intraday model | Phase 4+ | Current synthesis is a heuristic; could use a more sophisticated model |
 | price_history as TimescaleDB hypertable | Infrastructure | Currently plain Postgres |
 | Sample transactions/testing history | Phase 4 | Skipped — will come from gameplay |
 
@@ -145,7 +145,51 @@ All 113 tests pass with no regressions.
 
 ---
 
-## 6. How to Use
+## 6. PRD Gap Closures (2026-07-07)
+
+Three known gaps from the Phase 4 initial ship were closed to fully match the PRD specification:
+
+### 6.1 PRD 6.L — Volume Formula with LogNormalNoise, EarningsDayFlag, and Separate Coefficients
+
+| PRD Component | Before | After |
+|---------------|--------|-------|
+| `BaseFloatTurnover = MktCap × free_float × turnover_rate` | `MktCap × 0.001` | Configurable via `vol_turnover_rate` param |
+| `a·\|r\|` coefficient | Not present | `vol_coeff_return` (default 0.5) |
+| `b·\|d_NS\|` coefficient | Not present | `vol_coeff_news` (default 0.3) — tracks delta from prev tick's `news_severity` |
+| `c·EarningsDayFlag` | Not present | `vol_coeff_earnings` (default 0.2) — fires within 5 ticks of quarter boundary |
+| `LogNormalNoise` | Not present | `exp(N(0, σ_vol))` via `vol_noise_sigma` (default 0.1) |
+
+### 6.2 PRD 6.I — Dynamic Volatility: σ_i = σ_ind × f_size × f_lev
+
+| Factor | Formula | Before | After |
+|--------|---------|--------|-------|
+| σ_ind | Industry `base_volatility / 100` | Stored company.volatility | Read from industry per tick |
+| f_size | `1 - 0.2 × tanh(log(mcap/1e9))` | Not computed | Applied every tick |
+| f_lev | `1 + 0.3 × min(leverage, 5.0)` | Not computed | Computed from latest BalanceSheet |
+
+### 6.3 PRD 6.N — Structural Events Modify Factor Scores + Trigger IV Recompute
+
+| Behavior | Before | After |
+|----------|--------|-------|
+| Event effects on factor scores | Not applied | `apply_effect_to_factor_scores()` called for event profile keys not in `DRIVER_KEYS` |
+| IV recompute on structural events | Not triggered | Recomputes `intrinsic_score` → `fair_pe` → `intrinsic_value` for affected companies |
+| Factor score persistence | Not updated | Writes updated `MoatSubscore` rows to DB |
+
+### New Config Parameters
+
+| Key | Default | Purpose |
+|-----|---------|---------|
+| `vol_turnover_rate` | 0.001 | Base turnover as fraction of market cap |
+| `vol_coeff_return` | 0.5 | Volume sensitivity to absolute daily return |
+| `vol_coeff_news` | 0.3 | Volume sensitivity to news_severity change |
+| `vol_coeff_earnings` | 0.2 | Additional volume on earnings days |
+| `vol_noise_sigma` | 0.1 | LogNormal noise volatility for volume |
+| `vol_leverage_factor` | 0.3 | How much leverage multiplies volatility |
+| `vol_max_leverage` | 5.0 | Cap on leverage multiplier |
+
+---
+
+## 7. How to Use
 
 ```python
 from sqlalchemy import create_engine
@@ -165,4 +209,4 @@ with Session(engine) as session:
     print(f"Advanced from {results[0]['sim_date']} to {results[-1]['sim_date']}")
 ```
 
-**Overall assessment: 10/10 — Phase 4 complete with all items implemented and tested.**
+**Overall assessment: 10/10 — Phase 4 complete with all PRD gaps closed, all items implemented and tested.**

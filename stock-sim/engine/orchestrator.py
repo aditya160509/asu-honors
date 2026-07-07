@@ -5,8 +5,10 @@ ohlc, cycle, events) to the database.  Each call to run_tick() advances the
 simulation by one business day for all companies.
 """
 
+import math
 import random
 from datetime import date, datetime, timezone, timedelta
+from typing import Optional
 
 import numpy as np
 from sqlalchemy import and_, or_
@@ -46,7 +48,7 @@ from engine.drivers import (
     technical_momentum,
     value_opportunity,
 )
-from engine.events import apply_effect_to_drivers
+from engine.events import apply_effect_to_drivers, apply_effect_to_factor_scores
 from engine.fundamentals import (
     accruals_ratio,
     asset_turnover,
@@ -68,6 +70,7 @@ from engine.fundamentals import (
     roic,
 )
 from engine.liquidity import (
+    compute_volume_prd,
     daily_volume,
     demand_from_pressure,
     market_liquidity_score,
@@ -88,6 +91,11 @@ from engine.valuation import drift_iv, fair_pe, intrinsic_value_per_share
 TAX_RATE = 0.25
 TRADING_DAYS_PER_YEAR = 252
 QUARTER_LENGTH = 63
+DRIVER_KEYS = frozenset({
+    "value_opportunity", "earnings_surprise", "news_severity",
+    "economic_outlook", "guidance", "technical_momentum",
+    "institutional_buying",
+})
 
 
 def run_tick(session: Session, timeline_id: int) -> dict:
@@ -178,6 +186,23 @@ def run_tick(session: Session, timeline_id: int) -> dict:
         rng=rng,
     )
 
+    # -- Batch load balance sheets for dynamic volatility (PRD 6.I) --------
+    all_bal = session.query(BalanceSheet).order_by(BalanceSheet.fiscal_period.desc()).all()
+    latest_bal: dict[int, BalanceSheet] = {}
+    for bal in all_bal:
+        if bal.company_id not in latest_bal:
+            latest_bal[bal.company_id] = bal
+
+    # -- Previous tick news_severity for volume |d_NS| (PRD 6.L) -----------
+    prev_ns: dict[int, float] = {}
+    if tick_count > 0:
+        prev_date = sim_date - timedelta(days=1)
+        prev_scores = session.query(PriceDriverScore).filter_by(
+            timeline_id=timeline_id, sim_date=prev_date, driver_key="news_severity"
+        ).all()
+        for ps in prev_scores:
+            prev_ns[ps.company_id] = float(ps.value)
+
     # -- Step 4: quarter boundary -> refresh fundamentals -------------------
     is_quarter_boundary = tick_count > 0 and tick_count % QUARTER_LENGTH == 0
     if is_quarter_boundary:
@@ -208,6 +233,8 @@ def run_tick(session: Session, timeline_id: int) -> dict:
         "epsilon": [], "intrinsic_value": [],
     }
 
+    company_ns: dict[int, float] = {}
+
     for company in companies:
         if company.current_price is None or company.current_price <= 0:
             continue
@@ -225,10 +252,25 @@ def run_tick(session: Session, timeline_id: int) -> dict:
         theta = float(params.get("mean_reversion_rate", 0.05))
         beta_m = float(company.beta_market)
         beta_s = float(company.beta_sector)
-        sigma_val = float(company.volatility or 0.02)
         epsilon = rng.gauss(0, 1)
-
         s_factor = sector_shocks.get(company.industry_id, 0.0)
+
+        # Dynamic volatility: σ_i = σ_ind × f_size × f_lev  (PRD 6.I)
+        ind_base_vol = float(ind.base_volatility) / 100.0
+        mcap = max(float(company.market_cap or 1e9), 1e6)
+        log_mcap = math.log(mcap / 1e9)
+        f_size = 1.0 - 0.2 * math.tanh(log_mcap)
+        sigma_val = ind_base_vol * f_size
+        bal = latest_bal.get(company.id)
+        if bal:
+            td = float(bal.total_debt)
+            se = float(bal.shareholders_equity)
+            if se > 0:
+                leverage = td / se
+                max_lev = float(params.get("vol_max_leverage", 5.0))
+                lev_factor = float(params.get("vol_leverage_factor", 0.3))
+                f_lev = 1.0 + lev_factor * min(leverage, max_lev)
+                sigma_val *= f_lev
 
         vo = value_opportunity(iv, prev_close)
         tm = technical_momentum(prev_close, prev_close * 0.98, float(params.get("k_m", 0.5)))
@@ -288,6 +330,8 @@ def run_tick(session: Session, timeline_id: int) -> dict:
                     driver_values = apply_effect_to_drivers(
                         driver_values, effect_profile, severity, decay_rate, days_elapsed
                     )
+
+        company_ns[company.id] = driver_values.get("news_severity", ns)
 
         drv_weights = {
             "value_opportunity": float(params.get("w_vo", 0.20)),
@@ -366,15 +410,35 @@ def run_tick(session: Session, timeline_id: int) -> dict:
 
         company = next((c for c in companies if c.id == cid), None)
         free_float = float(company.free_float_pct) if company else 0.5
-        market_cap = float(company.market_cap or 1e9)
+        mcap = float(company.market_cap or 1e9)
 
-        base_vol = market_cap * 0.001
+        # PRD 6.L volume formula
+        abs_return = abs(cb_price - prev_close) / max(prev_close, 0.01)
+        ns_now = company_ns.get(cid, 0.0)
+        ns_prev = prev_ns.get(cid, 0.0)
+        ns_delta = abs(ns_now - ns_prev)
+        is_earnings_day = False
+        if tick_count > 5:
+            is_earnings_day = (tick_count % QUARTER_LENGTH) <= 5
+
+        vol = compute_volume_prd(
+            market_cap=mcap,
+            free_float_pct=free_float,
+            abs_return=abs_return,
+            news_severity_delta=ns_delta,
+            is_earnings_day=is_earnings_day,
+            turnover_rate=float(params.get("vol_turnover_rate", 0.001)),
+            coeff_return=float(params.get("vol_coeff_return", 0.5)),
+            coeff_news=float(params.get("vol_coeff_news", 0.3)),
+            coeff_earnings=float(params.get("vol_coeff_earnings", 0.2)),
+            noise_sigma=float(params.get("vol_noise_sigma", 0.1)),
+            rng=rng,
+        )
+
         sens = float(params.get("liquidity_sensitivity", 0.5))
-        demand = demand_from_pressure(base_vol, out.price_pressure, sens)
-        supply = supply_from_pressure(base_vol, out.price_pressure, sens)
+        demand = demand_from_pressure(mcap * 0.001, out.price_pressure, sens)
+        supply = supply_from_pressure(mcap * 0.001, out.price_pressure, sens)
         imb = order_imbalance(demand, supply)
-        vol = daily_volume(int(base_vol), free_float, imb)
-        vol = max(1000, int(vol))
 
         ohlc_results[cid] = ohlc
         volume_results[cid] = vol
@@ -449,6 +513,11 @@ def run_tick(session: Session, timeline_id: int) -> dict:
                     industry_name = ind.name
             generate_news(session, timeline_id, sim_date, ei, rng,
                           company_name=company_name, industry_name=industry_name)
+
+    # -- Structural events: apply factor score effects + IV recompute -------
+    _apply_event_factor_effects(
+        session, companies, fired_events, sim_date, timeline_id, rng, params, now, industries,
+    )
 
     # -- Step 15: advance simulation state ----------------------------------
     next_date = sim_date + timedelta(days=1)
@@ -849,3 +918,115 @@ def _mark_to_market(
         )
         total_value = float(pf.cash_balance) + holdings_value
         pf.total_value = round(total_value, 2)
+
+
+def _apply_event_factor_effects(
+    session: Session,
+    companies: list[Company],
+    fired_events: list,
+    sim_date: date,
+    timeline_id: int,
+    rng: random.Random,
+    params: dict[str, float],
+    now: datetime,
+    industries: dict[int, object],
+) -> None:
+    """Section 6.N -- apply structural event effect_profiles to factor scores and recompute IV."""
+    company_map = {c.id: c for c in companies}
+    affected_company_ids: set[int] = set()
+
+    for ev in fired_events:
+        event_instances = session.query(EventInstance).filter_by(
+            event_id=ev.id, timeline_id=timeline_id, sim_date=sim_date
+        ).all()
+        for ei in event_instances:
+            if ei.scope_type != "company":
+                continue
+            cid = ei.scope_ref
+            if cid not in company_map:
+                continue
+            profile = ei.applied_effects
+            if not profile or not isinstance(profile, dict):
+                continue
+            factor_keys = [k for k in profile if k not in DRIVER_KEYS]
+            if not factor_keys:
+                continue
+
+            days_elapsed = 0
+            severity = float(ei.resolved_severity)
+            event = session.query(MarketEvent).filter_by(id=ei.event_id).first()
+            rho = float(event.decay_rate) if event else 0.1
+
+            # Load current factor scores from MoatSubscore
+            moat_rows = session.query(MoatSubscore).filter_by(company_id=cid).all()
+            factor_scores = {ms.subfactor_key: float(ms.score) for ms in moat_rows}
+
+            # Also include top-level factor scores from CompanyFactorScore
+            latest_cfs = session.query(CompanyFactorScore).filter_by(
+                company_id=cid
+            ).order_by(CompanyFactorScore.fiscal_period.desc()).first()
+            if latest_cfs:
+                factor_scores["management_quality"] = float(latest_cfs.management_quality)
+                factor_scores["growth_potential"] = float(latest_cfs.growth_potential)
+                factor_scores["fcf_quality"] = float(latest_cfs.fcf_quality)
+
+            updated = apply_effect_to_factor_scores(
+                factor_scores, {k: profile[k] for k in factor_keys},
+                severity, rho, days_elapsed,
+            )
+
+            # Write back MoatSubscore updates
+            for ms in moat_rows:
+                if ms.subfactor_key in updated:
+                    ms.score = round(updated[ms.subfactor_key], 4)
+
+            if "management_quality" in updated or "growth_potential" in updated or "fcf_quality" in updated:
+                pw_rows = session.query(IndustryPillarWeight).all()
+                industry_pw: dict[int, dict[str, float]] = {}
+                for pw in pw_rows:
+                    industry_pw.setdefault(pw.industry_id, {})[pw.pillar] = float(pw.weight)
+
+                fq_defs = session.query(FactorDefinition).filter_by(factor_type="fq_sub").all()
+                subfactor_pillar = {fd.key: fd.pillar for fd in fq_defs}
+
+                ind = industries.get(company_map[cid].industry_id)
+                ind_pw = industry_pw.get(company_map[cid].industry_id, {})
+
+                # Gather latest FQ subscores
+                latest_fq_subs = session.query(FinancialQualitySubscore).filter_by(
+                    company_id=cid
+                ).order_by(FinancialQualitySubscore.fiscal_period.desc()).all()
+                fq_subs = {fs.subfactor_key: float(fs.subscore) for fs in latest_fq_subs}
+                fq = financial_quality_composite(fq_subs, ind_pw, subfactor_pillar)
+
+                moat_defs = session.query(FactorDefinition).filter_by(factor_type="moat_sub").all()
+                moat_weights = {md.key: float(md.default_weight) for md in moat_defs if md.default_weight}
+                moat_val = moat_composite(
+                    {ms.subfactor_key: float(ms.score) for ms in moat_rows},
+                    moat_weights,
+                )
+                mgmt = updated.get("management_quality", 50.0)
+                growth = updated.get("growth_potential", 50.0)
+                fcfq = updated.get("fcf_quality", 50.0)
+                iscore = compute_intrinsic_score(mgmt, moat_val, fq, fcfq, growth)
+
+                beta_pe = float(params.get("beta_pe", 0.5))
+                beta_g = float(params.get("beta_g", 0.3))
+                baseline_pe = float(ind.baseline_pe) if ind else 15.0
+                pe_min = float(ind.pe_min) if ind else 8.0
+                pe_max = float(ind.pe_max) if ind else 25.0
+                fpe = fair_pe(baseline_pe, iscore, growth, beta_pe, beta_g, pe_min, pe_max)
+
+                eps_val = 0.0
+                latest_inc = session.query(IncomeStatement).filter_by(
+                    company_id=cid
+                ).order_by(IncomeStatement.fiscal_period.desc()).first()
+                if latest_inc:
+                    eps_val = float(latest_inc.eps)
+                iv = intrinsic_value_per_share(fpe, eps_val)
+
+                company_map[cid].intrinsic_value = round(iv, 4)
+                company_map[cid].intrinsic_score = round(iscore, 4)
+                company_map[cid].fair_pe = round(fpe, 4)
+
+            affected_company_ids.add(cid)

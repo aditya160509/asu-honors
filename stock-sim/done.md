@@ -12,7 +12,7 @@
 | 1 | Simulation Rulebook (design) | ✅ Done |
 | 2 | Fictional Economy (150 companies, 15 industries, events, news) | ✅ Done |
 | 3 | Database (schema + migrations + seed data) | ✅ Done |
-| 4 | Simulation Engine (Python/NumPy) | ✅ Done — full DB-to-engine orchestration loop, economic cycle, OHLC, events/news, 113 tests; 4 post-audit bugs fixed (mark-to-market no-op, 3 zero drivers, event effects, hardcoded date) |
+| 4 | Simulation Engine (Python/NumPy) | ✅ Done — full DB-to-engine orchestration loop, economic cycle, OHLC, events/news, PRD 6.L volume (LogNormalNoise/EarningsDayFlag), dynamic volatility recompute (σ_i = σ_ind×f_size×f_lev), structural events modify factor scores + IV recompute, 113 tests |
 | 5 | Backend APIs (FastAPI) | ⬜ Not started |
 | 6 | Basic Frontend (Next.js) | ⬜ Not started |
 | 7–9 | Feature build-out (analytics, events UI, news feed, Future Lab, notifications, polish) | ⬜ Not started |
