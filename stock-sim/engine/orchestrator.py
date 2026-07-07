@@ -38,11 +38,15 @@ from db.models import (
 from engine.cycle import advance_cycle_phase, compute_cycle_state, generate_sector_shocks
 from engine.drivers import (
     composite_price_pressure,
+    earnings_surprise,
     economic_outlook as compute_economic_outlook,
+    guidance,
+    institutional_buying,
     news_severity,
     technical_momentum,
     value_opportunity,
 )
+from engine.events import apply_effect_to_drivers
 from engine.fundamentals import (
     accruals_ratio,
     asset_turnover,
@@ -119,6 +123,7 @@ def run_tick(session: Session, timeline_id: int) -> dict:
 
     sim_date = sim_state.current_sim_date
     tick_count = sim_state.tick_count
+    epoch_start = sim_date - timedelta(days=tick_count)
 
     # -- Step 2: idempotency ------------------------------------------------
     existing = session.query(PriceHistory).filter_by(
@@ -229,13 +234,35 @@ def run_tick(session: Session, timeline_id: int) -> dict:
         tm = technical_momentum(prev_close, prev_close * 0.98, float(params.get("k_m", 0.5)))
         eo = compute_economic_outlook(cycle_state["market_sentiment"])
 
-        es = 0.0
-        ns = 0.0
-        gd = 0.0
-        ib = 0.0
+        latest_inc = session.query(IncomeStatement).filter_by(
+            company_id=company.id
+        ).order_by(IncomeStatement.fiscal_period.desc()).first()
+        latest_ce = session.query(ConsensusEstimate).filter_by(
+            company_id=company.id
+        ).order_by(ConsensusEstimate.fiscal_period.desc()).first()
 
+        es = 0.0
+        if latest_inc and latest_ce:
+            actual_eps = float(latest_inc.eps)
+            consensus_eps = float(latest_ce.consensus_eps)
+            es = earnings_surprise(actual_eps, consensus_eps, tick_count, float(params.get("rho_es", 0.15)))
+
+        gd = 0.0
+        if latest_inc and latest_ce:
+            actual_eps = float(latest_inc.eps)
+            consensus_eps = float(latest_ce.consensus_eps)
+            beat = actual_eps > consensus_eps
+            miss = actual_eps < consensus_eps
+            if beat:
+                gd = guidance("raised", min(abs(actual_eps - consensus_eps) / max(abs(consensus_eps), 0.01), 0.5), tick_count, float(params.get("rho_g", 0.15)))
+            elif miss:
+                gd = guidance("cut", min(abs(actual_eps - consensus_eps) / max(abs(consensus_eps), 0.01), 0.5), tick_count, float(params.get("rho_g", 0.15)))
+
+        ib = institutional_buying(rng.uniform(-0.1, 0.1) + cycle_state.get("market_sentiment", 0) * 0.05)
+
+        ns = 0.0
         active_events = _get_active_events_for_company(
-            session, timeline_id, company.id, ind.id, sim_date
+            session, timeline_id, company.id, ind.id, sim_date, epoch_start
         )
         if active_events:
             ns = news_severity(active_events, tick_count, float(params.get("rho_news", 0.1)))
@@ -249,6 +276,18 @@ def run_tick(session: Session, timeline_id: int) -> dict:
             "technical_momentum": tm,
             "institutional_buying": ib,
         }
+
+        if active_events:
+            for event_data in active_events:
+                effect_profile = event_data.get("effect_profile", {})
+                if effect_profile:
+                    severity = event_data.get("severity", 0.0)
+                    decay_rate = event_data.get("decay_rate", 0.1)
+                    start_day = event_data.get("start_day", 0)
+                    days_elapsed = tick_count - start_day
+                    driver_values = apply_effect_to_drivers(
+                        driver_values, effect_profile, severity, decay_rate, days_elapsed
+                    )
 
         drv_weights = {
             "value_opportunity": float(params.get("w_vo", 0.20)),
@@ -765,6 +804,7 @@ def _get_active_events_for_company(
     company_id: int,
     industry_id: int,
     sim_date: date,
+    epoch_start: date,
 ) -> list[dict]:
     """Return active EventInstance data for driver computation."""
     instances = session.query(EventInstance).filter(
@@ -786,7 +826,7 @@ def _get_active_events_for_company(
         rho = float(event.decay_rate)
         result.append({
             "severity": severity,
-            "start_day": (inst.sim_date - date(2026, 1, 1)).days,
+            "start_day": (inst.sim_date - epoch_start).days,
             "effect_profile": inst.applied_effects,
             "decay_rate": rho,
         })
@@ -808,4 +848,4 @@ def _mark_to_market(
             for h in holdings
         )
         total_value = float(pf.cash_balance) + holdings_value
-        setattr(pf, "total_value", round(total_value, 2)) if hasattr(pf, "total_value") else None
+        pf.total_value = round(total_value, 2)

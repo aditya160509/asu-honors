@@ -85,6 +85,9 @@ def _seed_minimal(session: Session) -> int:
     session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('k_m', '0.5', 'global', datetime('now'), datetime('now'))"""))
     session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('liquidity_sensitivity', '0.5', 'global', datetime('now'), datetime('now'))"""))
     session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('expected_annual_growth', '0.08', 'global', datetime('now'), datetime('now'))"""))
+    session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('rho_es', '0.15', 'global', datetime('now'), datetime('now'))"""))
+    session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('rho_g', '0.15', 'global', datetime('now'), datetime('now'))"""))
+    session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('rho_news', '0.1', 'global', datetime('now'), datetime('now'))"""))
     session.commit()
     return 1
 

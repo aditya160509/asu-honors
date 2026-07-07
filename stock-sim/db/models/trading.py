@@ -37,6 +37,7 @@ class Portfolio(Base, TimestampMixin):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     timeline_id: Mapped[int] = mapped_column(ForeignKey("timelines.id", ondelete="CASCADE"), nullable=False)
     cash_balance: Mapped[float] = mapped_column(Numeric, nullable=False)
+    total_value: Mapped[float] = mapped_column(Numeric, default=0.0)
 
     __table_args__ = (
         UniqueConstraint("user_id", "timeline_id", name="uq_portfolios_user_timeline"),

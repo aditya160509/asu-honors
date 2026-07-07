@@ -83,7 +83,7 @@ Every 63 ticks (quarter boundary), `_refresh_fundamentals()`:
 
 ## 2. Files Changed/Added
 
-### New files:
+### New files (Phase 4 initial ship):
 ```
 engine/cycle.py          — Economic cycle state machine
 engine/news_manager.py   — Event lifecycle + news generation
@@ -93,10 +93,18 @@ tests/test_orchestrator.py — 16 integration tests
 docs/phase4-done.md      — This document
 ```
 
+### New files (Phase 4 post-audit bugfix, 2026-07-07):
+```
+db/migrations/versions/0004_add_portfolio_total_value.py  — Adds total_value column to portfolios
+```
+
 ### Modified files:
 ```
 engine/__init__.py       — Added exports for all new Phase 4 modules
+engine/orchestrator.py   — Fixed 4 bugs (see §6 below)
+db/models/trading.py     — Added total_value column to Portfolio model
 done.md                  — Phase 4 marked ✅ complete
+tests/test_orchestrator.py — Added rho_es/rho_g/rho_news config params to test seed
 ```
 
 ---
@@ -122,7 +130,22 @@ done.md                  — Phase 4 marked ✅ complete
 
 ---
 
-## 5. How to Use
+## 5. Post-Audit Bugfixes (2026-07-07)
+
+Code review of the Phase 4 initial ship found 4 bugs. All were fixed in a single pass:
+
+| # | Bug | Severity | Fix |
+|---|-----|----------|-----|
+| 1 | `_mark_to_market` is a no-op — Portfolio had no `total_value` column | Critical | Added `total_value` column to `Portfolio` model + migration 0004; removed `hasattr` guard |
+| 2 | 3 of 7 price drivers hardcoded to zero (earnings_surprise, guidance, institutional_buying) | High | Implemented all 3: earnings_surprise from actual vs consensus EPS, guidance from beat/miss direction, institutional_buying from market sentiment + random flow |
+| 3 | Event effect profiles (`effect_profile`) never applied to driver values | High | After computing driver_values, iterate active events calling `apply_effect_to_drivers()` with decayed, severity-scaled deltas |
+| 4 | `_get_active_events_for_company` hardcoded epoch to `date(2026, 1, 1)` | Medium | Changed to compute `epoch_start` dynamically from `sim_date - timedelta(days=tick_count)` |
+
+All 113 tests pass with no regressions.
+
+---
+
+## 6. How to Use
 
 ```python
 from sqlalchemy import create_engine
