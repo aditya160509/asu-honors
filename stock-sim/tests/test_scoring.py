@@ -60,3 +60,17 @@ def test_intrinsic_score_default_weights():
 
 def test_intrinsic_score_all_equal_returns_same_value():
     assert math.isclose(scoring.intrinsic_score(50, 50, 50, 50, 50), 50.0)
+
+
+def test_percentile_rank_scores_empty_array():
+    result = scoring.percentile_rank_scores(np.array([]))
+    assert result.shape == (0,)
+    assert result.dtype == float
+
+
+def test_financial_quality_composite_missing_pillar_skips():
+    subscores = {"roic": 80.0}
+    pillar_weights = {"profitability": 0.7, "liquidity": 0.3}
+    subfactor_pillar_map = {"roic": "profitability"}
+    result = scoring.financial_quality_composite(subscores, pillar_weights, subfactor_pillar_map)
+    assert math.isclose(result, 0.7 * 80.0)

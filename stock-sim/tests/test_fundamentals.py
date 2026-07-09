@@ -89,3 +89,122 @@ def test_interest_coverage_zero_interest():
 def test_current_ratio_zero_liabilities():
     result = fnd.current_ratio(current_assets=100, current_liabilities=0)
     assert result == float("inf") or math.isinf(result)
+
+
+# ── earnings_stability ──────────────────────────────────────────────────
+
+
+def test_earnings_stability_less_than_two():
+    assert fnd.earnings_stability([1.0]) == 50.0
+
+
+def test_earnings_stability_zero_stdev():
+    assert fnd.earnings_stability([2.0, 2.0, 2.0]) == 50.0
+
+
+def test_earnings_stability_zero_mean_eps():
+    assert fnd.earnings_stability([-1.0, 0.0, 1.0]) == 50.0
+
+
+def test_earnings_stability_normal():
+    result = fnd.earnings_stability([1.0, 1.5, 2.0, 2.5])
+    assert 0.0 <= result <= 100.0
+
+
+# ── revenue_consistency ────────────────────────────────────────────────
+
+
+def test_revenue_consistency_less_than_two():
+    assert fnd.revenue_consistency([100.0]) == 50.0
+
+
+def test_revenue_consistency_single_growth_rate():
+    assert fnd.revenue_consistency([100.0, 200.0]) == 50.0
+
+
+def test_revenue_consistency_normal():
+    result = fnd.revenue_consistency([100.0, 110.0, 121.0, 133.1])
+    assert 0.0 <= result <= 100.0
+
+
+def test_revenue_consistency_skip_zero_prev():
+    result = fnd.revenue_consistency([100.0, 0.0, 110.0, 121.0])
+    assert 0.0 <= result <= 100.0
+
+
+# ── payout_sustainability ──────────────────────────────────────────────
+
+
+def test_payout_sustainability_net_income_zero():
+    assert fnd.payout_sustainability(10, 0, 100) == 50.0
+
+
+def test_payout_sustainability_ocf_zero():
+    assert fnd.payout_sustainability(10, 100, 0) == 50.0
+
+
+def test_payout_sustainability_negative_payout():
+    assert fnd.payout_sustainability(-10, 100, 100) == 0.0
+
+
+def test_payout_sustainability_above_08():
+    assert fnd.payout_sustainability(90, 100, 100) == 0.0
+
+
+def test_payout_sustainability_at_or_below_02():
+    result = fnd.payout_sustainability(10, 100, 100)
+    assert math.isclose(result, 50.0)
+
+
+def test_payout_sustainability_at_or_below_06():
+    result = fnd.payout_sustainability(40, 100, 100)
+    assert math.isclose(result, 100.0)
+
+
+def test_payout_sustainability_below_08_above_06():
+    result = fnd.payout_sustainability(70, 100, 100)
+    assert math.isclose(result, 50.0)
+
+
+# ── Banking-specific metrics ──────────────────────────────────────────
+
+
+def test_net_interest_margin_zero_assets():
+    assert fnd.net_interest_margin(100, 30, 0) == float("inf")
+
+
+def test_net_interest_margin_normal():
+    result = fnd.net_interest_margin(100, 30, 1000)
+    assert math.isclose(result, 0.07)
+
+
+def test_cost_to_income_zero_income():
+    assert fnd.cost_to_income(50, 0) == float("inf")
+
+
+def test_cost_to_income_normal():
+    assert fnd.cost_to_income(50, 200) == 0.25
+
+
+def test_roa_zero_assets():
+    assert fnd.roa(100, 0) == float("inf")
+
+
+def test_roa_normal():
+    assert fnd.roa(50, 1000) == 0.05
+
+
+def test_capital_adequacy_ratio_zero_rwa():
+    assert fnd.capital_adequacy_ratio(100, 0) == float("inf")
+
+
+def test_capital_adequacy_ratio_normal():
+    assert fnd.capital_adequacy_ratio(100, 500) == 0.2
+
+
+def test_npa_ratio_zero_loans():
+    assert fnd.npa_ratio(50, 0) == float("inf")
+
+
+def test_npa_ratio_normal():
+    assert fnd.npa_ratio(10, 200) == 0.05

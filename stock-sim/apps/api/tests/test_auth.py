@@ -1,5 +1,13 @@
 """Tests for /api/v1/auth endpoints."""
 
+from apps.api.auth import verify_password
+from apps.api.config import settings
+from jose import jwt
+
+
+def test_verify_password_malformed_hash(client):
+    assert verify_password("test", "not-a-valid-hash") is False
+
 
 def test_register_success(client):
     resp = client.post(
@@ -52,4 +60,38 @@ def test_me_no_token(client):
 
 def test_me_invalid_token(client):
     resp = client.get("/api/v1/auth/me", headers={"Authorization": "Bearer not-a-real-token"})
+    assert resp.status_code == 401
+
+
+def test_register_password_too_short(client):
+    resp = client.post(
+        "/api/v1/auth/register",
+        json={"email": "short@example.com", "password": "1234567", "display_name": "Short"},
+    )
+    assert resp.status_code == 422
+
+
+def test_register_password_too_long(client):
+    resp = client.post(
+        "/api/v1/auth/register",
+        json={"email": "long@example.com", "password": "x" * 73, "display_name": "Long"},
+    )
+    assert resp.status_code == 422
+
+
+def test_me_token_no_sub(client, test_user):
+    token = jwt.encode({"role": "user"}, settings.secret_key, algorithm=settings.algorithm)
+    resp = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 401
+
+
+def test_me_token_non_int_sub(client, test_user):
+    token = jwt.encode({"sub": "abc", "role": "user"}, settings.secret_key, algorithm=settings.algorithm)
+    resp = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 401
+
+
+def test_me_token_user_not_found(client, test_user):
+    token = jwt.encode({"sub": "99999", "role": "user"}, settings.secret_key, algorithm=settings.algorithm)
+    resp = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 401

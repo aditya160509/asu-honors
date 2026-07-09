@@ -2,6 +2,8 @@
 
 from datetime import date
 
+import os
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -13,10 +15,18 @@ from sqlalchemy.pool import StaticPool
 # the pattern already used by tests/test_orchestrator.py in this repo.
 SQLiteTypeCompiler.visit_JSONB = SQLiteTypeCompiler.visit_JSON
 
+os.environ["DATABASE_URL"] = "sqlite://"
+
 from apps.api.auth import create_access_token, hash_password
 from apps.api.database import get_db
 from apps.api.main import app
+from apps.api.rate_limiter import InMemoryRateLimiter
 from db.models import Base, Company, ConfigParameter, Industry, Portfolio, Timeline, SimulationState, User
+
+# Bump rate limit so tests don't hit 429
+for mw in app.user_middleware:
+    if mw.cls is InMemoryRateLimiter:
+        mw.kwargs["max_requests"] = 100000
 
 
 @pytest.fixture()
@@ -48,6 +58,9 @@ def client(test_db):
         yield test_db
 
     app.dependency_overrides[get_db] = _override_get_db
+    # Remove rate limiter middleware for tests to avoid 429 errors
+    app.user_middleware = [m for m in app.user_middleware if m.cls.__name__ != "InMemoryRateLimiter"]
+    app.middleware_stack = app.build_middleware_stack()
     with TestClient(app) as c:
         yield c
     app.dependency_overrides.clear()

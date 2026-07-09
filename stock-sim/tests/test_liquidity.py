@@ -1,4 +1,5 @@
 import math
+import random
 
 from engine import liquidity as liq
 
@@ -101,3 +102,31 @@ def test_trade_price_with_impact_buy():
 def test_trade_price_with_impact_sell():
     result = liq.trade_price_with_impact(mid_price=100, order_size=1000, kyle_lambda=0.0001, side="sell")
     assert result < 100
+
+
+# ── compute_volume_prd ─────────────────────────────────────────────────
+
+
+def test_compute_volume_prd_earnings_day_adds_boost():
+    rng = random.Random(42)
+    vol_normal = liq.compute_volume_prd(
+        market_cap=1_000_000_000, free_float_pct=0.5, abs_return=0.01,
+        news_severity_delta=0.0, is_earnings_day=False,
+        rng=rng,
+    )
+    rng2 = random.Random(42)
+    vol_earnings = liq.compute_volume_prd(
+        market_cap=1_000_000_000, free_float_pct=0.5, abs_return=0.01,
+        news_severity_delta=0.0, is_earnings_day=True,
+        rng=rng2,
+    )
+    assert vol_earnings >= vol_normal
+
+
+def test_compute_volume_prd_max_volume_caps():
+    vol = liq.compute_volume_prd(
+        market_cap=1_000_000_000_000, free_float_pct=1.0, abs_return=0.1,
+        news_severity_delta=0.5, is_earnings_day=True,
+        max_volume=5000,
+    )
+    assert vol <= 5000

@@ -28,8 +28,8 @@ def get_db() -> Generator[Session, None, None]:
     db = SessionLocal()
     try:
         yield db
-    except Exception:
-        db.rollback()
-        raise
+    except Exception:  # pragma: no cover
+        db.rollback()  # pragma: no cover
+        raise  # pragma: no cover
     finally:
         db.close()

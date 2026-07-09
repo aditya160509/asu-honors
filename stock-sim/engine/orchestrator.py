@@ -413,8 +413,8 @@ def _compute_drivers(
         return None
 
     ind = state.industries.get(company.industry_id)
-    if ind is None:
-        return None
+    if ind is None:  # pragma: no cover — blocked by FK constraint
+        return None  # pragma: no cover
 
     prev_close = float(company.current_price)
     iv = float(company.intrinsic_value)
@@ -770,8 +770,8 @@ def _refresh_fundamentals(
     for r in company_rows:
         company = r["company"]
         ind = industries.get(company.industry_id)
-        if ind is None:
-            continue
+        if ind is None:  # pragma: no cover — blocked by FK constraint
+            continue  # pragma: no cover
 
         ind_pw = industry_pw.get(company.industry_id, {})
         fq = financial_quality_composite(r["fq_subscores"], ind_pw, subfactor_pillar)
@@ -1042,8 +1042,8 @@ def _get_active_events_for_company(
     for inst in instances:
         severity = float(inst.resolved_severity)
         event = session.query(MarketEvent).filter_by(id=inst.event_id).first()
-        if event is None:
-            continue
+        if event is None:  # pragma: no cover — blocked by FK constraint
+            continue  # pragma: no cover
         rho = float(event.decay_rate)
         result.append({
             "severity": severity,

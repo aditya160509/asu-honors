@@ -161,3 +161,85 @@ def test_list_timelines(client, test_db, test_timeline, auth_headers):
     body = resp.json()
     assert len(body) >= 1
     assert body[0]["name"] == "Live Market"
+
+
+def test_create_timeline_no_parent_state(client, test_db, auth_headers):
+    from db.models import Timeline
+    parent = Timeline(id=10, name="Parent No State", rng_seed=42, is_live=True)
+    test_db.add(parent)
+    test_db.commit()
+    resp = client.post(
+        "/api/v1/sim/timelines",
+        json={
+            "name": "Orphan Branch",
+            "parent_timeline_id": 10,
+            "branch_point_sim_date": "2026-01-02",
+        },
+        headers=auth_headers,
+    )
+    assert resp.status_code == 404
+
+
+def test_create_timeline_with_overrides(client, test_db, test_timeline, auth_headers):
+    resp = client.post(
+        "/api/v1/sim/timelines",
+        json={
+            "name": "Branch With Overrides",
+            "parent_timeline_id": 1,
+            "branch_point_sim_date": "2026-01-02",
+            "scenario_overrides": {},
+        },
+        headers=auth_headers,
+    )
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["name"] == "Branch With Overrides"
+
+
+def test_inject_event_not_found(client, test_db, test_timeline, admin_auth_headers):
+    resp = client.post(
+        "/api/v1/sim/admin/events",
+        json={"event_id": 999, "timeline_id": 1, "scope_type": "market", "scope_ref": 0},
+        headers=admin_auth_headers,
+    )
+    assert resp.status_code == 404
+
+
+def test_update_config_existing(client, test_db, base_config, admin_auth_headers):
+    resp = client.put(
+        "/api/v1/sim/admin/config",
+        json={"key": "trade_fee_rate", "value": "0.002", "scope": "global"},
+        headers=admin_auth_headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["value"] == "0.002"
+
+
+def test_get_state_timeline_not_found(client, test_db, auth_headers):
+    resp = client.get("/api/v1/sim/state?timeline_id=999", headers=auth_headers)
+    assert resp.status_code == 404
+
+
+def test_list_config_with_scope_id(client, test_db, base_config, admin_auth_headers):
+    from db.models import ConfigParameter
+
+    test_db.add(ConfigParameter(key="test_param", value="test_value", scope="company", scope_id=42))
+    test_db.commit()
+
+    resp = client.get("/api/v1/sim/admin/config?scope=company&scope_id=42", headers=admin_auth_headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert any(p["key"] == "test_param" for p in body)
+
+    resp = client.get("/api/v1/sim/admin/config?scope=global&scope_id=999", headers=admin_auth_headers)
+    assert resp.status_code == 200
+    assert all(p["key"] != "test_param" for p in resp.json())
+
+
+def test_advance_invalid_days(client, test_db, test_timeline, auth_headers):
+    resp = client.post(
+        "/api/v1/sim/advance",
+        json={"timeline_id": 1, "days": 0},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 422
