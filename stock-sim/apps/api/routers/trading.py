@@ -13,11 +13,12 @@ from apps.api.schemas import (
     HoldingResponse,
     OrderRequest,
     OrderResponse,
+    PortfolioAnalyticsResponse,
     PortfolioResponse,
     TransactionItem,
     WatchlistItem,
 )
-from apps.api.services.trade_service import place_order
+from apps.api.services.trade_service import get_portfolio_analytics, place_order
 from db.models import Company, Holding, Portfolio, Transaction, User, Watchlist
 
 logger = logging.getLogger(__name__)
@@ -46,6 +47,15 @@ def _build_holding_response(holding: Holding, company: Company) -> HoldingRespon
         unrealized_pnl=unrealized_pnl,
         unrealized_pnl_pct=unrealized_pnl_pct,
     )
+
+
+@router.get("/portfolio/analytics", response_model=PortfolioAnalyticsResponse)
+def get_portfolio_analytics_endpoint(
+    timeline_id: int = 1,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> PortfolioAnalyticsResponse:
+    return get_portfolio_analytics(db, user, timeline_id)
 
 
 @router.get("/portfolio", response_model=PortfolioResponse)

@@ -8,8 +8,8 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from apps.api.exceptions import InsufficientFundsError, InsufficientSharesError, NotFoundError
-from apps.api.schemas import OrderRequest, OrderResponse
-from db.models import Company, ConfigParameter, Holding, Portfolio, SimulationState, Transaction, User
+from apps.api.schemas import OrderRequest, OrderResponse, PortfolioAnalyticsResponse, SectorAllocation
+from db.models import Company, ConfigParameter, Holding, Industry, Portfolio, SimulationState, Transaction, User
 from engine.liquidity import kyle_lambda_from_liquidity, kyle_lambda_impact
 
 logger = logging.getLogger(__name__)
@@ -180,4 +180,73 @@ def place_order(db: Session, user: User, request: OrderRequest) -> OrderResponse
         price=execution_price,
         fees=fees,
         realized_pnl=realized_pnl,
+    )
+
+
+def get_portfolio_analytics(db: Session, user: User, timeline_id: int) -> PortfolioAnalyticsResponse:
+    """Compute portfolio analytics: return, PnL, sector allocation, win rate."""
+    portfolio = db.query(Portfolio).filter_by(user_id=user.id, timeline_id=timeline_id).first()
+    if portfolio is None:
+        raise NotFoundError("Portfolio not found")
+
+    cash = Decimal(str(portfolio.cash_balance))
+    holdings = db.query(Holding).filter_by(portfolio_id=portfolio.id).all()
+    industries = {ind.id: ind.name for ind in db.query(Industry).all()}
+
+    holdings_value = Decimal(0)
+    unrealized_pnl = Decimal(0)
+    sector_values: dict[str, Decimal] = {}
+    for h in holdings:
+        company = db.query(Company).filter_by(id=h.company_id).first()
+        if company is None or company.current_price is None:
+            continue
+        price = Decimal(str(company.current_price))
+        qty = Decimal(str(h.quantity))
+        cost = Decimal(str(h.avg_cost_basis))
+        mv = qty * price
+        holdings_value += mv
+        unrealized_pnl += (price - cost) * qty
+        sector = industries.get(company.industry_id, "Unknown")
+        sector_values[sector] = sector_values.get(sector, Decimal(0)) + mv
+
+    total_value = cash + holdings_value
+
+    user_start = Decimal(str(user.starting_cash)) if user.starting_cash else Decimal(1)
+    total_return_pct = float((total_value - user_start) / user_start * 100) if user_start > 0 else 0.0
+
+    realized_pnl = Decimal(0)
+    total_closed = 0
+    winning_closed = 0
+    txn_rows = (
+        db.query(Transaction)
+        .filter_by(portfolio_id=portfolio.id)
+        .all()
+    )
+    for t in txn_rows:
+        if t.realized_pnl is not None:
+            rp = Decimal(str(t.realized_pnl))
+            realized_pnl += rp
+            total_closed += 1
+            if rp > 0:
+                winning_closed += 1
+
+    win_rate = float(winning_closed / total_closed * 100) if total_closed > 0 else None
+    cash_pct = float(cash / total_value * 100) if total_value > 0 else 0.0
+
+    total_for_pct = max(holdings_value, Decimal(1))
+    allocation = [
+        SectorAllocation(sector=s, value=v, pct=float(v / total_for_pct * 100))
+        for s, v in sorted(sector_values.items(), key=lambda x: x[1], reverse=True)
+    ]
+
+    return PortfolioAnalyticsResponse(
+        total_value=total_value,
+        cash_balance=cash,
+        total_return_pct=total_return_pct,
+        unrealized_pnl=unrealized_pnl,
+        realized_pnl=realized_pnl,
+        num_positions=len(holdings),
+        win_rate=win_rate,
+        allocation_by_sector=allocation,
+        cash_allocation_pct=cash_pct,
     )

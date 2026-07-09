@@ -132,3 +132,33 @@ def test_watchlist_duplicate_add(client, test_db, test_company, auth_headers):
     assert r1.status_code == 201
     r2 = client.post("/api/v1/watchlist", json={"company_id": 1}, headers=auth_headers)
     assert r2.status_code == 409
+
+
+def test_portfolio_analytics_no_auth(client, test_db, test_portfolio):
+    resp = client.get("/api/v1/portfolio/analytics")
+    assert resp.status_code == 401
+
+
+def test_portfolio_analytics_empty(client, test_db, test_portfolio, auth_headers):
+    resp = client.get("/api/v1/portfolio/analytics", headers=auth_headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert float(body["cash_balance"]) == 100_000.0
+    assert float(body["total_value"]) == 100_000.0
+    assert body["num_positions"] == 0
+    assert body["win_rate"] is None
+    assert body["allocation_by_sector"] == []
+    assert body["cash_allocation_pct"] == 100.0
+
+
+def test_portfolio_analytics_with_holdings(client, test_db, test_portfolio, test_company, auth_headers):
+    resp = client.post("/api/v1/orders", json={"ticker": "TST", "side": "buy", "quantity": 10}, headers=auth_headers)
+    assert resp.status_code == 201
+
+    resp = client.get("/api/v1/portfolio/analytics", headers=auth_headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["num_positions"] == 1
+    assert len(body["allocation_by_sector"]) >= 1
+    assert body["cash_allocation_pct"] < 100.0
+    assert body["unrealized_pnl"] is not None

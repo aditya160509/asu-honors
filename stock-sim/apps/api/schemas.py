@@ -187,6 +187,24 @@ class PortfolioResponse(BaseModel):
     day_change_pct: Optional[float] = None
 
 
+class SectorAllocation(BaseModel):
+    sector: str
+    value: Decimal
+    pct: float
+
+
+class PortfolioAnalyticsResponse(BaseModel):
+    total_value: Decimal
+    cash_balance: Decimal
+    total_return_pct: float
+    unrealized_pnl: Decimal
+    realized_pnl: Decimal
+    num_positions: int
+    win_rate: Optional[float] = None
+    allocation_by_sector: list[SectorAllocation]
+    cash_allocation_pct: float
+
+
 class TransactionItem(BaseModel):
     id: int
     sim_date: date
