@@ -59,7 +59,14 @@ from engine.scoring import (
     moat_composite,
     percentile_rank_scores,
 )
-from engine.valuation import fair_pe, intrinsic_value_per_share
+from engine.valuation import (
+    DEFAULT_Q_INFLECTION,
+    DEFAULT_Q_MAX,
+    DEFAULT_Q_MIN,
+    DEFAULT_Q_STEEPNESS,
+    fair_pe,
+    intrinsic_value_per_share,
+)
 
 FIRST_SIM_DATE = date(2026, 1, 2)
 FISCAL_PERIOD = "2026Q4"
@@ -182,8 +189,10 @@ def seed(session: Session) -> None:
 
     rng = _random.Random(42)
     params = d["params"]
-    beta_pe = params["beta_pe"]
-    beta_g = params["beta_g"]
+    q_min = params.get("quality_mult_min", DEFAULT_Q_MIN)
+    q_max = params.get("quality_mult_max", DEFAULT_Q_MAX)
+    q_k = params.get("quality_mult_k", DEFAULT_Q_STEEPNESS)
+    q_c = params.get("quality_mult_inflection", DEFAULT_Q_INFLECTION)
 
     rows = []
     for company in d["companies"]:
@@ -233,8 +242,9 @@ def seed(session: Session) -> None:
         iscore = compute_intrinsic_score(mgmt, moat_val, fq, fcfq, growth)
         ind = d["industries"][ind_id]
         fpe = fair_pe(
-            float(ind.baseline_pe), iscore, growth, beta_pe, beta_g,
+            float(ind.baseline_pe), iscore,
             float(ind.pe_min), float(ind.pe_max),
+            q_min, q_max, q_k, q_c,
         )
         eps_val = float(inc.eps) if inc else 0.0
         iv = intrinsic_value_per_share(fpe, eps_val)

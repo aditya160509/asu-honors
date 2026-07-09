@@ -1,23 +1,49 @@
-"""Section 6.D-6.F — fair P/E, intrinsic value, and its daily drift."""
+"""Section 6.D-6.F — fair P/E via the logistic quality multiplier, intrinsic value, and its daily drift."""
+
+import math
+
+DEFAULT_Q_MIN = 0.30
+DEFAULT_Q_MAX = 5.00
+DEFAULT_Q_STEEPNESS = 0.12
+DEFAULT_Q_INFLECTION = 60.0
+
+
+def quality_multiplier(
+    intrinsic_score: float,
+    q_min: float = DEFAULT_Q_MIN,
+    q_max: float = DEFAULT_Q_MAX,
+    k: float = DEFAULT_Q_STEEPNESS,
+    c: float = DEFAULT_Q_INFLECTION,
+) -> float:
+    """Q(S) = q_min + (q_max - q_min) / (1 + exp(-k*(S - c))).
+
+    S is the 0-100 IntrinsicScore composite (Section 6.C — already combines
+    growth, moat, financial quality, management, and FCF quality). The
+    logistic shape encodes diminishing marginal valuation: below the
+    inflection point c, quality improvements barely move the multiplier
+    (businesses stay near q_min); crossing c is where investors start
+    paying up rapidly; above it the premium flattens out approaching q_max.
+    """
+    return q_min + (q_max - q_min) / (1.0 + math.exp(-k * (intrinsic_score - c)))
 
 
 def fair_pe(
     pe0: float,
     intrinsic_score: float,
-    growth_score: float,
-    beta_pe: float,
-    beta_g: float,
     pe_min: float,
     pe_max: float,
+    q_min: float = DEFAULT_Q_MIN,
+    q_max: float = DEFAULT_Q_MAX,
+    k: float = DEFAULT_Q_STEEPNESS,
+    c: float = DEFAULT_Q_INFLECTION,
 ) -> float:
-    """Section 6.D — Fair PE = PE0 * (1 + beta_pe*(IS-50)/50) * (1 + beta_g*(GS-50)/50), clamped to [pe_min, pe_max].
+    """Section 6.D — Fair PE = PE_industry * Q(IntrinsicScore), clamped to [pe_min, pe_max].
 
-    At IntrinsicScore=50 and GrowthScore=50 both quality/growth terms are zero,
-    so FairPE reduces to exactly PE0 (the industry baseline).
+    PE_industry should be the industry's median (or cycle-normalized median)
+    P/E per the design note in the spec, to avoid a few richly-valued
+    outliers skewing the baseline every company is measured against.
     """
-    quality_term = 1 + beta_pe * (intrinsic_score - 50) / 50
-    growth_term = 1 + beta_g * (growth_score - 50) / 50
-    raw = pe0 * quality_term * growth_term
+    raw = pe0 * quality_multiplier(intrinsic_score, q_min, q_max, k, c)
     return max(pe_min, min(pe_max, raw))
 
 

@@ -86,7 +86,15 @@ from engine.scoring import (
     percentile_rank_scores,
 )
 from engine.tick import CompanyTickInput, TickState, run_tick as engine_run_tick
-from engine.valuation import drift_iv, fair_pe, intrinsic_value_per_share
+from engine.valuation import (
+    DEFAULT_Q_INFLECTION,
+    DEFAULT_Q_MAX,
+    DEFAULT_Q_MIN,
+    DEFAULT_Q_STEEPNESS,
+    drift_iv,
+    fair_pe,
+    intrinsic_value_per_share,
+)
 
 TAX_RATE = 0.25
 TRADING_DAYS_PER_YEAR = 252
@@ -592,8 +600,10 @@ def _refresh_fundamentals(
         moat_scores.setdefault(ms.company_id, {})[ms.subfactor_key] = float(ms.score)
 
     latest_period = _compute_fiscal_period(tick_count)
-    beta_pe = params.get("beta_pe", 0.5)
-    beta_g = params.get("beta_g", 0.3)
+    q_min = params.get("quality_mult_min", DEFAULT_Q_MIN)
+    q_max = params.get("quality_mult_max", DEFAULT_Q_MAX)
+    q_k = params.get("quality_mult_k", DEFAULT_Q_STEEPNESS)
+    q_c = params.get("quality_mult_inflection", DEFAULT_Q_INFLECTION)
 
     company_rows = []
     for company in companies:
@@ -631,8 +641,9 @@ def _refresh_fundamentals(
         iscore = compute_intrinsic_score(mgmt, moat_val, fq, fcfq, growth)
 
         fpe = fair_pe(
-            float(ind.baseline_pe), iscore, growth, beta_pe, beta_g,
+            float(ind.baseline_pe), iscore,
             float(ind.pe_min), float(ind.pe_max),
+            q_min, q_max, q_k, q_c,
         )
         eps_val = float(r["raw"].get("eps", 0.0))
         iv = intrinsic_value_per_share(fpe, eps_val)
@@ -1010,12 +1021,17 @@ def _apply_event_factor_effects(
                 fcfq = updated.get("fcf_quality", 50.0)
                 iscore = compute_intrinsic_score(mgmt, moat_val, fq, fcfq, growth)
 
-                beta_pe = float(params.get("beta_pe", 0.5))
-                beta_g = float(params.get("beta_g", 0.3))
+                event_q_min = float(params.get("quality_mult_min", DEFAULT_Q_MIN))
+                event_q_max = float(params.get("quality_mult_max", DEFAULT_Q_MAX))
+                event_q_k = float(params.get("quality_mult_k", DEFAULT_Q_STEEPNESS))
+                event_q_c = float(params.get("quality_mult_inflection", DEFAULT_Q_INFLECTION))
                 baseline_pe = float(ind.baseline_pe) if ind else 15.0
                 pe_min = float(ind.pe_min) if ind else 8.0
                 pe_max = float(ind.pe_max) if ind else 25.0
-                fpe = fair_pe(baseline_pe, iscore, growth, beta_pe, beta_g, pe_min, pe_max)
+                fpe = fair_pe(
+                    baseline_pe, iscore, pe_min, pe_max,
+                    event_q_min, event_q_max, event_q_k, event_q_c,
+                )
 
                 eps_val = 0.0
                 latest_inc = session.query(IncomeStatement).filter_by(

@@ -118,6 +118,25 @@ All completed as seed data in Phase 3:
 - **Idempotent re-runs.** If `price_history` already has a row for a given sim_date, that tick is skipped.
 - **Config-as-data.** All coefficients come from `config_parameters` table — nothing hardcoded.
 
+## Valuation Formula Revision — Logistic Quality Multiplier ✅
+
+**2026-07-09.** Section 6.D (Fair PE) replaced: the old two-term `β_PE`/`β_G` quality-and-growth tilt is gone, replaced by a single **logistic quality multiplier** `Q(S)` applied to the industry baseline PE:
+
+```
+Q(S) = Q_min + (Q_max − Q_min) / (1 + e^(−k·(S − c)))
+FairPE = clamp(PE_industry × Q(S), PE_min, PE_max)
+```
+
+`S` is `IntrinsicScore` (already combines management quality, MOAT, financial quality, FCF quality, and growth potential — so growth is inside `S`, not a separate multiplier term). Encodes diminishing marginal valuation: quality gains near the bottom or top of the 0–100 scale barely move the multiplier; gains crossing the inflection point `c` (default 60) drive rapid re-rating.
+
+**Config parameters:** `quality_mult_min` (0.30), `quality_mult_max` (5.00), `quality_mult_k` (0.12), `quality_mult_inflection` (60) — replace the removed `beta_pe`/`beta_g` keys.
+
+**Files changed:** `engine/valuation.py` (new `quality_multiplier()`, `fair_pe()` signature changed — drops `growth_score`/`beta_pe`/`beta_g`, adds `q_min`/`q_max`/`k`/`c`), `db/seeds/seed_config.py`, `db/seeds/seed_initial_prices.py`, `engine/orchestrator.py` (both call sites — the initial fake-quarter generator and the structural-event IV recompute path), `tests/test_valuation.py` (rewritten), `tests/test_orchestrator.py` + `apps/api/tests/conftest.py` (fixture config keys updated), `project.md` Section 6.D.
+
+**Design note carried over from the spec, not yet implemented:** `PE_industry` should ideally be the industry's median (or cycle-normalized median) P/E rather than the current static per-industry seed constant, so a few richly-valued outliers don't skew the baseline. Left as a documented future enhancement — no dynamic cross-sectional PE computation exists yet.
+
+**159/159 tests pass** (152 prior + 7 new/revised valuation tests) after the change.
+
 ## Phase 5 — Backend APIs ✅
 
 **Completed 2026-07-07,** per the file-by-file spec in `docs/phase5-plan.md`. New directory `apps/api/` (22 new files): `main.py`, `config.py` (pydantic-settings), `database.py` (SQLAlchemy session dependency), `auth.py` (JWT via python-jose + bcrypt), `dependencies.py`, `exceptions.py`, `schemas.py` (all Pydantic request/response models), `routers/{auth,market,trading,simulation,news,leaderboard}.py`, `services/{market_service,trade_service,sim_service}.py`, `tests/{conftest,test_auth,test_market,test_trading,test_simulation}.py`.

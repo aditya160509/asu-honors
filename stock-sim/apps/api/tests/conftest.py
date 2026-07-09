@@ -174,8 +174,10 @@ def base_config(test_db: Session) -> None:
     """Config parameters required by engine.orchestrator.run_tick."""
     params = {
         "mean_reversion_rate": "0.05",
-        "beta_pe": "0.5",
-        "beta_g": "0.3",
+        "quality_mult_min": "0.30",
+        "quality_mult_max": "5.00",
+        "quality_mult_k": "0.12",
+        "quality_mult_inflection": "60",
         "r_cap": "0.20",
         "w_vo": "0.20",
         "w_es": "0.15",
