@@ -1,7 +1,7 @@
 # Fictional Stock Market Simulation — Build Progress
 
 > Tracks status against the Master Prompt & PRD, phase by phase. Location of all code: `stock-sim/` inside this repo (`asu-honors`).
-> Last updated: 2026-07-06 (Phase 3 complete — 10/10, all issues resolved).
+> Last updated: 2026-07-07 (Phase 5 complete — FastAPI backend + fixes from code review).
 
 ---
 
@@ -13,10 +13,10 @@
 | 2 | Fictional Economy (150 companies, 15 industries, events, news) | ✅ Done |
 | 3 | Database (schema + migrations + seed data) | ✅ Done |
 | 4 | Simulation Engine (Python/NumPy) | ✅ Done — full DB-to-engine orchestration loop, economic cycle, OHLC, events/news, PRD 6.L volume (LogNormalNoise/EarningsDayFlag), dynamic volatility recompute (σ_i = σ_ind×f_size×f_lev), structural events modify factor scores + IV recompute, 113 tests |
-| 5 | Backend APIs (FastAPI) | ⬜ Not started |
+| 5 | Backend APIs (FastAPI) | ✅ Done — 22 endpoints across auth/market/trading/simulation/news/leaderboard, JWT + bcrypt, order execution with Kyle-lambda impact, 152 tests (113 engine + 39 API) |
 | 6 | Basic Frontend (Next.js) | ⬜ Not started |
 | 7–9 | Feature build-out (analytics, events UI, news feed, Future Lab, notifications, polish) | ⬜ Not started |
-| 10 | Testing & Deployment | 🟡 Partial — engine unit tests + orchestrator integration tests exist (113 pass), nothing else tested |
+| 10 | Testing & Deployment | 🟡 Partial — engine + orchestrator + API tests exist (152 pass), no E2E/frontend tests, not deployed |
 
 ---
 
@@ -118,6 +118,23 @@ All completed as seed data in Phase 3:
 - **Idempotent re-runs.** If `price_history` already has a row for a given sim_date, that tick is skipped.
 - **Config-as-data.** All coefficients come from `config_parameters` table — nothing hardcoded.
 
-## Phase 5–10
+## Phase 5 — Backend APIs ✅
+
+**Completed 2026-07-07,** per the file-by-file spec in `docs/phase5-plan.md`. New directory `apps/api/` (22 new files): `main.py`, `config.py` (pydantic-settings), `database.py` (SQLAlchemy session dependency), `auth.py` (JWT via python-jose + bcrypt), `dependencies.py`, `exceptions.py`, `schemas.py` (all Pydantic request/response models), `routers/{auth,market,trading,simulation,news,leaderboard}.py`, `services/{market_service,trade_service,sim_service}.py`, `tests/{conftest,test_auth,test_market,test_trading,test_simulation}.py`.
+
+**Endpoints (22 total):** `/auth/{register,login,me}`, `/market`, `/market/cycle`, `/companies/{ticker}` (+`/history`,`/drivers`,`/financials`,`/valuation`), `/orders`, `/portfolio`, `/transactions`, `/watchlist` (+ delete), `/sim/{advance,state,timelines}`, `/sim/admin/{events,config}`, `/news/`, `/leaderboard/`.
+
+**Order execution** (`trade_service.place_order`): validates ticker/cash/shares, applies Kyle's-lambda price impact from `engine.liquidity`, computes fees from `config_parameters.trade_fee_rate` (default 0.1%), writes `Transaction` + updates `Holding` (weighted-avg cost basis) + `Portfolio.cash_balance`.
+
+**Fixes applied from an 8-angle code review before commit:**
+- Kyle-lambda impact is now capped at 99% of current price (previously an unbounded impact past `current_price` silently reset execution price to the undiscounted market price — the opposite of the intended effect for large orders).
+- Buy-order cash validation now includes fees (previously a buy priced exactly at available cash could drive `cash_balance` negative once fees were deducted).
+- JWT `sub`-claim decode now guards `int()` conversion (previously a malformed-but-signed token would 500 instead of 401).
+- `unrealized_pnl_pct` guards near-zero (not just exactly-zero) `avg_cost_basis` to avoid absurd percentages from rounding drift.
+- `/market` batches the previous-close lookup into one query for all companies instead of one query per company (N+1 → 1).
+
+**Known gaps (documented, not blocking):** no row-level locking on concurrent order execution (a real TOCTOU risk on Postgres, not addressed — no live DB to test against in this environment); `/leaderboard` re-derives ranks in Python instead of querying the `leaderboard` materialized view from migration 0002; CORS is hardcoded `allow_origins=["*"]` (flagged by the plan itself as pre-prod hardening, not yet config-driven).
+
+## Phase 6–10
 
 See `docs/` directory for detailed phase documentation.
