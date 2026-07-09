@@ -7,14 +7,13 @@ slightly perturbed around IV and writes the first price_history row.
 
 import os
 import random as _random
-import sys
 from datetime import date, datetime, timezone
 
 import numpy as np
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, joinedload
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
+# Path setup handled by run_all.py entry point
 
 from db.models import (
     BalanceSheet,
@@ -181,6 +180,14 @@ def _safe_finite(v: float) -> float:
 
 def seed(session: Session) -> None:
     now = datetime.now(timezone.utc)
+    from db.models import PriceHistory
+    initial_date = FIRST_SIM_DATE
+    existing = session.query(PriceHistory).filter(PriceHistory.sim_date == initial_date).first()
+    if existing is not None:
+        import logging
+        logging.getLogger(__name__).warning("Initial prices already seeded — skipping")
+        return
+
     d = _load_company_data(session)
     timeline = d["timeline"]
     if timeline is None:

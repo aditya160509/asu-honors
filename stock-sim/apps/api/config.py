@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     database_url: str = "postgresql+psycopg://stocksim:stocksim@localhost:5432/stocksim"
-    secret_key: str = "dev-secret-key-change-in-prod"
+    secret_key: str
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 1440
     api_host: str = "0.0.0.0"

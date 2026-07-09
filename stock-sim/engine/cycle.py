@@ -6,11 +6,15 @@ CYCLE_PHASES = ("expansion", "peak", "contraction", "trough")
 
 # transition matrix: phase -> list of (next_phase, probability_weight)
 # weights are normalised so each row sums to 1.0.
+# Expected average durations (geometric):
+#   expansion:   1/(1-0.97) ≈ 33 days, peak: 1/(1-0.85) ≈ 7 days,
+#   contraction: 1/(1-0.96) ≈ 25 days, trough: 1/(1-0.80) ≈ 5 days.
+# Full cycle ≈ 70 days (~3.5 months); expansions/contractions last ~4-5 weeks each.
 CYCLE_TRANSITIONS: dict[str, list[tuple[str, float]]] = {
-    "expansion":   [("expansion", 0.85), ("peak", 0.15)],
-    "peak":        [("peak", 0.50), ("contraction", 0.50)],
-    "contraction": [("contraction", 0.80), ("trough", 0.20)],
-    "trough":      [("trough", 0.60), ("expansion", 0.40)],
+    "expansion":   [("expansion", 0.97), ("peak", 0.03)],
+    "peak":        [("peak", 0.85), ("contraction", 0.15)],
+    "contraction": [("contraction", 0.96), ("trough", 0.04)],
+    "trough":      [("trough", 0.80), ("expansion", 0.20)],
 }
 
 PHASE_MARKET_RETURN: dict[str, float] = {

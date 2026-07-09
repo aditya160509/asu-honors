@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
 from apps.api.auth import get_current_user, require_admin
+from apps.api.config import settings
 from apps.api.database import get_db
 from apps.api.exceptions import NotFoundError
 from apps.api.schemas import (
@@ -70,7 +71,7 @@ def list_timelines(
 
 @router.get("/state", response_model=SimulationStateResponse)
 def get_state(
-    timeline_id: int = 1,
+    timeline_id: int = Query(default=settings.default_timeline_id),
     db: Session = Depends(get_db),
     _user: User = Depends(get_current_user),
 ) -> SimulationStateResponse:

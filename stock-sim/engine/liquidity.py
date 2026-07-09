@@ -40,11 +40,12 @@ def compute_volume_prd(
     coeff_earnings: float = 0.2,
     noise_sigma: float = 0.1,
     rng: Optional[random.Random] = None,
+    max_volume: Optional[int] = None,
 ) -> int:
     """Section 6.L — Volume = BaseFloatTurnover × (1 + a·|r| + b·|d_NS| + c·EarningsDayFlag) × LogNormalNoise.
 
     BaseFloatTurnover = market_cap * free_float_pct * turnover_rate.
-    Returns minimum 1000 shares.
+    Returns minimum 1000 shares. If max_volume is provided, the result is capped at that value (default: no cap).
     """
     base = market_cap * free_float_pct * turnover_rate
     multiplier = 1.0 + coeff_return * abs_return + coeff_news * news_severity_delta
@@ -53,7 +54,10 @@ def compute_volume_prd(
     if rng is not None and noise_sigma > 0:
         multiplier *= math.exp(rng.gauss(0, noise_sigma))
     vol = int(base * multiplier)
-    return max(1000, vol)
+    vol = max(1000, vol)
+    if max_volume is not None:
+        vol = min(vol, max_volume)
+    return vol
 
 
 def market_liquidity_score(free_float_pct: float, avg_daily_volume: float, market_cap: float) -> float:

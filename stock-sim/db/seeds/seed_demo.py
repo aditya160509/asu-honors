@@ -1,51 +1,34 @@
 """Seed demo users, portfolios, and sample transactions."""
 
 import os
-import sys
 
 import bcrypt
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
+# Path setup handled by run_all.py entry point
 
 from db.models import Portfolio, Timeline, User
 
-
-def _hash(password: str) -> str:
-    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
-
-
-USERS = [
-    {
-        "email": "alice@example.com",
-        "hashed_password": _hash("demo"),
-        "display_name": "Alice",
-        "role": "admin",
-        "starting_cash": 1_000_000,
-    },
-    {
-        "email": "bob@example.com",
-        "hashed_password": _hash("demo"),
-        "display_name": "Bob",
-        "role": "user",
-        "starting_cash": 500_000,
-    },
-    {
-        "email": "charlie@example.com",
-        "hashed_password": _hash("demo"),
-        "display_name": "Charlie",
-        "role": "user",
-        "starting_cash": 250_000,
-    },
+USER_DEFS = [
+    {"email": "alice@example.com", "display_name": "Alice", "role": "admin", "starting_cash": 1_000_000},
+    {"email": "bob@example.com", "display_name": "Bob", "role": "user", "starting_cash": 500_000},
+    {"email": "charlie@example.com", "display_name": "Charlie", "role": "user", "starting_cash": 250_000},
 ]
 
 
 def seed(session: Session) -> None:
-    for user_data in USERS:
-        existing = session.query(User).filter_by(email=user_data["email"]).first()
+    password_hash = bcrypt.hashpw(b"demo", bcrypt.gensalt()).decode()
+    for ud in USER_DEFS:
+        existing = session.query(User).filter_by(email=ud["email"]).first()
         if existing is None:
-            session.add(User(**user_data))
+            session.add(User(
+                email=ud["email"],
+                hashed_password=password_hash,
+                display_name=ud["display_name"],
+                role=ud["role"],
+                starting_cash=ud["starting_cash"],
+            ))
     session.flush()
 
     timeline = session.query(Timeline).filter_by(id=1).first()
@@ -56,14 +39,14 @@ def seed(session: Session) -> None:
         ))
         session.flush()
 
-    for user_data in USERS:
-        user = session.query(User).filter_by(email=user_data["email"]).first()
+    for ud in USER_DEFS:
+        user = session.query(User).filter_by(email=ud["email"]).first()
         existing = session.query(Portfolio).filter_by(user_id=user.id, timeline_id=1).first()
         if existing is None:
             session.add(Portfolio(
                 user_id=user.id, timeline_id=1,
-                cash_balance=user_data["starting_cash"],
-                total_value=user_data["starting_cash"],
+                cash_balance=ud["starting_cash"],
+                total_value=ud["starting_cash"],
             ))
 
 

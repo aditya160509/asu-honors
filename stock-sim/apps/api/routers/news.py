@@ -7,6 +7,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
+from apps.api.config import settings
 from apps.api.database import get_db
 from apps.api.schemas import NewsItem
 from db.models import Company, Industry, NewsFeed
@@ -18,7 +19,7 @@ router = APIRouter(prefix="/api/v1/news", tags=["News"])
 
 @router.get("/", response_model=list[NewsItem])
 def get_news(
-    timeline_id: int = 1,
+    timeline_id: int = Query(default=settings.default_timeline_id),
     sim_date: Optional[date] = Query(default=None),
     company_id: Optional[int] = Query(default=None),
     limit: int = 50,

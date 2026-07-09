@@ -2,13 +2,12 @@
 
 import os
 import random
-import sys
 from datetime import datetime, timezone
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
+# Path setup handled by run_all.py entry point
 
 from db.models import Company, CompanyFactorScore, MoatSubscore
 

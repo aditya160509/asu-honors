@@ -3,10 +3,11 @@
 import logging
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
 from apps.api.auth import get_current_user
+from apps.api.config import settings
 from apps.api.database import get_db
 from apps.api.exceptions import ConflictError, NotFoundError
 from apps.api.schemas import (
@@ -51,7 +52,7 @@ def _build_holding_response(holding: Holding, company: Company) -> HoldingRespon
 
 @router.get("/portfolio/analytics", response_model=PortfolioAnalyticsResponse)
 def get_portfolio_analytics_endpoint(
-    timeline_id: int = 1,
+    timeline_id: int = Query(default=settings.default_timeline_id),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> PortfolioAnalyticsResponse:
@@ -60,7 +61,7 @@ def get_portfolio_analytics_endpoint(
 
 @router.get("/portfolio", response_model=PortfolioResponse)
 def get_portfolio(
-    timeline_id: int = 1,
+    timeline_id: int = Query(default=settings.default_timeline_id),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> PortfolioResponse:
@@ -109,7 +110,7 @@ def create_order(
 
 @router.get("/transactions", response_model=list[TransactionItem])
 def get_transactions(
-    timeline_id: int = 1,
+    timeline_id: int = Query(default=settings.default_timeline_id),
     limit: int = 50,
     offset: int = 0,
     db: Session = Depends(get_db),

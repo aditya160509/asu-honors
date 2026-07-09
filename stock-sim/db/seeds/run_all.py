@@ -1,4 +1,8 @@
-"""Run all seed scripts in dependency order."""
+"""Run all seed scripts in dependency order.
+
+Each seed is run as a subprocess with PYTHONPATH set so that
+'from db.models import …' etc. resolve without sys.path hacks.
+"""
 
 import os
 import subprocess
@@ -16,11 +20,17 @@ SEEDS = [
 
 
 def main() -> None:
+    project_root = os.path.normpath(os.path.join(os.path.dirname(__file__), "../.."))
     db_url = os.environ.get(
         "DATABASE_URL",
         "postgresql+psycopg://stocksim:stocksim@localhost:5432/stocksim",
     )
-    env = {**os.environ, "DATABASE_URL": db_url}
+    existing_pypath = os.environ.get("PYTHONPATH", "")
+    env = {
+        **os.environ,
+        "DATABASE_URL": db_url,
+        "PYTHONPATH": f"{project_root}{os.pathsep}{existing_pypath}" if existing_pypath else project_root,
+    }
 
     seeds_dir = os.path.join(os.path.dirname(__file__))
 

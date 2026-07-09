@@ -8,6 +8,7 @@ simulation by one business day for all companies.
 import math
 import random
 from datetime import date, datetime, timezone, timedelta
+from types import SimpleNamespace
 from typing import Optional
 
 import numpy as np
@@ -85,7 +86,7 @@ from engine.scoring import (
     moat_composite,
     percentile_rank_scores,
 )
-from engine.tick import CompanyTickInput, TickState, run_tick as engine_run_tick
+from engine.tick import CompanyTickInput, CompanyTickOutput, TickResult, TickState, run_tick as engine_run_tick
 from engine.valuation import (
     DEFAULT_Q_INFLECTION,
     DEFAULT_Q_MAX,
@@ -107,28 +108,179 @@ DRIVER_KEYS = frozenset({
 
 
 def run_tick(session: Session, timeline_id: int) -> dict:
-    """Advance the simulation by one trading day for the given timeline.
-
-    Steps (PRD Section 6.O):
-      1. Load simulation state
-      2. Check idempotency (skip if already executed)
-      3. Advance economic cycle -> market_factor_return, F^s
-      4. Check quarter boundary -> refresh fundamentals
-      5. Drift IV for all companies
-      6. Compute 7 driver values per company
-      7. Fire probabilistic events, apply effects -> compute news_severity
-      8. Build TickState, call engine_run_tick
-      9. Apply circuit breaker, synthesize OHLC
-      10. Compute volume, order imbalance, liquidity
-      11. Write price_history, price_driver_scores, cycle_state rows
-      12. Update Company denormalized fields
-      13. Mark-to-market portfolios
-      14. Generate news from fired events
-      15. Advance SimulationState
-
-    Returns a summary dict with counts and the new sim_date.
-    """
+    """Advance the simulation by one trading day for the given timeline."""
     now = datetime.now(timezone.utc)
+    timeline = session.query(Timeline).filter_by(id=timeline_id).first()
+    if timeline is None:
+        raise ValueError(f"Timeline {timeline_id} not found")
+
+    sim_state = session.query(SimulationState).filter_by(timeline_id=timeline_id).first()
+    if sim_state is None:
+        raise ValueError(f"No SimulationState for timeline {timeline_id} -- run seed_initial_prices first")
+
+    sim_date = sim_state.current_sim_date
+    tick_count = sim_state.tick_count
+
+    existing = session.query(PriceHistory).filter_by(
+        timeline_id=timeline_id, sim_date=sim_date
+    ).first()
+    if existing is not None:
+        return {"status": "skipped", "reason": "already_executed", "sim_date": sim_date}
+
+    results = run_ticks(session, timeline_id, num_ticks=1)
+    return results[0]
+
+
+def run_ticks(
+    session: Session,
+    timeline_id: int,
+    num_ticks: int = 1,
+) -> list[dict]:
+    """Run multiple ticks in sequence. Each tick is idempotent."""
+    results = []
+    for _ in range(num_ticks):
+        state = _load_tick_state(session, timeline_id)
+        sim_date = state.sim_date
+        tick_count = state.tick_count
+        companies = state.companies
+
+        existing = session.query(PriceHistory).filter_by(
+            timeline_id=timeline_id, sim_date=sim_date
+        ).first()
+        if existing is not None:
+            results.append({"status": "skipped", "reason": "already_executed", "sim_date": sim_date})
+            continue
+
+        # -- Quarter boundary: refresh fundamentals -------------------------
+        if state.is_quarter_boundary:
+            _refresh_fundamentals(
+                session, timeline_id, companies, state.industries,
+                state.params, datetime.now(timezone.utc), state.rng, tick_count,
+            )
+
+        # -- IV drift -------------------------------------------------------
+        for company in companies:
+            if company.intrinsic_value is not None:
+                expected_growth = float(state.params.get("expected_annual_growth", 0.08))
+                company.intrinsic_value = float(drift_iv(
+                    float(company.intrinsic_value), expected_growth, TRADING_DAYS_PER_YEAR,
+                ))
+
+        # -- Compute drivers per company ------------------------------------
+        pricing_data: dict[str, list] = {
+            "company_ids": [], "y": [], "theta": [],
+            "driver_values": [], "driver_weights": [],
+            "beta_market": [], "beta_sector": [],
+            "sector_factors": [], "sigma": [],
+            "epsilon": [], "intrinsic_value": [],
+        }
+        company_ns: dict[int, float] = {}
+
+        for company in companies:
+            result = _compute_drivers(session, company, state, timeline_id, sim_date, tick_count)
+            if result is None:
+                continue
+            pricing_data["company_ids"].append(result["company_id"])
+            pricing_data["y"].append(result["y"])
+            pricing_data["theta"].append(result["theta"])
+            pricing_data["driver_values"].append(result["driver_values"])
+            pricing_data["driver_weights"].append(result["driver_weights"])
+            pricing_data["beta_market"].append(result["beta_market"])
+            pricing_data["beta_sector"].append(result["beta_sector"])
+            pricing_data["sector_factors"].append(result["sector_factor"])
+            pricing_data["sigma"].append(result["sigma"])
+            pricing_data["epsilon"].append(result["epsilon"])
+            pricing_data["intrinsic_value"].append(result["intrinsic_value"])
+            company_ns[company.id] = result["news_severity"]
+
+        if not pricing_data["company_ids"]:
+            raise ValueError("No companies with valid pricing data")
+
+        # -- Run the engine tick --------------------------------------------
+        tick_inputs = tuple(
+            CompanyTickInput(
+                company_id=cid, y=y, theta=th,
+                driver_values=dv, driver_weights=dw,
+                beta_market=bm, beta_sector=bs,
+                sector_factor_return=sf, sigma=sig,
+                epsilon=eps, intrinsic_value=iv,
+            )
+            for cid, y, th, dv, dw, bm, bs, sf, sig, eps, iv in zip(
+                pricing_data["company_ids"],
+                pricing_data["y"],
+                pricing_data["theta"],
+                pricing_data["driver_values"],
+                pricing_data["driver_weights"],
+                pricing_data["beta_market"],
+                pricing_data["beta_sector"],
+                pricing_data["sector_factors"],
+                pricing_data["sigma"],
+                pricing_data["epsilon"],
+                pricing_data["intrinsic_value"],
+            )
+        )
+
+        tick_state = TickState(
+            sim_day=tick_count,
+            market_factor_return=state.f_m,
+            companies=tick_inputs,
+        )
+        tick_result = engine_run_tick(tick_state)
+
+        # -- Circuit breaker + OHLC + volume --------------------------------
+        ohlc_results, volume_results, imbalance_results = _update_prices_and_ohlc(
+            companies, tick_result, state.params, state.prev_ns, company_ns, state.rng, tick_count,
+        )
+
+        # -- Write DB rows --------------------------------------------------
+        _write_tick_results(
+            session, timeline_id, sim_date, companies, tick_inputs, tick_result,
+            ohlc_results, volume_results, imbalance_results,
+        )
+
+        # -- Update denormalized Company fields -----------------------------
+        _update_denormalized_fields(
+            companies, ohlc_results, volume_results, tick_result,
+        )
+
+        # -- Mark to market -------------------------------------------------
+        _mark_to_market(session, timeline_id, companies)
+
+        # -- Fire events + generate news ------------------------------------
+        _execute_events(session, timeline_id, state, sim_date, companies)
+
+        # -- Advance simulation state ---------------------------------------
+        next_date = sim_date + timedelta(days=1)
+        state.sim_state.current_sim_date = next_date
+        state.sim_state.tick_count = tick_count + 1
+        state.sim_state.is_running = True
+
+        session.flush()
+
+        results.append({
+            "status": "completed",
+            "sim_date": sim_date,
+            "next_date": next_date,
+            "tick_count": tick_count + 1,
+            "companies_updated": len(tick_result.outputs),
+            "cycle_phase": state.cycle_phase,
+            "market_factor_return": state.f_m,
+        })
+
+    return results
+
+
+# ── Extracted helper methods ────────────────────────────────────────────────
+
+
+def _load_tick_state(session: Session, timeline_id: int) -> SimpleNamespace:
+    """Load and return all simulation state for one tick.
+
+    Loads timeline, sim_state, economic cycle, companies, industries, balance
+    sheets, and previous tick news_severity.  Raises ValueError if the timeline
+    or simulation state does not exist.  Does NOT check idempotency — the
+    caller is responsible for that.
+    """
     timeline = session.query(Timeline).filter_by(id=timeline_id).first()
     if timeline is None:
         raise ValueError(f"Timeline {timeline_id} not found")
@@ -141,17 +293,10 @@ def run_tick(session: Session, timeline_id: int) -> dict:
     tick_count = sim_state.tick_count
     epoch_start = sim_date - timedelta(days=tick_count)
 
-    # -- Step 2: idempotency ------------------------------------------------
-    existing = session.query(PriceHistory).filter_by(
-        timeline_id=timeline_id, sim_date=sim_date
-    ).first()
-    if existing is not None:
-        return {"status": "skipped", "reason": "already_executed", "sim_date": sim_date}
-
     rng = random.Random(timeline.rng_seed + tick_count)
     params = _load_params(session)
 
-    # -- Step 3: economic cycle ---------------------------------------------
+    # Economic cycle
     latest_cycle = session.query(EconomicCycleState).filter_by(
         timeline_id=timeline_id
     ).order_by(EconomicCycleState.sim_date.desc()).first()
@@ -181,7 +326,6 @@ def run_tick(session: Session, timeline_id: int) -> dict:
 
     f_m = cycle_state["market_factor_return"]
 
-    # -- Load companies and industry data ------------------------------------
     companies = session.query(Company).all()
     industries = {ind.id: ind for ind in session.query(Industry).all()}
     industry_ids = list(industries.keys())
@@ -194,14 +338,12 @@ def run_tick(session: Session, timeline_id: int) -> dict:
         rng=rng,
     )
 
-    # -- Batch load balance sheets for dynamic volatility (PRD 6.I) --------
     all_bal = session.query(BalanceSheet).order_by(BalanceSheet.fiscal_period.desc()).all()
     latest_bal: dict[int, BalanceSheet] = {}
     for bal in all_bal:
         if bal.company_id not in latest_bal:
             latest_bal[bal.company_id] = bal
 
-    # -- Previous tick news_severity for volume |d_NS| (PRD 6.L) -----------
     prev_ns: dict[int, float] = {}
     if tick_count > 0:
         prev_date = sim_date - timedelta(days=1)
@@ -211,193 +353,179 @@ def run_tick(session: Session, timeline_id: int) -> dict:
         for ps in prev_scores:
             prev_ns[ps.company_id] = float(ps.value)
 
-    # -- Step 4: quarter boundary -> refresh fundamentals -------------------
     is_quarter_boundary = tick_count > 0 and tick_count % QUARTER_LENGTH == 0
-    if is_quarter_boundary:
-        _refresh_fundamentals(session, timeline_id, companies, industries, params, now, rng, tick_count)
 
-    # -- Step 5: IV drift ---------------------------------------------------
-    eps_map: dict[int, float] = {}
-    for company in companies:
-        latest_inc = session.query(IncomeStatement).filter_by(
-            company_id=company.id
-        ).order_by(IncomeStatement.fiscal_period.desc()).first()
-        if latest_inc:
-            eps_map[company.id] = float(latest_inc.eps)
-        if company.intrinsic_value is not None:
-            expected_growth = float(
-                params.get("expected_annual_growth", 0.08)
-            )
-            company.intrinsic_value = float(drift_iv(
-                float(company.intrinsic_value), expected_growth, TRADING_DAYS_PER_YEAR
-            ))
+    return SimpleNamespace(
+        timeline=timeline,
+        sim_state=sim_state,
+        sim_date=sim_date,
+        tick_count=tick_count,
+        epoch_start=epoch_start,
+        rng=rng,
+        params=params,
+        cycle_phase=cycle_phase,
+        cycle_state=cycle_state,
+        f_m=f_m,
+        companies=companies,
+        industries=industries,
+        industry_ids=industry_ids,
+        sector_shocks=sector_shocks,
+        latest_bal=latest_bal,
+        prev_ns=prev_ns,
+        is_quarter_boundary=is_quarter_boundary,
+    )
 
-    # -- Steps 6-7: compute drivers per company -----------------------------
-    pricing_data: dict[str, list] = {
-        "company_ids": [], "y": [], "theta": [],
-        "driver_values": [], "driver_weights": [],
-        "beta_market": [], "beta_sector": [],
-        "sector_factors": [], "sigma": [],
-        "epsilon": [], "intrinsic_value": [],
+
+def _compute_drivers(
+    session: Session,
+    company: Company,
+    state: SimpleNamespace,
+    timeline_id: int,
+    sim_date: date,
+    tick_count: int,
+) -> Optional[dict]:
+    """Compute all 7 driver values and OU pricing inputs for one company.
+
+    Returns a dict with keys: company_id, y, theta, driver_values,
+    driver_weights, beta_market, beta_sector, sector_factor, sigma, epsilon,
+    intrinsic_value, news_severity.  Returns None if the company has invalid
+    pricing data (missing price or intrinsic value).
+    """
+    if company.current_price is None or company.current_price <= 0:
+        return None
+    if company.intrinsic_value is None or company.intrinsic_value <= 0:
+        return None
+
+    ind = state.industries.get(company.industry_id)
+    if ind is None:
+        return None
+
+    prev_close = float(company.current_price)
+    iv = float(company.intrinsic_value)
+
+    y = np.log(max(prev_close, 0.01) / max(iv, 0.01))
+    theta = float(state.params.get("mean_reversion_rate", 0.05))
+    beta_m = float(company.beta_market)
+    beta_s = float(company.beta_sector)
+    epsilon = state.rng.gauss(0, 1)
+    s_factor = state.sector_shocks.get(company.industry_id, 0.0)
+
+    ind_base_vol = float(ind.base_volatility) / 100.0
+    mcap = max(float(company.market_cap or 1e9), 1e6)
+    log_mcap = math.log(mcap / 1e9)
+    f_size = 1.0 - 0.2 * math.tanh(log_mcap)
+    sigma_val = ind_base_vol * f_size
+    bal = state.latest_bal.get(company.id)
+    if bal:
+        td = float(bal.total_debt)
+        se = float(bal.shareholders_equity)
+        if se > 0:
+            leverage = td / se
+            max_lev = float(state.params.get("vol_max_leverage", 5.0))
+            lev_factor = float(state.params.get("vol_leverage_factor", 0.3))
+            f_lev = 1.0 + lev_factor * min(leverage, max_lev)
+            sigma_val *= f_lev
+
+    vo = value_opportunity(iv, prev_close)
+    tm = technical_momentum(prev_close, prev_close * 0.98, float(state.params.get("k_m", 0.5)))
+    eo = compute_economic_outlook(state.cycle_state["market_sentiment"])
+
+    latest_inc = session.query(IncomeStatement).filter_by(
+        company_id=company.id
+    ).order_by(IncomeStatement.fiscal_period.desc()).first()
+    latest_ce = session.query(ConsensusEstimate).filter_by(
+        company_id=company.id
+    ).order_by(ConsensusEstimate.fiscal_period.desc()).first()
+
+    es = 0.0
+    if latest_inc and latest_ce:
+        actual_eps = float(latest_inc.eps)
+        consensus_eps = float(latest_ce.consensus_eps)
+        es = earnings_surprise(actual_eps, consensus_eps, tick_count, float(state.params.get("rho_es", 0.15)))
+
+    gd = 0.0
+    if latest_inc and latest_ce:
+        actual_eps = float(latest_inc.eps)
+        consensus_eps = float(latest_ce.consensus_eps)
+        beat = actual_eps > consensus_eps
+        miss = actual_eps < consensus_eps
+        if beat:
+            gd = guidance("raised", min(abs(actual_eps - consensus_eps) / max(abs(consensus_eps), 0.01), 0.5), tick_count, float(state.params.get("rho_g", 0.15)))
+        elif miss:
+            gd = guidance("cut", min(abs(actual_eps - consensus_eps) / max(abs(consensus_eps), 0.01), 0.5), tick_count, float(state.params.get("rho_g", 0.15)))
+
+    ib = institutional_buying(state.rng.uniform(-0.1, 0.1) + state.cycle_state.get("market_sentiment", 0) * 0.05)
+
+    ns = 0.0
+    active_events = _get_active_events_for_company(
+        session, timeline_id, company.id, ind.id, sim_date, state.epoch_start,
+    )
+    if active_events:
+        ns = news_severity(active_events, tick_count, float(state.params.get("rho_news", 0.1)))
+
+    driver_values = {
+        "value_opportunity": vo,
+        "earnings_surprise": es,
+        "news_severity": ns,
+        "economic_outlook": eo,
+        "guidance": gd,
+        "technical_momentum": tm,
+        "institutional_buying": ib,
     }
 
-    company_ns: dict[int, float] = {}
+    if active_events:
+        for event_data in active_events:
+            effect_profile = event_data.get("effect_profile", {})
+            if effect_profile:
+                severity = event_data.get("severity", 0.0)
+                decay_rate = event_data.get("decay_rate", 0.1)
+                start_day = event_data.get("start_day", 0)
+                days_elapsed = tick_count - start_day
+                driver_values = apply_effect_to_drivers(
+                    driver_values, effect_profile, severity, decay_rate, days_elapsed,
+                )
 
-    for company in companies:
-        if company.current_price is None or company.current_price <= 0:
-            continue
-        if company.intrinsic_value is None or company.intrinsic_value <= 0:
-            continue
+    drv_weights = {
+        "value_opportunity": float(state.params.get("w_vo", 0.20)),
+        "earnings_surprise": float(state.params.get("w_es", 0.15)),
+        "news_severity": float(state.params.get("w_ns", 0.15)),
+        "economic_outlook": float(state.params.get("w_eo", 0.10)),
+        "guidance": float(state.params.get("w_g", 0.15)),
+        "technical_momentum": float(state.params.get("w_tm", 0.10)),
+        "institutional_buying": float(state.params.get("w_ib", 0.15)),
+    }
 
-        ind = industries.get(company.industry_id)
-        if ind is None:
-            continue
+    news_severity_val = driver_values.get("news_severity", ns)
 
-        prev_close = float(company.current_price)
-        iv = float(company.intrinsic_value)
+    return {
+        "company_id": company.id,
+        "y": y,
+        "theta": theta,
+        "driver_values": driver_values,
+        "driver_weights": drv_weights,
+        "beta_market": beta_m,
+        "beta_sector": beta_s,
+        "sector_factor": s_factor,
+        "sigma": sigma_val,
+        "epsilon": epsilon,
+        "intrinsic_value": iv,
+        "news_severity": news_severity_val,
+    }
 
-        y = np.log(max(prev_close, 0.01) / max(iv, 0.01))
-        theta = float(params.get("mean_reversion_rate", 0.05))
-        beta_m = float(company.beta_market)
-        beta_s = float(company.beta_sector)
-        epsilon = rng.gauss(0, 1)
-        s_factor = sector_shocks.get(company.industry_id, 0.0)
 
-        # Dynamic volatility: σ_i = σ_ind × f_size × f_lev  (PRD 6.I)
-        ind_base_vol = float(ind.base_volatility) / 100.0
-        mcap = max(float(company.market_cap or 1e9), 1e6)
-        log_mcap = math.log(mcap / 1e9)
-        f_size = 1.0 - 0.2 * math.tanh(log_mcap)
-        sigma_val = ind_base_vol * f_size
-        bal = latest_bal.get(company.id)
-        if bal:
-            td = float(bal.total_debt)
-            se = float(bal.shareholders_equity)
-            if se > 0:
-                leverage = td / se
-                max_lev = float(params.get("vol_max_leverage", 5.0))
-                lev_factor = float(params.get("vol_leverage_factor", 0.3))
-                f_lev = 1.0 + lev_factor * min(leverage, max_lev)
-                sigma_val *= f_lev
+def _update_prices_and_ohlc(
+    companies: list[Company],
+    tick_result: TickResult,
+    params: dict[str, float],
+    prev_ns: dict[int, float],
+    company_ns: dict[int, float],
+    rng: random.Random,
+    tick_count: int,
+) -> tuple[dict[int, dict], dict[int, int], dict[int, float]]:
+    """Apply circuit breaker, synthesize OHLC, and compute volume for each company.
 
-        vo = value_opportunity(iv, prev_close)
-        tm = technical_momentum(prev_close, prev_close * 0.98, float(params.get("k_m", 0.5)))
-        eo = compute_economic_outlook(cycle_state["market_sentiment"])
-
-        latest_inc = session.query(IncomeStatement).filter_by(
-            company_id=company.id
-        ).order_by(IncomeStatement.fiscal_period.desc()).first()
-        latest_ce = session.query(ConsensusEstimate).filter_by(
-            company_id=company.id
-        ).order_by(ConsensusEstimate.fiscal_period.desc()).first()
-
-        es = 0.0
-        if latest_inc and latest_ce:
-            actual_eps = float(latest_inc.eps)
-            consensus_eps = float(latest_ce.consensus_eps)
-            es = earnings_surprise(actual_eps, consensus_eps, tick_count, float(params.get("rho_es", 0.15)))
-
-        gd = 0.0
-        if latest_inc and latest_ce:
-            actual_eps = float(latest_inc.eps)
-            consensus_eps = float(latest_ce.consensus_eps)
-            beat = actual_eps > consensus_eps
-            miss = actual_eps < consensus_eps
-            if beat:
-                gd = guidance("raised", min(abs(actual_eps - consensus_eps) / max(abs(consensus_eps), 0.01), 0.5), tick_count, float(params.get("rho_g", 0.15)))
-            elif miss:
-                gd = guidance("cut", min(abs(actual_eps - consensus_eps) / max(abs(consensus_eps), 0.01), 0.5), tick_count, float(params.get("rho_g", 0.15)))
-
-        ib = institutional_buying(rng.uniform(-0.1, 0.1) + cycle_state.get("market_sentiment", 0) * 0.05)
-
-        ns = 0.0
-        active_events = _get_active_events_for_company(
-            session, timeline_id, company.id, ind.id, sim_date, epoch_start
-        )
-        if active_events:
-            ns = news_severity(active_events, tick_count, float(params.get("rho_news", 0.1)))
-
-        driver_values = {
-            "value_opportunity": vo,
-            "earnings_surprise": es,
-            "news_severity": ns,
-            "economic_outlook": eo,
-            "guidance": gd,
-            "technical_momentum": tm,
-            "institutional_buying": ib,
-        }
-
-        if active_events:
-            for event_data in active_events:
-                effect_profile = event_data.get("effect_profile", {})
-                if effect_profile:
-                    severity = event_data.get("severity", 0.0)
-                    decay_rate = event_data.get("decay_rate", 0.1)
-                    start_day = event_data.get("start_day", 0)
-                    days_elapsed = tick_count - start_day
-                    driver_values = apply_effect_to_drivers(
-                        driver_values, effect_profile, severity, decay_rate, days_elapsed
-                    )
-
-        company_ns[company.id] = driver_values.get("news_severity", ns)
-
-        drv_weights = {
-            "value_opportunity": float(params.get("w_vo", 0.20)),
-            "earnings_surprise": float(params.get("w_es", 0.15)),
-            "news_severity": float(params.get("w_ns", 0.15)),
-            "economic_outlook": float(params.get("w_eo", 0.10)),
-            "guidance": float(params.get("w_g", 0.15)),
-            "technical_momentum": float(params.get("w_tm", 0.10)),
-            "institutional_buying": float(params.get("w_ib", 0.15)),
-        }
-
-        pricing_data["company_ids"].append(company.id)
-        pricing_data["y"].append(y)
-        pricing_data["theta"].append(theta)
-        pricing_data["driver_values"].append(driver_values)
-        pricing_data["driver_weights"].append(drv_weights)
-        pricing_data["beta_market"].append(beta_m)
-        pricing_data["beta_sector"].append(beta_s)
-        pricing_data["sector_factors"].append(s_factor)
-        pricing_data["sigma"].append(sigma_val)
-        pricing_data["epsilon"].append(epsilon)
-        pricing_data["intrinsic_value"].append(iv)
-
-    if not pricing_data["company_ids"]:
-        raise ValueError("No companies with valid pricing data")
-
-    # -- Step 8: run the tick -----------------------------------------------
-    tick_inputs = tuple(
-        CompanyTickInput(
-            company_id=cid, y=y, theta=th,
-            driver_values=dv, driver_weights=dw,
-            beta_market=bm, beta_sector=bs,
-            sector_factor_return=sf, sigma=sig,
-            epsilon=eps, intrinsic_value=iv,
-        )
-        for cid, y, th, dv, dw, bm, bs, sf, sig, eps, iv in zip(
-            pricing_data["company_ids"],
-            pricing_data["y"],
-            pricing_data["theta"],
-            pricing_data["driver_values"],
-            pricing_data["driver_weights"],
-            pricing_data["beta_market"],
-            pricing_data["beta_sector"],
-            pricing_data["sector_factors"],
-            pricing_data["sigma"],
-            pricing_data["epsilon"],
-            pricing_data["intrinsic_value"],
-        )
-    )
-
-    tick_state = TickState(
-        sim_day=tick_count,
-        market_factor_return=f_m,
-        companies=tick_inputs,
-    )
-    tick_result = engine_run_tick(tick_state)
-
-    # -- Step 9: circuit breaker + OHLC -------------------------------------
+    Returns (ohlc_results, volume_results, imbalance_results) keyed by company_id.
+    """
     r_cap = float(params.get("r_cap", 0.20))
 
     prev_prices: dict[int, float] = {}
@@ -420,7 +548,6 @@ def run_tick(session: Session, timeline_id: int) -> dict:
         free_float = float(company.free_float_pct) if company else 0.5
         mcap = float(company.market_cap or 1e9)
 
-        # PRD 6.L volume formula
         abs_return = abs(cb_price - prev_close) / max(prev_close, 0.01)
         ns_now = company_ns.get(cid, 0.0)
         ns_prev = prev_ns.get(cid, 0.0)
@@ -452,7 +579,21 @@ def run_tick(session: Session, timeline_id: int) -> dict:
         volume_results[cid] = vol
         imbalance_results[cid] = imb
 
-    # -- Steps 11-12: write DB rows -----------------------------------------
+    return ohlc_results, volume_results, imbalance_results
+
+
+def _write_tick_results(
+    session: Session,
+    timeline_id: int,
+    sim_date: date,
+    companies: list[Company],
+    tick_inputs: tuple[CompanyTickInput, ...],
+    tick_result: TickResult,
+    ohlc_results: dict[int, dict],
+    volume_results: dict[int, int],
+    imbalance_results: dict[int, float],
+) -> None:
+    """Write PriceHistory and PriceDriverScore rows for all companies."""
     for out in tick_result.outputs:
         cid = out.company_id
         ohlc = ohlc_results[cid]
@@ -488,25 +629,45 @@ def run_tick(session: Session, timeline_id: int) -> dict:
                 contribution=round(drv_w * drv_val / max(abs(total_pressure), 1e-10), 6),
             ))
 
+
+def _update_denormalized_fields(
+    companies: list[Company],
+    ohlc_results: dict[int, dict],
+    volume_results: dict[int, int],
+    tick_result: TickResult,
+) -> None:
+    """Update Company.current_price, .intrinsic_value, .market_cap, .market_liquidity_score."""
+    for out in tick_result.outputs:
+        cid = out.company_id
+        ohlc = ohlc_results[cid]
+        vol_val = volume_results[cid]
         company = next(c for c in companies if c.id == cid)
+        iv = float(company.intrinsic_value)
         company.current_price = round(ohlc["close"], 4)
         company.intrinsic_value = round(iv, 4)
         company.market_cap = round(ohlc["close"] * float(company.shares_outstanding), 2)
-        liq_score = market_liquidity_score(float(company.free_float_pct), vol_val, float(company.market_cap or 1e9))
+        liq_score = market_liquidity_score(
+            float(company.free_float_pct), vol_val, float(company.market_cap or 1e9),
+        )
         company.market_liquidity_score = round(liq_score, 4)
 
-    # -- Step 13: mark-to-market portfolios ---------------------------------
-    _mark_to_market(session, timeline_id, companies)
 
-    # -- Step 14: fire events + generate news -------------------------------
+def _execute_events(
+    session: Session,
+    timeline_id: int,
+    state: SimpleNamespace,
+    sim_date: date,
+    companies: list[Company],
+) -> None:
+    """Select and fire probabilistic events, generate news, apply factor score effects."""
     company_ids_list = [c.id for c in companies]
-    industry_ids_list = [ind.id for ind in industries.values()]
+    industry_ids_list = [ind.id for ind in state.industries.values()]
     fired_events = select_and_fire_events(
-        session, timeline_id, sim_date, rng, company_ids_list, industry_ids_list
+        session, timeline_id, sim_date, state.rng, company_ids_list, industry_ids_list,
     )
     for ev in fired_events:
         event_instances = session.query(EventInstance).filter_by(
-            event_id=ev.id, timeline_id=timeline_id, sim_date=sim_date
+            event_id=ev.id, timeline_id=timeline_id, sim_date=sim_date,
         ).all()
         for ei in event_instances:
             company_name = None
@@ -519,45 +680,13 @@ def run_tick(session: Session, timeline_id: int) -> dict:
                 ind = session.query(Industry).filter_by(id=ei.scope_ref).first()
                 if ind:
                     industry_name = ind.name
-            generate_news(session, timeline_id, sim_date, ei, rng,
+            generate_news(session, timeline_id, sim_date, ei, state.rng,
                           company_name=company_name, industry_name=industry_name)
 
-    # -- Structural events: apply factor score effects + IV recompute -------
     _apply_event_factor_effects(
-        session, companies, fired_events, sim_date, timeline_id, rng, params, now, industries,
+        session, companies, fired_events, sim_date, timeline_id,
+        state.rng, state.params, datetime.now(timezone.utc), state.industries,
     )
-
-    # -- Step 15: advance simulation state ----------------------------------
-    next_date = sim_date + timedelta(days=1)
-    sim_state.current_sim_date = next_date
-    sim_state.tick_count = tick_count + 1
-    sim_state.is_running = True
-
-    session.flush()
-
-    return {
-        "status": "completed",
-        "sim_date": sim_date,
-        "next_date": next_date,
-        "tick_count": tick_count + 1,
-        "companies_updated": len(tick_result.outputs),
-        "cycle_phase": cycle_phase,
-        "market_factor_return": f_m,
-    }
-
-
-def run_ticks(
-    session: Session,
-    timeline_id: int,
-    num_ticks: int = 1,
-) -> list[dict]:
-    """Run multiple ticks in sequence. Each tick is idempotent."""
-    results = []
-    for _ in range(num_ticks):
-        result = run_tick(session, timeline_id)
-        session.commit()
-        results.append(result)
-    return results
 
 
 def _load_params(session: Session) -> dict[str, float]:

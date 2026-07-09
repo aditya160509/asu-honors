@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from apps.api.config import settings
 from apps.api.database import get_db
 from apps.api.schemas import LeaderboardEntry
 from db.models import Company, Holding, Portfolio, User
@@ -18,8 +19,9 @@ router = APIRouter(prefix="/api/v1/leaderboard", tags=["Leaderboard"])
 
 @router.get("/", response_model=list[LeaderboardEntry])
 def get_leaderboard(
-    timeline_id: int = 1,
-    limit: int = 20,
+    timeline_id: int = Query(default=settings.default_timeline_id),
+    limit: int = Query(default=20, le=100),
+    offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
 ) -> list[LeaderboardEntry]:
     holdings_subq = (
@@ -56,7 +58,7 @@ def get_leaderboard(
         leaderboard.append((name, total_value, return_pct))
 
     leaderboard.sort(key=lambda r: r[1], reverse=True)
-    leaderboard = leaderboard[:limit]
+    leaderboard = leaderboard[offset:offset + limit]
 
     return [
         LeaderboardEntry(rank=i + 1, display_name=name, total_value=value, return_pct=pct)

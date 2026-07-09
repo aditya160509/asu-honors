@@ -7,6 +7,7 @@ import math
 import os
 import random
 from datetime import date, timedelta
+from typing import Optional
 
 import pytest
 from sqlalchemy import create_engine, event as sa_event
@@ -50,7 +51,7 @@ def session():
     engine.dispose()
 
 
-def _execute_batch(session: Session, stmt: str, params: list | None = None):
+def _execute_batch(session: Session, stmt: str, params: Optional[list] = None):
     """Execute raw SQL to bypass ORM ordering issues with SQLite FKs."""
     session.execute(text(stmt), params or {})
 

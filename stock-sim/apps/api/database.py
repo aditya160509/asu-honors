@@ -10,7 +10,16 @@ from apps.api.config import settings
 
 logger = logging.getLogger(__name__)
 
-engine = create_engine(settings.database_url, pool_size=10, max_overflow=20)
+connect_args = {}
+kwargs = {}
+if settings.database_url.startswith("sqlite"):
+    connect_args["check_same_thread"] = False
+    kwargs["poolclass"] = None  # singleton pool, SQLite default
+else:
+    kwargs["pool_size"] = 10
+    kwargs["max_overflow"] = 20
+
+engine = create_engine(settings.database_url, connect_args=connect_args, **kwargs)
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
 
