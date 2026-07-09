@@ -45,6 +45,11 @@ def get_leaderboard(
         .join(User, Portfolio.user_id == User.id)
         .outerjoin(holdings_subq, holdings_subq.c.pf_id == Portfolio.id)
         .filter(Portfolio.timeline_id == timeline_id)
+        .order_by(
+            (Portfolio.cash_balance + func.coalesce(holdings_subq.c.holdings_value, 0)).desc()
+        )
+        .offset(offset)
+        .limit(limit)
         .all()
     )
 
@@ -57,10 +62,7 @@ def get_leaderboard(
         return_pct = float((total_value - starting_cash) / starting_cash * 100) if starting_cash else 0.0
         leaderboard.append((name, total_value, return_pct))
 
-    leaderboard.sort(key=lambda r: r[1], reverse=True)
-    leaderboard = leaderboard[offset:offset + limit]
-
     return [
-        LeaderboardEntry(rank=i + 1, display_name=name, total_value=value, return_pct=pct)
+        LeaderboardEntry(rank=offset + i + 1, display_name=name, total_value=value, return_pct=pct)
         for i, (name, value, pct) in enumerate(leaderboard)
     ]

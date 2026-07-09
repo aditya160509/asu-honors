@@ -45,7 +45,10 @@ def compute_volume_prd(
     """Section 6.L — Volume = BaseFloatTurnover × (1 + a·|r| + b·|d_NS| + c·EarningsDayFlag) × LogNormalNoise.
 
     BaseFloatTurnover = market_cap * free_float_pct * turnover_rate.
-    Returns minimum 1000 shares. If max_volume is provided, the result is capped at that value (default: no cap).
+    The result is dollar turnover (not share count), used consistently for
+    liquidity scoring and market-impact calculations.
+    Returns minimum 1000. If max_volume is provided, the result is capped at
+    that value (default: no cap).
     """
     base = market_cap * free_float_pct * turnover_rate
     multiplier = 1.0 + coeff_return * abs_return + coeff_news * news_severity_delta

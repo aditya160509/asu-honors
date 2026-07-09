@@ -81,7 +81,7 @@ def get_market_grid(db: Session, timeline_id: int) -> MarketGridResponse:
         day_change_pct = None
         if current_price is not None:
             prev_close = prev_closes.get(company.id)
-            if prev_close:
+            if prev_close is not None:
                 day_change_pct = (float(current_price) - prev_close) / prev_close * 100.0
         items.append(
             CompanyGridItem(

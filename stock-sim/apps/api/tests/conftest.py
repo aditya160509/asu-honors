@@ -186,7 +186,7 @@ def base_config(test_db: Session) -> None:
         "w_g": "0.15",
         "w_tm": "0.10",
         "w_ib": "0.15",
-        "k_m": "0.5",
+        "k_m": "2.0",
         "liquidity_sensitivity": "0.5",
         "expected_annual_growth": "0.08",
         "rho_es": "0.15",

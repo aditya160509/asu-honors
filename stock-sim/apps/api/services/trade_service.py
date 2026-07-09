@@ -193,11 +193,15 @@ def get_portfolio_analytics(db: Session, user: User, timeline_id: int) -> Portfo
     holdings = db.query(Holding).filter_by(portfolio_id=portfolio.id).all()
     industries = {ind.id: ind.name for ind in db.query(Industry).all()}
 
+    ana_company_ids = {h.company_id for h in holdings}
+    ana_companies = {
+        c.id: c for c in db.query(Company).filter(Company.id.in_(ana_company_ids)).all()
+    } if ana_company_ids else {}
     holdings_value = Decimal(0)
     unrealized_pnl = Decimal(0)
     sector_values: dict[str, Decimal] = {}
     for h in holdings:
-        company = db.query(Company).filter_by(id=h.company_id).first()
+        company = ana_companies.get(h.company_id)
         if company is None or company.current_price is None:
             continue
         price = Decimal(str(company.current_price))

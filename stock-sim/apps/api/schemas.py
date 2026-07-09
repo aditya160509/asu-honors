@@ -138,7 +138,6 @@ class OrderRequest(BaseModel):
     ticker: str
     side: str
     quantity: int
-    order_type: str = "market"
     timeline_id: int = 1
 
     @field_validator("side")
@@ -213,6 +212,10 @@ class TransactionItem(BaseModel):
     quantity: int
     price: Decimal
     realized_pnl: Optional[Decimal] = None
+
+
+class WatchlistAddRequest(BaseModel):
+    company_id: int
 
 
 class WatchlistItem(BaseModel):

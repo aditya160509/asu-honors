@@ -344,6 +344,20 @@ def _load_tick_state(session: Session, timeline_id: int) -> SimpleNamespace:
         if bal.company_id not in latest_bal:
             latest_bal[bal.company_id] = bal
 
+    # Batch-load IncomeStatement and ConsensusEstimate so _compute_drivers
+    # does not issue N queries per company per tick.
+    all_inc = session.query(IncomeStatement).order_by(IncomeStatement.fiscal_period.desc()).all()
+    latest_inc: dict[int, IncomeStatement] = {}
+    for inc in all_inc:
+        if inc.company_id not in latest_inc:
+            latest_inc[inc.company_id] = inc
+
+    all_ce = session.query(ConsensusEstimate).order_by(ConsensusEstimate.fiscal_period.desc()).all()
+    latest_ce: dict[int, ConsensusEstimate] = {}
+    for ce in all_ce:
+        if ce.company_id not in latest_ce:
+            latest_ce[ce.company_id] = ce
+
     prev_ns: dict[int, float] = {}
     if tick_count > 0:
         prev_date = sim_date - timedelta(days=1)
@@ -371,6 +385,8 @@ def _load_tick_state(session: Session, timeline_id: int) -> SimpleNamespace:
         industry_ids=industry_ids,
         sector_shocks=sector_shocks,
         latest_bal=latest_bal,
+        latest_inc=latest_inc,
+        latest_ce=latest_ce,
         prev_ns=prev_ns,
         is_quarter_boundary=is_quarter_boundary,
     )
@@ -430,12 +446,8 @@ def _compute_drivers(
     tm = technical_momentum(prev_close, prev_close * 0.98, float(state.params.get("k_m", 0.5)))
     eo = compute_economic_outlook(state.cycle_state["market_sentiment"])
 
-    latest_inc = session.query(IncomeStatement).filter_by(
-        company_id=company.id
-    ).order_by(IncomeStatement.fiscal_period.desc()).first()
-    latest_ce = session.query(ConsensusEstimate).filter_by(
-        company_id=company.id
-    ).order_by(ConsensusEstimate.fiscal_period.desc()).first()
+    latest_inc = state.latest_inc.get(company.id)
+    latest_ce = state.latest_ce.get(company.id)
 
     es = 0.0
     if latest_inc and latest_ce:

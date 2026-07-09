@@ -79,3 +79,27 @@ def test_drift_iv_matches_daily_compounding_formula():
     result = val.drift_iv(iv, growth, days)
     expected = iv * (1 + growth) ** (1 / days)
     assert math.isclose(result, expected)
+
+
+def test_quality_multiplier_k_zero_returns_midpoint():
+    result = val.quality_multiplier(intrinsic_score=50, q_min=0.30, q_max=5.00, k=0, c=60)
+    assert math.isclose(result, (0.30 + 5.00) / 2)
+
+
+def test_quality_multiplier_k_negative_inverts_curve():
+    result = val.quality_multiplier(intrinsic_score=0, q_min=0.30, q_max=5.00, k=-0.12, c=60)
+    low_at_high = val.quality_multiplier(intrinsic_score=0, q_min=0.30, q_max=5.00, k=-0.12, c=60)
+    high_at_low = val.quality_multiplier(intrinsic_score=100, q_min=0.30, q_max=5.00, k=-0.12, c=60)
+    assert low_at_high > high_at_low
+
+
+def test_quality_multiplier_score_out_of_range():
+    result_neg = val.quality_multiplier(intrinsic_score=-50, q_min=0.30, q_max=5.00, k=0.12, c=60)
+    result_big = val.quality_multiplier(intrinsic_score=200, q_min=0.30, q_max=5.00, k=0.12, c=60)
+    assert result_neg >= 0.30
+    assert result_big <= 5.00
+
+
+def test_quality_multiplier_q_min_greater_than_q_max():
+    result = val.quality_multiplier(intrinsic_score=60, q_min=5.00, q_max=0.30, k=0.12, c=60)
+    assert math.isclose(result, (5.00 + 0.30) / 2)

@@ -17,6 +17,7 @@ from apps.api.schemas import (
     PortfolioAnalyticsResponse,
     PortfolioResponse,
     TransactionItem,
+    WatchlistAddRequest,
     WatchlistItem,
 )
 from apps.api.services.trade_service import get_portfolio_analytics, place_order
@@ -70,10 +71,14 @@ def get_portfolio(
         raise NotFoundError("Portfolio not found")
 
     holdings = db.query(Holding).filter_by(portfolio_id=portfolio.id).all()
+    company_ids = {h.company_id for h in holdings}
+    companies_map = {
+        c.id: c for c in db.query(Company).filter(Company.id.in_(company_ids)).all()
+    } if company_ids else {}
     holding_responses = []
     holdings_value = Decimal(0)
     for h in holdings:
-        company = db.query(Company).filter_by(id=h.company_id).first()
+        company = companies_map.get(h.company_id)
         if company is None:
             continue
         hr = _build_holding_response(h, company)
@@ -128,9 +133,13 @@ def get_transactions(
         .limit(limit)
         .all()
     )
+    txn_company_ids = {r.company_id for r in rows}
+    txn_companies = {
+        c.id: c for c in db.query(Company).filter(Company.id.in_(txn_company_ids)).all()
+    } if txn_company_ids else {}
     items = []
     for r in rows:
-        company = db.query(Company).filter_by(id=r.company_id).first()
+        company = txn_companies.get(r.company_id)
         items.append(
             TransactionItem(
                 id=r.id,
@@ -151,9 +160,13 @@ def get_watchlist(
     user: User = Depends(get_current_user),
 ) -> list[WatchlistItem]:
     rows = db.query(Watchlist).filter_by(user_id=user.id).all()
+    wl_company_ids = {r.company_id for r in rows}
+    wl_companies = {
+        c.id: c for c in db.query(Company).filter(Company.id.in_(wl_company_ids)).all()
+    } if wl_company_ids else {}
     items = []
     for r in rows:
-        company = db.query(Company).filter_by(id=r.company_id).first()
+        company = wl_companies.get(r.company_id)
         if company is None:
             continue
         items.append(WatchlistItem(company_id=company.id, ticker=company.ticker, name=company.name))
@@ -162,11 +175,11 @@ def get_watchlist(
 
 @router.post("/watchlist", response_model=WatchlistItem, status_code=status.HTTP_201_CREATED)
 def add_watchlist(
-    body: dict,
+    body: WatchlistAddRequest,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> WatchlistItem:
-    company_id = body.get("company_id")
+    company_id = body.company_id
     company = db.query(Company).filter_by(id=company_id).first()
     if company is None:
         raise NotFoundError("Company not found")

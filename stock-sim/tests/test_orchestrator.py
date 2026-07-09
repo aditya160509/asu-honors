@@ -85,7 +85,7 @@ def _seed_minimal(session: Session) -> int:
     session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('w_g', '0.15', 'global', datetime('now'), datetime('now'))"""))
     session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('w_tm', '0.10', 'global', datetime('now'), datetime('now'))"""))
     session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('w_ib', '0.15', 'global', datetime('now'), datetime('now'))"""))
-    session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('k_m', '0.5', 'global', datetime('now'), datetime('now'))"""))
+    session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('k_m', '2.0', 'global', datetime('now'), datetime('now'))"""))
     session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('liquidity_sensitivity', '0.5', 'global', datetime('now'), datetime('now'))"""))
     session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('expected_annual_growth', '0.08', 'global', datetime('now'), datetime('now'))"""))
     session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('rho_es', '0.15', 'global', datetime('now'), datetime('now'))"""))
