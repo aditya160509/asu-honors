@@ -18,11 +18,6 @@ class ConflictError(HTTPException):
         super().__init__(status_code=status.HTTP_409_CONFLICT, detail=detail)
 
 
-class ValidationError(HTTPException):
-    def __init__(self, detail: str = "Invalid input") -> None:
-        super().__init__(status_code=422, detail=detail)
-
-
 class InsufficientFundsError(HTTPException):
     def __init__(self, detail: str = "Insufficient cash") -> None:
         super().__init__(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
@@ -39,7 +34,7 @@ _ERROR_CODES: dict[int, str] = {
     status.HTTP_403_FORBIDDEN: "FORBIDDEN",
     status.HTTP_404_NOT_FOUND: "NOT_FOUND",
     status.HTTP_409_CONFLICT: "CONFLICT",
-    422: "VALIDATION_ERROR",
+    status.HTTP_422_UNPROCESSABLE_CONTENT: "VALIDATION_ERROR",
 }
 
 

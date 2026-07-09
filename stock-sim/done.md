@@ -1,7 +1,7 @@
 # Fictional Stock Market Simulation — Build Progress
 
 > Tracks status against the Master Prompt & PRD, phase by phase. Location of all code: `stock-sim/` inside this repo (`asu-honors`).
-> Last updated: 2026-07-07 (Phase 5 complete — FastAPI backend + fixes from code review).
+> Last updated: 2026-07-09 (Phase 5 complete — FastAPI backend + audit fixes).
 
 ---
 
@@ -133,7 +133,26 @@ All completed as seed data in Phase 3:
 - `unrealized_pnl_pct` guards near-zero (not just exactly-zero) `avg_cost_basis` to avoid absurd percentages from rounding drift.
 - `/market` batches the previous-close lookup into one query for all companies instead of one query per company (N+1 → 1).
 
-**Known gaps (documented, not blocking):** no row-level locking on concurrent order execution (a real TOCTOU risk on Postgres, not addressed — no live DB to test against in this environment); `/leaderboard` re-derives ranks in Python instead of querying the `leaderboard` materialized view from migration 0002; CORS is hardcoded `allow_origins=["*"]` (flagged by the plan itself as pre-prod hardening, not yet config-driven).
+**Audit fixes (2026-07-09, per `docs/phase5-audit.md`):**
+- ✅ CORS: `allow_credentials=False` (was `True` with `allow_origins=["*"]`, invalid per CORS spec)
+- ✅ Double `Depends(get_current_user)` removed from `trading.py` router-level deps (was 2× per request)
+- ✅ Timeline data leakage fixed: `list_timelines` filters by `owner_user_id` (includes global timelines)
+- ✅ Config leakage fixed: `list_config` accepts optional `scope_id` filter
+- ✅ Leaderboard N++1 eliminated: single join-based query instead of per-portfolio/per-holding queries
+- ✅ News N+1 eliminated: batch company/industry name lookups; null-severity crash fixed
+- ✅ `_prev_closes_by_company` rewritten: subquery with `func.max` instead of loading all rows into memory
+- ✅ `get_current_user_optional` catches `JWTError` directly instead of broad `HTTPException`
+- ✅ Database `get_db()` now rolls back on exception before closing
+- ✅ Unused `interval` param removed from `/history` endpoint
+- ✅ Lazy imports moved to top of `sim_service.py`
+- ✅ Dead `ValidationError` exception class removed
+- ✅ `PortfolioResponse.day_change_pct` computed (was hardcoded `None`)
+- ✅ Sell impact cap reduced to 50% (was 99%, allowing near-total price collapse)
+- ✅ Deprecation warning fixed (`HTTP_422_UNPROCESSABLE_ENTITY` → `UNPROCESSABLE_CONTENT`)
+
+**152 tests pass, zero warnings.**
+
+**Remaining known gaps:** no row-level locking for concurrent order execution (TOCTOU risk); `/leaderboard` derives ranks in Python instead of querying the materialized view; `/portfolio/analytics` endpoint not implemented (PRD requirement).
 
 ## Phase 6–10
 

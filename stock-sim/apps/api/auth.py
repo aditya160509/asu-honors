@@ -83,8 +83,8 @@ def get_current_user_optional(
     if credentials is None:
         return None
     try:
-        payload = _decode_token(credentials.credentials)
-    except HTTPException:
+        payload = jwt.decode(credentials.credentials, settings.secret_key, algorithms=[settings.algorithm])
+    except JWTError:
         return None
     user_id = payload.get("sub")
     if user_id is None:

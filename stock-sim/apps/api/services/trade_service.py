@@ -139,7 +139,8 @@ def place_order(db: Session, user: User, request: OrderRequest) -> OrderResponse
     # exceeds the current price; an unbounded impact would otherwise let the
     # order silently reset to the undiscounted price, defeating the impact
     # model entirely for large orders.
-    impact = min(impact, current_price * Decimal("0.99"))
+    max_impact = current_price * Decimal("0.50") if request.side == "sell" else current_price * Decimal("0.99")
+    impact = min(impact, max_impact)
     execution_price = current_price + (impact if request.side == "buy" else -impact)
 
     fee_rate = _get_fee_rate(db)

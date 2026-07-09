@@ -3,7 +3,7 @@
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
 from apps.api.auth import get_current_user, require_admin
@@ -61,9 +61,11 @@ def create_timeline(
 @router.get("/timelines", response_model=list[TimelineResponse])
 def list_timelines(
     db: Session = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ) -> list[Timeline]:
-    return db.query(Timeline).order_by(Timeline.id).all()
+    return db.query(Timeline).filter(
+        (Timeline.owner_user_id == user.id) | (Timeline.owner_user_id.is_(None))
+    ).order_by(Timeline.id).all()
 
 
 @router.get("/state", response_model=SimulationStateResponse)
@@ -118,7 +120,11 @@ def update_config(
 @router.get("/admin/config", response_model=list[ConfigParameterResponse])
 def list_config(
     scope: str = "global",
+    scope_id: Optional[int] = Query(default=None),
     db: Session = Depends(get_db),
     _admin: User = Depends(require_admin),
 ) -> list[ConfigParameter]:
-    return db.query(ConfigParameter).filter_by(scope=scope).all()
+    query = db.query(ConfigParameter).filter_by(scope=scope)
+    if scope_id is not None:
+        query = query.filter_by(scope_id=scope_id)
+    return query.all()

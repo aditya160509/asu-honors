@@ -33,16 +33,13 @@ def get_news(
 
     rows = query.order_by(NewsFeed.sim_date.desc(), NewsFeed.id.desc()).offset(offset).limit(limit).all()
 
+    company_ids = {r.company_id for r in rows if r.company_id}
+    industry_ids = {r.industry_id for r in rows if r.industry_id}
+    companies = {c.id: c.name for c in db.query(Company).filter(Company.id.in_(company_ids)).all()} if company_ids else {}
+    industries = {i.id: i.name for i in db.query(Industry).filter(Industry.id.in_(industry_ids)).all()} if industry_ids else {}
+
     items = []
     for r in rows:
-        company_name = None
-        industry_name = None
-        if r.company_id:
-            company = db.query(Company).filter_by(id=r.company_id).first()
-            company_name = company.name if company else None
-        if r.industry_id:
-            industry = db.query(Industry).filter_by(id=r.industry_id).first()
-            industry_name = industry.name if industry else None
         items.append(
             NewsItem(
                 id=r.id,
@@ -50,9 +47,9 @@ def get_news(
                 headline=r.headline,
                 body=r.body,
                 sentiment=r.sentiment,
-                severity=float(r.severity),
-                company_name=company_name,
-                industry_name=industry_name,
+                severity=float(r.severity) if r.severity is not None else 0.0,
+                company_name=companies.get(r.company_id) if r.company_id else None,
+                industry_name=industries.get(r.industry_id) if r.industry_id else None,
             )
         )
     return items

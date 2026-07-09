@@ -3,14 +3,14 @@
 import hashlib
 import logging
 import time
-from datetime import date
+from datetime import date, timedelta
 from typing import Optional
 
 from sqlalchemy.orm import Session
 
 from apps.api.exceptions import NotFoundError
 from apps.api.schemas import AdvanceResponse
-from db.models import ConfigParameter, EventInstance, SimulationState, Timeline
+from db.models import ConfigParameter, EventInstance, MarketEvent, SimulationState, Timeline
 from engine.orchestrator import run_ticks
 
 logger = logging.getLogger(__name__)
@@ -115,8 +115,6 @@ def inject_event(
     severity: Optional[float],
 ) -> EventInstance:
     """Create an EventInstance row with an optional severity override."""
-    from db.models import MarketEvent
-
     event = db.query(MarketEvent).filter_by(id=event_id).first()
     if event is None:
         raise NotFoundError(f"MarketEvent {event_id} not found")
@@ -142,8 +140,6 @@ def inject_event(
 
 
 def _add_days(d: date, days: int) -> date:
-    from datetime import timedelta
-
     return d + timedelta(days=days)
 
 

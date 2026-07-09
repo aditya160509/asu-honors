@@ -22,7 +22,7 @@ from db.models import Company, Holding, Portfolio, Transaction, User, Watchlist
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v1", tags=["Trading & Portfolio"], dependencies=[Depends(get_current_user)])
+router = APIRouter(prefix="/api/v1", tags=["Trading & Portfolio"])
 
 
 def _build_holding_response(holding: Holding, company: Company) -> HoldingResponse:
@@ -72,12 +72,17 @@ def get_portfolio(
     cash = Decimal(str(portfolio.cash_balance))
     total_value = cash + holdings_value
 
+    day_change_pct = None
+    if total_value > 0 and hasattr(portfolio, "total_value") and portfolio.total_value is not None:
+        prev_total = Decimal(str(portfolio.total_value))
+        day_change_pct = float((total_value - prev_total) / prev_total * 100) if prev_total > 0 else None
+
     return PortfolioResponse(
         id=portfolio.id,
         cash_balance=cash,
         total_value=total_value,
         holdings=holding_responses,
-        day_change_pct=None,
+        day_change_pct=day_change_pct,
     )
 
 

@@ -3,6 +3,7 @@
 from datetime import date
 from typing import Optional
 
+from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
 
 from apps.api.exceptions import NotFoundError
@@ -34,16 +35,27 @@ def _prev_closes_by_company(
     db: Session, timeline_id: int, sim_date: date,
 ) -> dict[int, float]:
     """One company's most recent close strictly before sim_date, batched for all companies."""
+    latest_subq = (
+        db.query(
+            PriceHistory.company_id,
+            func.max(PriceHistory.sim_date).label("max_date"),
+        )
+        .filter(PriceHistory.timeline_id == timeline_id, PriceHistory.sim_date < sim_date)
+        .group_by(PriceHistory.company_id)
+        .subquery()
+    )
     rows = (
         db.query(PriceHistory)
-        .filter(PriceHistory.timeline_id == timeline_id, PriceHistory.sim_date < sim_date)
-        .order_by(PriceHistory.company_id, PriceHistory.sim_date.desc())
+        .join(
+            latest_subq,
+            and_(
+                PriceHistory.company_id == latest_subq.c.company_id,
+                PriceHistory.sim_date == latest_subq.c.max_date,
+            ),
+        )
         .all()
     )
-    out: dict[int, float] = {}
-    for row in rows:
-        out.setdefault(row.company_id, float(row.close))
-    return out
+    return {r.company_id: float(r.close) for r in rows}
 
 
 def get_market_grid(db: Session, timeline_id: int) -> MarketGridResponse:

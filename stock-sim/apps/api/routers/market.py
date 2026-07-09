@@ -42,10 +42,9 @@ def get_company(ticker: str, timeline_id: int = 1, db: Session = Depends(get_db)
 @router.get("/companies/{ticker}/history", response_model=list[PriceHistoryItem])
 def get_company_history(
     ticker: str,
-    timeline_id: int = 1,
-    from_date: Optional[date] = Query(default=None),
-    to_date: Optional[date] = Query(default=None),
-    interval: str = Query(default="daily"),
+    timeline_id: int = Query(default=1, alias="timeline"),
+    from_date: Optional[date] = Query(default=None, alias="from"),
+    to_date: Optional[date] = Query(default=None, alias="to"),
     db: Session = Depends(get_db),
 ) -> list[PriceHistoryItem]:
     return market_service.get_price_history(db, ticker, timeline_id, from_date, to_date)

@@ -4,6 +4,7 @@ import logging
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from apps.api.database import get_db
@@ -21,31 +22,43 @@ def get_leaderboard(
     limit: int = 20,
     db: Session = Depends(get_db),
 ) -> list[LeaderboardEntry]:
-    portfolios = db.query(Portfolio).filter_by(timeline_id=timeline_id).all()
-    price_cache: dict[int, Decimal] = {}
+    holdings_subq = (
+        db.query(
+            Holding.portfolio_id.label("pf_id"),
+            func.sum(Holding.quantity * Company.current_price).label("holdings_value"),
+        )
+        .join(Company, Holding.company_id == Company.id)
+        .group_by(Holding.portfolio_id)
+        .subquery()
+    )
 
-    def _price(company_id: int) -> Decimal:
-        if company_id not in price_cache:
-            company = db.query(Company).filter_by(id=company_id).first()
-            price_cache[company_id] = Decimal(str(company.current_price)) if company and company.current_price else Decimal(0)
-        return price_cache[company_id]
+    rows = (
+        db.query(
+            User.display_name,
+            Portfolio.cash_balance,
+            holdings_subq.c.holdings_value,
+            User.starting_cash,
+        )
+        .select_from(Portfolio)
+        .join(User, Portfolio.user_id == User.id)
+        .outerjoin(holdings_subq, holdings_subq.c.pf_id == Portfolio.id)
+        .filter(Portfolio.timeline_id == timeline_id)
+        .all()
+    )
 
-    rows = []
-    for pf in portfolios:
-        user = db.query(User).filter_by(id=pf.user_id).first()
-        if user is None:
-            continue
-        holdings = db.query(Holding).filter_by(portfolio_id=pf.id).all()
-        holdings_value = sum((Decimal(str(h.quantity)) * _price(h.company_id) for h in holdings), Decimal(0))
-        total_value = Decimal(str(pf.cash_balance)) + holdings_value
-        starting_cash = Decimal(str(user.starting_cash)) if user.starting_cash else Decimal(1)
+    leaderboard = []
+    for name, cash, hval, start_cash in rows:
+        cash_dec = Decimal(str(cash)) if cash is not None else Decimal(0)
+        hval_dec = Decimal(str(hval)) if hval is not None else Decimal(0)
+        total_value = cash_dec + hval_dec
+        starting_cash = Decimal(str(start_cash)) if start_cash else Decimal(1)
         return_pct = float((total_value - starting_cash) / starting_cash * 100) if starting_cash else 0.0
-        rows.append((user.display_name, total_value, return_pct))
+        leaderboard.append((name, total_value, return_pct))
 
-    rows.sort(key=lambda r: r[1], reverse=True)
-    rows = rows[:limit]
+    leaderboard.sort(key=lambda r: r[1], reverse=True)
+    leaderboard = leaderboard[:limit]
 
     return [
         LeaderboardEntry(rank=i + 1, display_name=name, total_value=value, return_pct=pct)
-        for i, (name, value, pct) in enumerate(rows)
+        for i, (name, value, pct) in enumerate(leaderboard)
     ]
