@@ -4,17 +4,17 @@ from engine import valuation as val
 
 
 def test_quality_multiplier_at_inflection_is_midpoint():
-    result = val.quality_multiplier(intrinsic_score=60, q_min=0.6, q_max=2.0, k=0.11, c=60)
+    result = val.quality_multiplier(intrinsic_score=60, m_min=0.6, m_max=2.0, k=0.11, c=60)
     assert math.isclose(result, (0.6 + 2.0) / 2)
 
 
 def test_quality_multiplier_low_score_approaches_q_min():
-    result = val.quality_multiplier(intrinsic_score=0, q_min=0.6, q_max=2.0, k=0.11, c=60)
+    result = val.quality_multiplier(intrinsic_score=0, m_min=0.6, m_max=2.0, k=0.11, c=60)
     assert math.isclose(result, 0.6, abs_tol=0.05)
 
 
 def test_quality_multiplier_high_score_approaches_q_max():
-    result = val.quality_multiplier(intrinsic_score=100, q_min=0.6, q_max=2.0, k=0.11, c=60)
+    result = val.quality_multiplier(intrinsic_score=100, m_min=0.6, m_max=2.0, k=0.11, c=60)
     assert math.isclose(result, 2.0, abs_tol=0.15)
 
 
@@ -32,19 +32,19 @@ def test_quality_multiplier_default_params_match_spec_formula():
 
 
 def test_quality_multiplier_k_zero_returns_midpoint():
-    result = val.quality_multiplier(intrinsic_score=50, q_min=0.6, q_max=2.0, k=0, c=60)
+    result = val.quality_multiplier(intrinsic_score=50, m_min=0.6, m_max=2.0, k=0, c=60)
     assert math.isclose(result, (0.6 + 2.0) / 2)
 
 
 def test_quality_multiplier_k_negative_inverts_curve():
-    low_at_high = val.quality_multiplier(intrinsic_score=0, q_min=0.6, q_max=2.0, k=-0.11, c=60)
-    high_at_low = val.quality_multiplier(intrinsic_score=100, q_min=0.6, q_max=2.0, k=-0.11, c=60)
+    low_at_high = val.quality_multiplier(intrinsic_score=0, m_min=0.6, m_max=2.0, k=-0.11, c=60)
+    high_at_low = val.quality_multiplier(intrinsic_score=100, m_min=0.6, m_max=2.0, k=-0.11, c=60)
     assert low_at_high > high_at_low
 
 
 def test_quality_multiplier_score_out_of_range():
-    result_neg = val.quality_multiplier(intrinsic_score=-50, q_min=0.6, q_max=2.0, k=0.11, c=60)
-    result_big = val.quality_multiplier(intrinsic_score=200, q_min=0.6, q_max=2.0, k=0.11, c=60)
+    result_neg = val.quality_multiplier(intrinsic_score=-50, m_min=0.6, m_max=2.0, k=0.11, c=60)
+    result_big = val.quality_multiplier(intrinsic_score=200, m_min=0.6, m_max=2.0, k=0.11, c=60)
     assert result_neg >= 0.6
     assert result_big <= 2.0
 
@@ -93,7 +93,7 @@ def test_full_peg_pipeline_matches_manual_computation():
     growth_rate_pct = 15.0
     eps = 20.0
 
-    m = val.quality_multiplier(s, q_min=0.6, q_max=2.0, k=0.11, c=60)
+    m = val.quality_multiplier(s, m_min=0.6, m_max=2.0, k=0.11, c=60)
     expected_m = 0.6 + 1.4 / (1 + math.exp(-0.11 * (s - 60)))
     assert math.isclose(m, expected_m)
 

@@ -752,6 +752,10 @@ def test_multiple_companies_tick(session):
         "datetime('now'), datetime('now'))"
     ))
     session.execute(text(
+        "INSERT INTO config_parameters (key, value, scope, scope_id, created_at, updated_at) "
+        "VALUES ('neutral_industry_peg', '1.4', 'industry', 2, datetime('now'), datetime('now'))"
+    ))
+    session.execute(text(
         "INSERT INTO companies (id, name, ticker, industry_id, shares_outstanding, free_float_pct, "
         "beta_market, beta_sector, current_price, intrinsic_value, intrinsic_score, fair_pe, market_cap, "
         "volatility, market_liquidity_score, created_at, updated_at) "
@@ -974,6 +978,10 @@ def test_banking_sector_tick(session):
         "cycle_sensitivity, sector_beta_default, subfactor_set, created_at, updated_at) "
         "VALUES (3, 'Banking', 'Banking sector', 12.0, 6.0, 18.0, 15.0, 0.8, 0.6, 'financials', "
         "datetime('now'), datetime('now'))"
+    ))
+    session.execute(text(
+        "INSERT INTO config_parameters (key, value, scope, scope_id, created_at, updated_at) "
+        "VALUES ('neutral_industry_peg', '0.9', 'industry', 3, datetime('now'), datetime('now'))"
     ))
 
     # Banking company

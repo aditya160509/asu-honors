@@ -260,7 +260,6 @@ def seed(session: Session) -> None:
         growth = float(r["seed_cfs"].growth_potential)
         fcfq = float(r["seed_cfs"].fcf_quality)
         iscore = compute_intrinsic_score(mgmt, moat_val, fq, fcfq, growth)
-        ind = d["industries"][ind_id]
         neutral_peg = d["neutral_industry_pegs"].get(ind_id, 1.0)
         peg = fair_peg(neutral_peg, iscore, m_min, m_max, m_k, m_c)
         growth_rate_pct = growth_score_to_rate(growth, growth_rate_min, growth_rate_max)

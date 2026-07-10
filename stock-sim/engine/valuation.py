@@ -33,8 +33,8 @@ DEFAULT_GROWTH_RATE_MAX = 60.0
 
 def quality_multiplier(
     intrinsic_score: float,
-    q_min: float = DEFAULT_M_MIN,
-    q_max: float = DEFAULT_M_MAX,
+    m_min: float = DEFAULT_M_MIN,
+    m_max: float = DEFAULT_M_MAX,
     k: float = DEFAULT_M_STEEPNESS,
     c: float = DEFAULT_M_INFLECTION,
 ) -> float:
@@ -49,7 +49,7 @@ def quality_multiplier(
     [70,100] keeps earning a premium but at a decelerating rate (the market
     already prices it as high quality). Default range ~0.6-2.0.
     """
-    return q_min + (q_max - q_min) / (1.0 + math.exp(-k * (intrinsic_score - c)))
+    return m_min + (m_max - m_min) / (1.0 + math.exp(-k * (intrinsic_score - c)))
 
 
 def fair_peg(
