@@ -27,35 +27,26 @@ def test_quality_multiplier_is_monotonically_increasing():
 def test_fair_pe_matches_worked_example_from_spec():
     # Spec's worked example (Qmax=3.5 illustration): PE_industry=20,
     # IntrinsicScore=78 -> Q(S)~=2.8 -> FairPE~=56.
-    result = val.fair_pe(
-        pe0=20, intrinsic_score=78, pe_min=5, pe_max=100,
-        q_min=0.30, q_max=3.5, k=0.0707, c=60,
-    )
+    result = val.fair_pe(pe0=20, intrinsic_score=78, q_min=0.30, q_max=3.5, k=0.0707, c=60)
     assert math.isclose(result, 56.0, abs_tol=1.0)
 
 
 def test_fair_pe_at_inflection_is_pe0_times_midpoint_multiplier():
-    result = val.fair_pe(
-        pe0=20, intrinsic_score=60, pe_min=1, pe_max=200,
-        q_min=0.30, q_max=5.00, k=0.12, c=60,
-    )
+    result = val.fair_pe(pe0=20, intrinsic_score=60, q_min=0.30, q_max=5.00, k=0.12, c=60)
     assert math.isclose(result, 20 * (0.30 + 5.00) / 2)
 
 
-def test_fair_pe_clamped_to_max():
-    result = val.fair_pe(
-        pe0=20, intrinsic_score=100, pe_min=5, pe_max=40,
-        q_min=0.30, q_max=5.00, k=0.12, c=60,
-    )
-    assert result == 40
+def test_fair_pe_has_no_separate_clamp_bounded_only_by_q_max():
+    # No pe_min/pe_max clamp anymore: FairPE at IntrinsicScore=100 is bounded
+    # by pe0 * q_max, not by any external clamp.
+    result = val.fair_pe(pe0=20, intrinsic_score=100, q_min=0.30, q_max=5.00, k=0.12, c=60)
+    assert result < 20 * 5.00
+    assert result > 20 * 4.0
 
 
-def test_fair_pe_clamped_to_min():
-    result = val.fair_pe(
-        pe0=20, intrinsic_score=0, pe_min=15, pe_max=40,
-        q_min=0.30, q_max=5.00, k=0.12, c=60,
-    )
-    assert result == 15
+def test_fair_pe_at_zero_score_bounded_by_q_min():
+    result = val.fair_pe(pe0=20, intrinsic_score=0, q_min=0.30, q_max=5.00, k=0.12, c=60)
+    assert math.isclose(result, 20 * 0.30, abs_tol=0.5)
 
 
 def test_intrinsic_value_per_share():

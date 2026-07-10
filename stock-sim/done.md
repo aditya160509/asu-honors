@@ -1,7 +1,7 @@
 # Fictional Stock Market Simulation — Build Progress
 
 > Tracks status against the Master Prompt & PRD, phase by phase. Location of all code: `stock-sim/` inside this repo (`asu-honors`).
-> Last updated: 2026-07-09 (Phase 5 complete — FastAPI backend + audit fixes).
+> Last updated: 2026-07-10 (valuation clamp-removal fix reconciled with upstream Phase 5 audit-fix round; 300 tests pass).
 
 ---
 
@@ -12,11 +12,11 @@
 | 1 | Simulation Rulebook (design) | ✅ Done |
 | 2 | Fictional Economy (150 companies, 15 industries, events, news) | ✅ Done |
 | 3 | Database (schema + migrations + seed data) | ✅ Done |
-| 4 | Simulation Engine (Python/NumPy) | ✅ Done — full DB-to-engine orchestration loop, economic cycle, OHLC, events/news, PRD 6.L volume (LogNormalNoise/EarningsDayFlag), dynamic volatility recompute (σ_i = σ_ind×f_size×f_lev), structural events modify factor scores + IV recompute, 113 tests |
-| 5 | Backend APIs (FastAPI) | ✅ Done — 22 endpoints across auth/market/trading/simulation/news/leaderboard, JWT + bcrypt, order execution with Kyle-lambda impact, 152 tests (113 engine + 39 API) |
-| 6 | Basic Frontend (Next.js) | ⬜ Not started |
+| 4 | Simulation Engine (Python/NumPy) | ✅ Done — full DB-to-engine orchestration loop, economic cycle, OHLC, events/news, PRD 6.L volume (LogNormalNoise/EarningsDayFlag), dynamic volatility recompute (σ_i = σ_ind×f_size×f_lev), structural events modify factor scores + IV recompute |
+| 5 | Backend APIs (FastAPI) | ✅ Done — 23 endpoints across auth/market/trading/simulation/news/leaderboard/health, JWT + bcrypt, rate limiting, order execution with Kyle-lambda impact, `/portfolio/analytics` |
+| 6 | Basic Frontend (Next.js) | ⬜ Not started (plan drafted: `docs/phase6-plan.md`) |
 | 7–9 | Feature build-out (analytics, events UI, news feed, Future Lab, notifications, polish) | ⬜ Not started |
-| 10 | Testing & Deployment | 🟡 Partial — engine + orchestrator + API tests exist (152 pass), no E2E/frontend tests, not deployed |
+| 10 | Testing & Deployment | 🟡 Partial — **300 tests pass** (engine + orchestrator + API, 100% coverage per upstream's `06558eb`), no E2E/frontend tests, not deployed |
 
 ---
 
@@ -120,22 +120,34 @@ All completed as seed data in Phase 3:
 
 ## Valuation Formula Revision — Logistic Quality Multiplier ✅
 
-**2026-07-09.** Section 6.D (Fair PE) replaced: the old two-term `β_PE`/`β_G` quality-and-growth tilt is gone, replaced by a single **logistic quality multiplier** `Q(S)` applied to the industry baseline PE:
+**2026-07-09.** Section 6.D (Fair PE) replaced: the old two-term `β_PE`/`β_G` quality-and-growth tilt is gone, replaced by a single **logistic quality multiplier** `Q(S)` applied to the industry's average PE:
 
 ```
 Q(S) = Q_min + (Q_max − Q_min) / (1 + e^(−k·(S − c)))
-FairPE = clamp(PE_industry × Q(S), PE_min, PE_max)
+FairPE = PE_industry × Q(S)
 ```
 
 `S` is `IntrinsicScore` (already combines management quality, MOAT, financial quality, FCF quality, and growth potential — so growth is inside `S`, not a separate multiplier term). Encodes diminishing marginal valuation: quality gains near the bottom or top of the 0–100 scale barely move the multiplier; gains crossing the inflection point `c` (default 60) drive rapid re-rating.
 
 **Config parameters:** `quality_mult_min` (0.30), `quality_mult_max` (5.00), `quality_mult_k` (0.12), `quality_mult_inflection` (60) — replace the removed `beta_pe`/`beta_g` keys.
 
-**Files changed:** `engine/valuation.py` (new `quality_multiplier()`, `fair_pe()` signature changed — drops `growth_score`/`beta_pe`/`beta_g`, adds `q_min`/`q_max`/`k`/`c`), `db/seeds/seed_config.py`, `db/seeds/seed_initial_prices.py`, `engine/orchestrator.py` (both call sites — the initial fake-quarter generator and the structural-event IV recompute path), `tests/test_valuation.py` (rewritten), `tests/test_orchestrator.py` + `apps/api/tests/conftest.py` (fixture config keys updated), `project.md` Section 6.D.
+### Follow-up fix (2026-07-09/10) — removed the `pe_min`/`pe_max` clamp entirely
 
-**Design note carried over from the spec, not yet implemented:** `PE_industry` should ideally be the industry's median (or cycle-normalized median) P/E rather than the current static per-industry seed constant, so a few richly-valued outliers don't skew the baseline. Left as a documented future enhancement — no dynamic cross-sectional PE computation exists yet.
+A dry-run with hand-picked sample companies (`docs/valuation_dry_run.py`) surfaced a real calibration bug: the seeded `industries.pe_min`/`pe_max` clamps (e.g. IT: 10–60, Banking: 5–20) were sized for the *old* formula's much narrower multiplier band (≈0.4×–1.6× baseline PE). With the new `Q_max=5.00`, every industry's `pe_max` ceiling started biting around `IntrinsicScore≈60` — a company scoring 60 and one scoring 100 landed on the *identical* clamped FairPE, collapsing all differentiation across the top 40% of the score range and defeating the entire point of the logistic curve.
 
-**159/159 tests pass** (152 prior + 7 new/revised valuation tests) after the change.
+**Fix:** removed the `pe_min`/`pe_max` clamp from `fair_pe()` entirely. `Q(S)` is already bounded to `[Q_min, Q_max]` by construction, so `FairPE` is already bounded to `[PE_industry × Q_min, PE_industry × Q_max]` without a second clamp. `PE_industry` (`industries.baseline_pe`) is treated as the industry's average PE. The `industries.pe_min`/`pe_max` columns remain in the schema (unused by `fair_pe` now) in case a future revision needs an external ceiling independent of `Q_max`.
+
+**Files changed:** `engine/valuation.py` (`fair_pe()` signature — dropped `growth_score`/`beta_pe`/`beta_g`/`pe_min`/`pe_max`, added `q_min`/`q_max`/`k`/`c`; new `quality_multiplier()`), `db/seeds/seed_config.py`, `db/seeds/seed_initial_prices.py`, `engine/orchestrator.py` (both call sites — the initial fake-quarter generator and the structural-event IV recompute path), `tests/test_valuation.py` (rewritten), `project.md` Section 6.D, `docs/valuation_dry_run.py` (new — standalone sample-company dry-run + real-world Reliance Industries sanity check).
+
+### Reconciliation note (2026-07-10)
+
+This valuation change was developed in parallel with an independent round of Phase 5 audit fixes pushed upstream (commits `068b1a0`, `c1a1809`, `06558eb`, `e78b644` — N+1 fixes, `secret_key` now required via env, `orchestrator.py` refactored into 7 helper functions, rate limiter, `/health` endpoint, `/portfolio/analytics`, 300 tests at 100% coverage). Reconciled by reapplying the `fair_pe` clamp-removal fix on top of the upstream refactor (call sites moved to new line numbers but same 3 locations) rather than force-pushing over it. Also reapplied 2 of my earlier Phase 5 audit fixes that upstream hadn't touched: a `lifespan` shutdown hook disposing the DB engine (`apps/api/main.py`), and removal of the unused `redis_url` config field (`apps/api/config.py`). Did **not** reapply my earlier commit-vs-flush "fix" — on inspection, upstream's flush-in-service/commit-in-router split is a deliberate, consistently-applied architectural choice (per `c1a1809`'s commit message), not a bug.
+
+**Dry-run verification** (`docs/valuation_dry_run.py`, hand-picked sample values, no DB): confirmed monotonicity, the midpoint property (`Q(60) = (Q_min+Q_max)/2 = 2.65`), and the diminishing-marginal-valuation shape (equal-sized score jumps produce far larger `Q` deltas through the 50–60 middle band than at the 0–20 or 90–100 extremes).
+
+**Real-world sanity check — Reliance Industries Ltd (NSE: RELIANCE):** dry-run with approximate real EPS (~₹98) and a blended industry PE (~18x, weighted across Reliance's O2C/retail/telecom segments) against hand-estimated quality inputs (mgmt=78, moat=82, fq=62, fcfq=58, growth=70) produced **FairPE≈74x — roughly 3× too high** versus Reliance's actual historical trading range (~22–28x). Solving backward, an `IntrinsicScore≈50` (not ≈72) is what reproduces the real multiple at the default `k=0.12`/`c=60`. **Honest conclusion:** the `Q(S)` formula itself behaves correctly (monotonic, properly bounded, correct diminishing-marginal-valuation shape) — the gap is that the qualitative 0–100 score inputs (management/moat/financial-quality/FCF/growth judgments) have not been calibrated against real market multiples. Seeded company scores in this simulation are synthetic placeholders, not fitted to observed market data; that calibration is a documented open task, not yet done.
+
+**300/300 tests pass** after reconciliation (`SECRET_KEY` env var now required for tests per upstream's security fix — see `apps/api/config.py`).
 
 ## Phase 5 — Backend APIs ✅
 

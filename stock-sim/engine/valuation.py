@@ -30,21 +30,27 @@ def quality_multiplier(
 def fair_pe(
     pe0: float,
     intrinsic_score: float,
-    pe_min: float,
-    pe_max: float,
     q_min: float = DEFAULT_Q_MIN,
     q_max: float = DEFAULT_Q_MAX,
     k: float = DEFAULT_Q_STEEPNESS,
     c: float = DEFAULT_Q_INFLECTION,
 ) -> float:
-    """Section 6.D — Fair PE = PE_industry * Q(IntrinsicScore), clamped to [pe_min, pe_max].
+    """Section 6.D — Fair PE = PE_industry (average) * Q(IntrinsicScore).
 
-    PE_industry should be the industry's median (or cycle-normalized median)
-    P/E per the design note in the spec, to avoid a few richly-valued
-    outliers skewing the baseline every company is measured against.
+    No separate pe_min/pe_max clamp: Q(S) is itself bounded to [q_min, q_max]
+    by construction, so FairPE is already bounded to
+    [pe0 * q_min, pe0 * q_max] without a second clamp. (An earlier version
+    clamped to per-industry pe_min/pe_max ranges that were sized for the old
+    additive/multiplicative formula's much narrower multiplier band; those
+    ranges made the pe_max ceiling bite around IntrinsicScore~=60 for every
+    industry, collapsing all higher scores to an identical FairPE and
+    defeating the logistic curve's whole point for the top ~40% of the
+    score range. Removed 2026-07-09 — see done.md.)
+
+    PE_industry should be the industry's simple average P/E across its
+    member companies (not a static per-industry constant), per the spec.
     """
-    raw = pe0 * quality_multiplier(intrinsic_score, q_min, q_max, k, c)
-    return max(pe_min, min(pe_max, raw))
+    return pe0 * quality_multiplier(intrinsic_score, q_min, q_max, k, c)
 
 
 def intrinsic_value_per_share(fair_pe: float, eps: float) -> float:

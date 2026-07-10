@@ -783,7 +783,6 @@ def _refresh_fundamentals(
 
         fpe = fair_pe(
             float(ind.baseline_pe), iscore,
-            float(ind.pe_min), float(ind.pe_max),
             q_min, q_max, q_k, q_c,
         )
         eps_val = float(r["raw"].get("eps", 0.0))
@@ -1167,10 +1166,8 @@ def _apply_event_factor_effects(
                 event_q_k = float(params.get("quality_mult_k", DEFAULT_Q_STEEPNESS))
                 event_q_c = float(params.get("quality_mult_inflection", DEFAULT_Q_INFLECTION))
                 baseline_pe = float(ind.baseline_pe) if ind else 15.0
-                pe_min = float(ind.pe_min) if ind else 8.0
-                pe_max = float(ind.pe_max) if ind else 25.0
                 fpe = fair_pe(
-                    baseline_pe, iscore, pe_min, pe_max,
+                    baseline_pe, iscore,
                     event_q_min, event_q_max, event_q_k, event_q_c,
                 )
 

@@ -1,16 +1,25 @@
 """FastAPI application entry point — registers routers, middleware, exception handlers."""
 
 import logging
+from contextlib import asynccontextmanager
+from typing import AsyncIterator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from apps.api.database import engine as db_engine
 from apps.api.exceptions import add_exception_handlers
 from apps.api.rate_limiter import InMemoryRateLimiter
 from apps.api.routers import auth, health, leaderboard, market, news, simulation, trading
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    yield
+    db_engine.dispose()
 
 
 def create_app() -> FastAPI:
@@ -20,6 +29,7 @@ def create_app() -> FastAPI:
         version="0.1.0",
         docs_url="/docs",
         redoc_url="/redoc",
+        lifespan=_lifespan,
     )
 
     application.add_middleware(

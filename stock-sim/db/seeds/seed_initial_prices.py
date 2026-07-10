@@ -250,7 +250,6 @@ def seed(session: Session) -> None:
         ind = d["industries"][ind_id]
         fpe = fair_pe(
             float(ind.baseline_pe), iscore,
-            float(ind.pe_min), float(ind.pe_max),
             q_min, q_max, q_k, q_c,
         )
         eps_val = float(inc.eps) if inc else 0.0

@@ -263,8 +263,9 @@ IntrinsicScore_i = 0.25·Mgmt_i + 0.25·MOAT_i + 0.20·FQ_i + 0.10·FCFQ_i + 0.2
 ```
 Q(S) = Q_min + (Q_max − Q_min) / (1 + e^(−k·(S − c)))
 FairPE_i = PE0_{ind} × Q(IntrinsicScore_i)
-FairPE_i = clamp(FairPE_i, PE_min_ind, PE_max_ind)
 ```
+
+**No separate `pe_min`/`pe_max` clamp (revised 2026-07-09).** `Q(S)` is already bounded to `[Q_min, Q_max]` by construction, so `FairPE_i` is already bounded to `[PE0_ind × Q_min, PE0_ind × Q_max]` without a second clamp. An earlier revision clamped to per-industry `pe_min`/`pe_max` ranges that had been sized for the old additive/multiplicative formula's much narrower multiplier band (≈0.4×–1.6×); with `Q_max=5.00` those old ranges made the `pe_max` ceiling bite around `IntrinsicScore≈60` for *every* industry, collapsing all higher scores to an identical FairPE and defeating the logistic curve's whole point for the top ~40% of the score range. The `industries.pe_min`/`pe_max` columns remain in the schema (unused by `fair_pe` now) in case a future revision needs a hard external ceiling independent of `Q_max`.
 
 - `Q_min` (default 0.30) — the multiplier floor: even the worst business retains ~30% of the industry baseline valuation.
 - `Q_max` (default 5.00) — the multiplier ceiling: even a perfect business is capped, since investors won't pay unboundedly more for incremental quality once it's already excellent.
@@ -273,7 +274,7 @@ FairPE_i = clamp(FairPE_i, PE_min_ind, PE_max_ind)
 
 **Why logistic, not linear:** real markets exhibit diminishing marginal valuation — moving from 95 to 100 isn't nearly as valuable as moving from 55 to 65, because the latter often crosses the threshold into a category of business investors are willing to pay a structural premium for. A linear multiplier rewards every point equally; the logistic shape captures the actual S-curve of how quality re-rates a business (flat near the bottom, steep through the middle, flattening again near the top).
 
-`PE0_ind` (the industry baseline) should ideally be the industry's **median** P/E (or a cycle-normalized median) rather than a simple mean, so a handful of richly-valued outliers don't skew the baseline every company in that industry is measured against. The current schema stores `PE0_ind` as a static per-industry seed constant (`industries.baseline_pe`); computing it dynamically from a live company universe is a future enhancement, not required by this revision.
+`PE0_ind` (the industry baseline) is the industry's **average** P/E — currently a seeded per-industry constant (`industries.baseline_pe`); a future revision could instead compute it dynamically (mean or median) from the live company universe, and a median (or cycle-normalized median) would be more robust against a handful of richly-valued outliers skewing the baseline, per the spec's design note — neither is required by this revision.
 
 **Generalizes beyond P/E** — the same `Q(S)` architecture applies to any fair-valuation metric: `Intrinsic Value = Book Value × (Industry P/B × Q(S))` for banks, `Enterprise Value = Revenue × (Industry EV/Sales × Q(S))` for SaaS, `Enterprise Value = EBITDA × (Industry EV/EBITDA × Q(S))` for hotels/chemicals. Only the P/E-based path is implemented so far.
 
