@@ -178,6 +178,10 @@ COMPANIES = [
     (15, "Hologram Gaming Corp", "HGC", 200_000_000, 0.60, 1.5, 1.4),
     (15, "NewsWire Today", "NWT", 90_000_000, 0.45, 0.8, 0.9),
     (15, "BrightSky Broadcasting", "BSB", 250_000_000, 0.65, 0.9, 1.0),
+    # ── Outlier companies (IDs 151-153) — extreme archetypes ──────────
+    (1,  "Nova Credit Distressed", "NCD", 80_000_000, 0.30, 2.0, 1.5),   # near-insolvent bank
+    (2,  "Blaze Growth Tech",      "BGT", 50_000_000, 0.25, 2.5, 2.0),   # loss-making hypergrowth
+    (4,  "Fortress Capital",       "FTC", 600_000_000, 0.90, 0.3, 0.4),  # cash-rich zero-debt compounder
 ]
 
 MOAT_KEYS = [
@@ -294,6 +298,51 @@ def seed(session: Session) -> None:
                 fair_pe=0,
                 intrinsic_value=0,
                 computed_at=now,
+            ))
+
+    # ── Outlier company score overrides (IDs 151-153) ──────────────────
+    OUTLIER_OVERRIDES = {
+        151: {
+            "moat": {"brand_strength": 8, "customer_loyalty": 12, "cost_advantage": 5,
+                     "network_effects": 3, "intangibles": 10, "innovation": 5,
+                     "competitive_intensity": 85, "geographic_diversification": 15,
+                     "market_share": 5},
+            "factor": {"management_quality": 10, "moat_score": 0, "financial_quality": 15,
+                       "fcf_quality": 20, "growth_potential": 5},
+        },
+        152: {
+            "moat": {"brand_strength": 40, "customer_loyalty": 35, "cost_advantage": 10,
+                     "network_effects": 70, "intangibles": 30, "innovation": 95,
+                     "competitive_intensity": 80, "geographic_diversification": 25,
+                     "market_share": 15},
+            "factor": {"management_quality": 50, "moat_score": 0, "financial_quality": 15,
+                       "fcf_quality": 10, "growth_potential": 95},
+        },
+        153: {
+            "moat": {"brand_strength": 92, "customer_loyalty": 95, "cost_advantage": 85,
+                     "network_effects": 50, "intangibles": 60, "innovation": 70,
+                     "competitive_intensity": 20, "geographic_diversification": 80,
+                     "market_share": 85},
+            "factor": {"management_quality": 92, "moat_score": 0, "financial_quality": 95,
+                       "fcf_quality": 95, "growth_potential": 50},
+        },
+    }
+    for cid, overrides in OUTLIER_OVERRIDES.items():
+        for key, val in overrides["moat"].items():
+            existing = session.query(MoatSubscore).filter_by(company_id=cid, subfactor_key=key).first()
+            if existing:
+                existing.score = val
+            else:
+                session.add(MoatSubscore(company_id=cid, subfactor_key=key, score=val))
+        existing_cfs = session.query(CompanyFactorScore).filter_by(company_id=cid, fiscal_period="SEED").first()
+        if existing_cfs:
+            for k, v in overrides["factor"].items():
+                setattr(existing_cfs, k, v)
+        else:
+            session.add(CompanyFactorScore(
+                company_id=cid, fiscal_period="SEED", computed_at=now,
+                intrinsic_score=0, fair_pe=0, intrinsic_value=0,
+                **overrides["factor"],
             ))
 
 
