@@ -34,21 +34,21 @@ NEUTRAL_INDUSTRY_PEGS = {
 
 
 INDUSTRIES = [
-    ("Banking & Financial Services", "Banks, NBFCs, insurance, and other financial intermediaries", 12, 5, 20, 0.25, 0.8, 1.0, "financials"),
-    ("Information Technology / Software", "Software, IT services, and technology platforms", 30, 10, 60, 0.40, 0.6, 1.1, "standard"),
-    ("Pharmaceuticals & Healthcare", "Drug manufacturers, biotech, and healthcare services", 25, 8, 45, 0.30, 0.2, 0.8, "standard"),
-    ("FMCG / Consumer Staples", "Fast-moving consumer goods with steady demand across cycles", 22, 10, 40, 0.18, 0.3, 0.6, "standard"),
-    ("Automobiles & Auto Components", "Vehicle manufacturers and auto-part suppliers", 14, 5, 25, 0.30, 0.9, 1.2, "standard"),
-    ("Energy (Oil & Gas)", "Upstream, midstream, and downstream oil and gas operations", 10, 4, 20, 0.32, 0.7, 1.3, "standard"),
-    ("Utilities (Power/Gas/Water)", "Essential utility services with regulated returns", 15, 8, 25, 0.16, 0.2, 0.5, "standard"),
-    ("Metals & Mining", "Extraction and processing of metals and minerals", 11, 4, 22, 0.35, 0.8, 1.4, "standard"),
-    ("Construction & Infrastructure", "Engineering, construction, and infrastructure development", 13, 5, 24, 0.25, 0.9, 1.2, "standard"),
-    ("Real Estate", "Property development, REITs, and real estate services", 16, 6, 30, 0.28, 0.8, 1.1, "standard"),
-    ("Telecommunications", "Telecom operators, tower companies, and communication services", 14, 6, 28, 0.22, 0.4, 0.9, "standard"),
-    ("Retail & E-commerce", "Brick-and-mortar retail and online commerce platforms", 24, 8, 50, 0.28, 0.6, 1.0, "standard"),
-    ("Industrials & Capital Goods", "Industrial machinery, equipment, and capital goods manufacturing", 17, 7, 32, 0.24, 0.7, 1.1, "standard"),
-    ("Chemicals", "Specialty and commodity chemical production", 16, 6, 30, 0.26, 0.6, 1.0, "standard"),
-    ("Media & Entertainment", "Broadcasting, publishing, streaming, and entertainment content", 20, 7, 40, 0.32, 0.5, 0.9, "standard"),
+    ("Banking & Financial Services", "Banks, NBFCs, insurance, and other financial intermediaries", 0.25, 0.8, 1.0, "financials"),
+    ("Information Technology / Software", "Software, IT services, and technology platforms", 0.40, 0.6, 1.1, "standard"),
+    ("Pharmaceuticals & Healthcare", "Drug manufacturers, biotech, and healthcare services", 0.30, 0.2, 0.8, "standard"),
+    ("FMCG / Consumer Staples", "Fast-moving consumer goods with steady demand across cycles", 0.18, 0.3, 0.6, "standard"),
+    ("Automobiles & Auto Components", "Vehicle manufacturers and auto-part suppliers", 0.30, 0.9, 1.2, "standard"),
+    ("Energy (Oil & Gas)", "Upstream, midstream, and downstream oil and gas operations", 0.32, 0.7, 1.3, "standard"),
+    ("Utilities (Power/Gas/Water)", "Essential utility services with regulated returns", 0.16, 0.2, 0.5, "standard"),
+    ("Metals & Mining", "Extraction and processing of metals and minerals", 0.35, 0.8, 1.4, "standard"),
+    ("Construction & Infrastructure", "Engineering, construction, and infrastructure development", 0.25, 0.9, 1.2, "standard"),
+    ("Real Estate", "Property development, REITs, and real estate services", 0.28, 0.8, 1.1, "standard"),
+    ("Telecommunications", "Telecom operators, tower companies, and communication services", 0.22, 0.4, 0.9, "standard"),
+    ("Retail & E-commerce", "Brick-and-mortar retail and online commerce platforms", 0.28, 0.6, 1.0, "standard"),
+    ("Industrials & Capital Goods", "Industrial machinery, equipment, and capital goods manufacturing", 0.24, 0.7, 1.1, "standard"),
+    ("Chemicals", "Specialty and commodity chemical production", 0.26, 0.6, 1.0, "standard"),
+    ("Media & Entertainment", "Broadcasting, publishing, streaming, and entertainment content", 0.32, 0.5, 0.9, "standard"),
 ]
 
 PILLAR_WEIGHTS = [
@@ -183,16 +183,13 @@ validate_pillar_weights()
 
 def seed(session: Session) -> None:
     for i, ind in enumerate(INDUSTRIES, start=1):
-        name, desc, bpe, pmin, pmax, bvol, csens, sbeta, sset = ind
+        name, desc, bvol, csens, sbeta, sset = ind
         existing = session.get(Industry, i)
         if existing is None:
             session.add(Industry(
                 id=i,
                 name=name,
                 description=desc,
-                baseline_pe=bpe,
-                pe_min=pmin,
-                pe_max=pmax,
                 base_volatility=bvol,
                 cycle_sensitivity=csens,
                 sector_beta_default=sbeta,

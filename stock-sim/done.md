@@ -248,6 +248,21 @@ Financial Quality Score S (0-100, = IntrinsicScore)
 
 **Test suite:** 313 tests pass (308 pre-existing + 5 new regression tests targeting the correctness fixes above).
 
+## Deep Code Review — Phase C: Drop Unused Industry PE Columns ✅
+
+**2026-07-11.** Dropped `Industry.baseline_pe`/`pe_min`/`pe_max` — leftover from the pre-PEG `PE0_ind` clamp-based valuation formula (superseded by `NeutralIndustryPEG`/`neutral_industry_peg` config rows, Section 6.D). Confirmed via full-repo grep that these three columns were never read anywhere in `engine/` or `apps/api/` — only written by `seed_industries.py` and required by the `nullable=False` schema in test fixtures, with zero actual computation depending on them.
+
+**Changes:**
+- `db/models/reference.py` — removed the three columns and the now-vacuous `ck_industries_pe_bounds` check constraint from `Industry`.
+- `db/migrations/versions/0005_drop_industry_pe_columns.py` — new migration (`0004 -> 0005`) dropping the constraint and columns; `downgrade()` restores them with sane server defaults for reversibility.
+- `db/seeds/seed_industries.py` — removed the three fields from each of the 15 `INDUSTRIES` tuples and the `seed()` unpacking/construction code.
+- `apps/api/tests/conftest.py`, `tests/test_orchestrator.py` — removed the now-invalid column references from the `test_industry` fixture and the three raw-SQL `INSERT INTO industries` statements.
+- `project.md` Section 7.2 — removed the two rows from the `industries` table schema doc.
+
+**Not done:** Phase C was scoped to just these three columns; no other schema changes were made. A live Postgres `alembic upgrade head` verification wasn't run (no Postgres instance available in this environment) — `alembic history` confirms the migration chain resolves cleanly (`0001 -> ... -> 0005 (head)`) and the file compiles, but the migration should be smoke-tested against a real Postgres instance before deploying.
+
+**Test suite:** 313 tests pass (SQLite in-memory tests bypass Alembic via `Base.metadata.create_all`, so they validate the ORM model change but not the migration itself).
+
 ## Phase 6–10
 
 See `docs/` directory for detailed phase documentation.

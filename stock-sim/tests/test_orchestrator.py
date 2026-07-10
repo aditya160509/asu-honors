@@ -60,7 +60,7 @@ def _seed_minimal(session: Session) -> int:
     """Seed just enough data to run one tick, using raw SQL for FK safety."""
     from sqlalchemy import text as sa_text
 
-    session.execute(sa_text("""INSERT INTO industries (id, name, description, baseline_pe, pe_min, pe_max, base_volatility, cycle_sensitivity, sector_beta_default, subfactor_set, created_at, updated_at) VALUES (1, 'Test Industry', '', 15.0, 8.0, 25.0, 20.0, 1.0, 0.8, 'standard', datetime('now'), datetime('now'))"""))
+    session.execute(sa_text("""INSERT INTO industries (id, name, description, base_volatility, cycle_sensitivity, sector_beta_default, subfactor_set, created_at, updated_at) VALUES (1, 'Test Industry', '', 20.0, 1.0, 0.8, 'standard', datetime('now'), datetime('now'))"""))
     session.execute(sa_text("""INSERT INTO companies (id, name, ticker, industry_id, shares_outstanding, free_float_pct, beta_market, beta_sector, current_price, intrinsic_value, intrinsic_score, fair_pe, market_cap, volatility, market_liquidity_score, created_at, updated_at) VALUES (1, 'Test Corp', 'TST', 1, 100000000, 0.8, 1.0, 0.5, 100.0, 100.0, 50.0, 15.0, 10000000000.0, 0.02, 80.0, datetime('now'), datetime('now'))"""))
     session.execute(sa_text("""INSERT INTO factor_definitions (key, display_name, factor_type, pillar, direction, formula_ref, default_weight, created_at, updated_at) VALUES ('test_fq', 'Test FQ', 'fq_sub', 'profitability', 'higher_better', 'test', 1.0, datetime('now'), datetime('now'))"""))
     session.execute(sa_text("""INSERT INTO industry_pillar_weights (industry_id, pillar, weight, created_at, updated_at) VALUES (1, 'profitability', 1.0, datetime('now'), datetime('now'))"""))
@@ -746,9 +746,9 @@ def test_multiple_companies_tick(session):
     """Add a second company + industry data and verify both are processed."""
     timeline_id = _seed_minimal(session)
     session.execute(text(
-        "INSERT INTO industries (id, name, description, baseline_pe, pe_min, pe_max, base_volatility, "
+        "INSERT INTO industries (id, name, description, base_volatility, "
         "cycle_sensitivity, sector_beta_default, subfactor_set, created_at, updated_at) "
-        "VALUES (2, 'Tech', 'Tech industry', 20.0, 10.0, 30.0, 25.0, 1.2, 1.0, 'standard', "
+        "VALUES (2, 'Tech', 'Tech industry', 25.0, 1.2, 1.0, 'standard', "
         "datetime('now'), datetime('now'))"
     ))
     session.execute(text(
@@ -976,9 +976,9 @@ def test_banking_sector_tick(session):
 
     # Add a banking industry
     session.execute(text(
-        "INSERT INTO industries (id, name, description, baseline_pe, pe_min, pe_max, base_volatility, "
+        "INSERT INTO industries (id, name, description, base_volatility, "
         "cycle_sensitivity, sector_beta_default, subfactor_set, created_at, updated_at) "
-        "VALUES (3, 'Banking', 'Banking sector', 12.0, 6.0, 18.0, 15.0, 0.8, 0.6, 'financials', "
+        "VALUES (3, 'Banking', 'Banking sector', 15.0, 0.8, 0.6, 'financials', "
         "datetime('now'), datetime('now'))"
     ))
     session.execute(text(

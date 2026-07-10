@@ -466,8 +466,6 @@ leaderboard (view/materialized)
 | id | PK | |
 | name | text | e.g., "Construction & Infrastructure" |
 | description | text | |
-| baseline_pe | numeric | `PE0_ind` |
-| pe_min, pe_max | numeric | clamp bounds |
 | base_volatility | numeric | `σ_ind` |
 | cycle_sensitivity | numeric | how much the sector reacts to economic cycle |
 | sector_beta_default | numeric | default `β^s` |

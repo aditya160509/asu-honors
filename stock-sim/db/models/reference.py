@@ -12,9 +12,6 @@ class Industry(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(String)
-    baseline_pe: Mapped[float] = mapped_column(Numeric)
-    pe_min: Mapped[float] = mapped_column(Numeric)
-    pe_max: Mapped[float] = mapped_column(Numeric)
     base_volatility: Mapped[float] = mapped_column(Numeric)
     cycle_sensitivity: Mapped[float] = mapped_column(Numeric)
     sector_beta_default: Mapped[float] = mapped_column(Numeric)
@@ -25,7 +22,6 @@ class Industry(Base, TimestampMixin):
     factor_weights: Mapped[list["IndustryFactorWeight"]] = relationship(back_populates="industry")
 
     __table_args__ = (
-        CheckConstraint("pe_min <= pe_max", name="ck_industries_pe_bounds"),
         CheckConstraint("subfactor_set in ('standard', 'financials')", name="ck_industries_subfactor_set"),
     )
 
