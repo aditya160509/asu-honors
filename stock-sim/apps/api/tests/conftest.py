@@ -187,10 +187,12 @@ def base_config(test_db: Session) -> None:
     """Config parameters required by engine.orchestrator.run_tick."""
     params = {
         "mean_reversion_rate": "0.05",
-        "quality_mult_min": "0.30",
-        "quality_mult_max": "5.00",
-        "quality_mult_k": "0.12",
+        "quality_mult_min": "0.6",
+        "quality_mult_max": "2.0",
+        "quality_mult_k": "0.11",
         "quality_mult_inflection": "60",
+        "growth_rate_min": "2.0",
+        "growth_rate_max": "60.0",
         "r_cap": "0.20",
         "w_vo": "0.20",
         "w_es": "0.15",
@@ -209,4 +211,7 @@ def base_config(test_db: Session) -> None:
     }
     for key, value in params.items():
         test_db.add(ConfigParameter(key=key, value=value, scope="global"))
+    test_db.add(ConfigParameter(
+        key="neutral_industry_peg", value="1.4", scope="industry", scope_id=1,
+    ))
     test_db.commit()

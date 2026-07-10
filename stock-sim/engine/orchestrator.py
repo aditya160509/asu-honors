@@ -88,12 +88,16 @@ from engine.scoring import (
 )
 from engine.tick import CompanyTickInput, CompanyTickOutput, TickResult, TickState, run_tick as engine_run_tick
 from engine.valuation import (
-    DEFAULT_Q_INFLECTION,
-    DEFAULT_Q_MAX,
-    DEFAULT_Q_MIN,
-    DEFAULT_Q_STEEPNESS,
+    DEFAULT_GROWTH_RATE_MAX,
+    DEFAULT_GROWTH_RATE_MIN,
+    DEFAULT_M_INFLECTION,
+    DEFAULT_M_MAX,
+    DEFAULT_M_MIN,
+    DEFAULT_M_STEEPNESS,
     drift_iv,
-    fair_pe,
+    fair_pe_from_peg,
+    fair_peg,
+    growth_score_to_rate,
     intrinsic_value_per_share,
 )
 
@@ -155,7 +159,8 @@ def run_ticks(
         if state.is_quarter_boundary:
             _refresh_fundamentals(
                 session, timeline_id, companies, state.industries,
-                state.params, datetime.now(timezone.utc), state.rng, tick_count,
+                state.params, state.neutral_industry_pegs,
+                datetime.now(timezone.utc), state.rng, tick_count,
             )
 
         # -- IV drift -------------------------------------------------------
@@ -295,6 +300,7 @@ def _load_tick_state(session: Session, timeline_id: int) -> SimpleNamespace:
 
     rng = random.Random(timeline.rng_seed + tick_count)
     params = _load_params(session)
+    neutral_industry_pegs = _load_neutral_industry_pegs(session)
 
     # Economic cycle
     latest_cycle = session.query(EconomicCycleState).filter_by(
@@ -377,6 +383,7 @@ def _load_tick_state(session: Session, timeline_id: int) -> SimpleNamespace:
         epoch_start=epoch_start,
         rng=rng,
         params=params,
+        neutral_industry_pegs=neutral_industry_pegs,
         cycle_phase=cycle_phase,
         cycle_state=cycle_state,
         f_m=f_m,
@@ -697,12 +704,17 @@ def _execute_events(
 
     _apply_event_factor_effects(
         session, companies, fired_events, sim_date, timeline_id,
-        state.rng, state.params, datetime.now(timezone.utc), state.industries,
+        state.rng, state.params, state.neutral_industry_pegs,
+        datetime.now(timezone.utc), state.industries,
     )
 
 
 def _load_params(session: Session) -> dict[str, float]:
-    rows = session.query(ConfigParameter).all()
+    # Only global-scope rows: industry-scoped params like neutral_industry_peg
+    # share the same key across all 15 industries, so folding them into this
+    # flat dict would silently overwrite each other. Load those separately
+    # via _load_neutral_industry_pegs.
+    rows = session.query(ConfigParameter).filter_by(scope="global").all()
     result: dict[str, float] = {}
     for p in rows:
         try:
@@ -712,12 +724,21 @@ def _load_params(session: Session) -> dict[str, float]:
     return result
 
 
+def _load_neutral_industry_pegs(session: Session) -> dict[int, float]:
+    """{industry_id: neutral_industry_peg} — Section 6.D PEG-based valuation."""
+    rows = session.query(ConfigParameter).filter_by(
+        key="neutral_industry_peg", scope="industry",
+    ).all()
+    return {p.scope_id: float(p.value) for p in rows}
+
+
 def _refresh_fundamentals(
     session: Session,
     timeline_id: int,
     companies: list[Company],
     industries: dict[int, Industry],
     params: dict[str, float],
+    neutral_industry_pegs: dict[int, float],
     now: datetime,
     rng: random.Random,
     tick_count: int,
@@ -741,10 +762,12 @@ def _refresh_fundamentals(
         moat_scores.setdefault(ms.company_id, {})[ms.subfactor_key] = float(ms.score)
 
     latest_period = _compute_fiscal_period(tick_count)
-    q_min = params.get("quality_mult_min", DEFAULT_Q_MIN)
-    q_max = params.get("quality_mult_max", DEFAULT_Q_MAX)
-    q_k = params.get("quality_mult_k", DEFAULT_Q_STEEPNESS)
-    q_c = params.get("quality_mult_inflection", DEFAULT_Q_INFLECTION)
+    m_min = params.get("quality_mult_min", DEFAULT_M_MIN)
+    m_max = params.get("quality_mult_max", DEFAULT_M_MAX)
+    m_k = params.get("quality_mult_k", DEFAULT_M_STEEPNESS)
+    m_c = params.get("quality_mult_inflection", DEFAULT_M_INFLECTION)
+    growth_rate_min = params.get("growth_rate_min", DEFAULT_GROWTH_RATE_MIN)
+    growth_rate_max = params.get("growth_rate_max", DEFAULT_GROWTH_RATE_MAX)
 
     company_rows = []
     for company in companies:
@@ -781,10 +804,10 @@ def _refresh_fundamentals(
         fcfq = float(rng.uniform(30, 85))
         iscore = compute_intrinsic_score(mgmt, moat_val, fq, fcfq, growth)
 
-        fpe = fair_pe(
-            float(ind.baseline_pe), iscore,
-            q_min, q_max, q_k, q_c,
-        )
+        neutral_peg = neutral_industry_pegs.get(company.industry_id, 1.0)
+        peg = fair_peg(neutral_peg, iscore, m_min, m_max, m_k, m_c)
+        growth_rate_pct = growth_score_to_rate(growth, growth_rate_min, growth_rate_max)
+        fpe = fair_pe_from_peg(peg, growth_rate_pct)
         eps_val = float(r["raw"].get("eps", 0.0))
         iv = intrinsic_value_per_share(fpe, eps_val)
 
@@ -1100,6 +1123,7 @@ def _apply_event_factor_effects(
     timeline_id: int,
     rng: random.Random,
     params: dict[str, float],
+    neutral_industry_pegs: dict[int, float],
     now: datetime,
     industries: dict[int, object],
 ) -> set[int]:
@@ -1133,7 +1157,7 @@ def _apply_event_factor_effects(
 
             for cid in target_cids:
                 _apply_factor_effects_to_company(
-                    session, cid, company_map, industries, params,
+                    session, cid, company_map, industries, params, neutral_industry_pegs,
                     {k: profile[k] for k in factor_keys}, severity, rho, days_elapsed,
                 )
                 affected_company_ids.add(cid)
@@ -1147,6 +1171,7 @@ def _apply_factor_effects_to_company(
     company_map: dict[int, Company],
     industries: dict[int, object],
     params: dict[str, float],
+    neutral_industry_pegs: dict[int, float],
     effects: dict[str, float],
     severity: float,
     rho: float,
@@ -1190,7 +1215,6 @@ def _apply_factor_effects_to_company(
     fq_defs = session.query(FactorDefinition).filter_by(factor_type="fq_sub").all()
     subfactor_pillar = {fd.key: fd.pillar for fd in fq_defs}
 
-    ind = industries.get(company_map[cid].industry_id)
     ind_pw = industry_pw.get(company_map[cid].industry_id, {})
 
     # financial_quality is normally re-derived each fiscal period from
@@ -1226,12 +1250,17 @@ def _apply_factor_effects_to_company(
     fcfq = updated["fcf_quality"]
     iscore = compute_intrinsic_score(mgmt, moat_val, fq, fcfq, growth)
 
-    q_min = float(params.get("quality_mult_min", DEFAULT_Q_MIN))
-    q_max = float(params.get("quality_mult_max", DEFAULT_Q_MAX))
-    q_k = float(params.get("quality_mult_k", DEFAULT_Q_STEEPNESS))
-    q_c = float(params.get("quality_mult_inflection", DEFAULT_Q_INFLECTION))
-    baseline_pe = float(ind.baseline_pe) if ind else 15.0
-    fpe = fair_pe(baseline_pe, iscore, q_min, q_max, q_k, q_c)
+    m_min = float(params.get("quality_mult_min", DEFAULT_M_MIN))
+    m_max = float(params.get("quality_mult_max", DEFAULT_M_MAX))
+    m_k = float(params.get("quality_mult_k", DEFAULT_M_STEEPNESS))
+    m_c = float(params.get("quality_mult_inflection", DEFAULT_M_INFLECTION))
+    growth_rate_min = float(params.get("growth_rate_min", DEFAULT_GROWTH_RATE_MIN))
+    growth_rate_max = float(params.get("growth_rate_max", DEFAULT_GROWTH_RATE_MAX))
+    ind_id = company_map[cid].industry_id
+    neutral_peg = neutral_industry_pegs.get(ind_id, 1.0)
+    peg = fair_peg(neutral_peg, iscore, m_min, m_max, m_k, m_c)
+    growth_rate_pct = growth_score_to_rate(growth, growth_rate_min, growth_rate_max)
+    fpe = fair_pe_from_peg(peg, growth_rate_pct)
 
     eps_val = 0.0
     latest_inc = session.query(IncomeStatement).filter_by(

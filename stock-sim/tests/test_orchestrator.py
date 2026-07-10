@@ -73,10 +73,13 @@ def _seed_minimal(session: Session) -> int:
     session.execute(sa_text("""INSERT INTO timelines (id, name, rng_seed, is_live, created_at, updated_at) VALUES (1, 'Live Market', 42, 1, datetime('now'), datetime('now'))"""))
     session.execute(sa_text("""INSERT INTO simulation_state (timeline_id, current_sim_date, tick_count, is_running, created_at, updated_at) VALUES (1, '2026-01-02', 0, 0, datetime('now'), datetime('now'))"""))
     session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('mean_reversion_rate', '0.05', 'global', datetime('now'), datetime('now'))"""))
-    session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('quality_mult_min', '0.30', 'global', datetime('now'), datetime('now'))"""))
-    session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('quality_mult_max', '5.00', 'global', datetime('now'), datetime('now'))"""))
-    session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('quality_mult_k', '0.12', 'global', datetime('now'), datetime('now'))"""))
+    session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('quality_mult_min', '0.6', 'global', datetime('now'), datetime('now'))"""))
+    session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('quality_mult_max', '2.0', 'global', datetime('now'), datetime('now'))"""))
+    session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('quality_mult_k', '0.11', 'global', datetime('now'), datetime('now'))"""))
     session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('quality_mult_inflection', '60', 'global', datetime('now'), datetime('now'))"""))
+    session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('growth_rate_min', '2.0', 'global', datetime('now'), datetime('now'))"""))
+    session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('growth_rate_max', '60.0', 'global', datetime('now'), datetime('now'))"""))
+    session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, scope_id, created_at, updated_at) VALUES ('neutral_industry_peg', '1.4', 'industry', 1, datetime('now'), datetime('now'))"""))
     session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('r_cap', '0.20', 'global', datetime('now'), datetime('now'))"""))
     session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('w_vo', '0.20', 'global', datetime('now'), datetime('now'))"""))
     session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('w_es', '0.15', 'global', datetime('now'), datetime('now'))"""))
@@ -647,11 +650,12 @@ def _run_factor_effects_directly(session, timeline_id, event_id, scope_type, sco
 
     companies = session.query(Company).all()
     industries = {ind.id: ind for ind in session.query(Industry).all()}
+    neutral_industry_pegs = {ind.id: 1.4 for ind in session.query(Industry).all()}
     affected = _apply_event_factor_effects(
         session, companies, [me], sim_date, timeline_id,
-        random.Random(1), {"quality_mult_min": "0.30", "quality_mult_max": "5.00",
-                            "quality_mult_k": "0.12", "quality_mult_inflection": "60"},
-        None, industries,
+        random.Random(1), {"quality_mult_min": "0.6", "quality_mult_max": "2.0",
+                            "quality_mult_k": "0.11", "quality_mult_inflection": "60"},
+        neutral_industry_pegs, None, industries,
     )
     session.commit()
     return affected

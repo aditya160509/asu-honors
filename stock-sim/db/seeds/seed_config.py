@@ -23,29 +23,45 @@ def seed(session: Session) -> None:
             scope="global",
             description="Scales price pressure into daily return",
         ),
+        # PEG-based valuation (Section 6.D, revised 2026-07-10): M(S) logistic
+        # quality multiplier applied to each industry's Neutral Industry PEG
+        # (seeded per-industry in seed_industries.py as
+        # neutral_industry_peg), not to a market PE anchor.
         ConfigParameter(
             key="quality_mult_min",
-            value="0.30",
+            value="0.6",
             scope="global",
-            description="Q(S) logistic quality multiplier: minimum multiplier for the weakest businesses",
+            description="M(S) logistic quality multiplier: minimum multiplier for the weakest businesses",
         ),
         ConfigParameter(
             key="quality_mult_max",
-            value="5.00",
+            value="2.0",
             scope="global",
-            description="Q(S) logistic quality multiplier: maximum multiplier for the strongest businesses",
+            description="M(S) logistic quality multiplier: maximum multiplier for the strongest businesses",
         ),
         ConfigParameter(
             key="quality_mult_k",
-            value="0.12",
+            value="0.11",
             scope="global",
-            description="Q(S) logistic quality multiplier: steepness of the re-rating around the inflection point",
+            description="M(S) logistic quality multiplier: steepness of the re-rating around the inflection point",
         ),
         ConfigParameter(
             key="quality_mult_inflection",
             value="60",
             scope="global",
-            description="Q(S) logistic quality multiplier: IntrinsicScore inflection point where valuation premiums begin",
+            description="M(S) logistic quality multiplier: Financial Quality Score inflection point where valuation premiums begin",
+        ),
+        ConfigParameter(
+            key="growth_rate_min",
+            value="2.0",
+            scope="global",
+            description="growth_potential=0 maps to this estimated long-term annual EPS growth rate (%)",
+        ),
+        ConfigParameter(
+            key="growth_rate_max",
+            value="60.0",
+            scope="global",
+            description="growth_potential=100 maps to this estimated long-term annual EPS growth rate (%)",
         ),
         ConfigParameter(
             key="trading_days_per_year",

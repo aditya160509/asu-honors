@@ -7,7 +7,30 @@ from sqlalchemy.orm import Session
 
 # Path setup handled by run_all.py entry point
 
-from db.models import Industry, IndustryFactorWeight, IndustryPillarWeight
+from db.models import ConfigParameter, Industry, IndustryFactorWeight, IndustryPillarWeight
+
+# Section 6.D (PEG-based, revised 2026-07-10) — Neutral Industry PEG: the
+# long-term fair PEG a normal (Financial Quality Score ~= 60) business
+# deserves in this industry. NOT a market-observed average; a configurable
+# starting point meant to be calibrated against historical market data later.
+# Keyed by industry name so it stays correct regardless of INDUSTRIES order.
+NEUTRAL_INDUSTRY_PEGS = {
+    "Banking & Financial Services": 0.90,
+    "Information Technology / Software": 1.40,
+    "Pharmaceuticals & Healthcare": 1.50,
+    "FMCG / Consumer Staples": 1.60,
+    "Automobiles & Auto Components": 1.00,
+    "Energy (Oil & Gas)": 0.70,
+    "Utilities (Power/Gas/Water)": 0.80,
+    "Metals & Mining": 0.60,
+    "Construction & Infrastructure": 0.90,
+    "Real Estate": 0.80,
+    "Telecommunications": 1.00,
+    "Retail & E-commerce": 1.40,
+    "Industrials & Capital Goods": 1.10,
+    "Chemicals": 1.20,
+    "Media & Entertainment": 1.20,
+}
 
 
 INDUSTRIES = [
@@ -175,6 +198,18 @@ def seed(session: Session) -> None:
                 sector_beta_default=sbeta,
                 subfactor_set=sset,
             ))
+
+        peg = NEUTRAL_INDUSTRY_PEGS.get(name)
+        if peg is not None:
+            existing_peg = session.query(ConfigParameter).filter_by(
+                key="neutral_industry_peg", scope="industry", scope_id=i,
+            ).first()
+            if existing_peg is None:
+                session.add(ConfigParameter(
+                    key="neutral_industry_peg", value=str(peg),
+                    scope="industry", scope_id=i,
+                    description=f"Neutral Industry PEG for {name} (Section 6.D)",
+                ))
 
     for ind_id, pillar, weight in PILLAR_WEIGHTS:
         existing = session.query(IndustryPillarWeight).filter_by(

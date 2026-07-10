@@ -203,6 +203,30 @@ This valuation change was developed in parallel with an independent round of Pha
 
 **Known remaining gap, not fixed:** persistent factor-score effects always apply with `days_elapsed=0` (no decay ever applied to the *factor-score* side, unlike the driver side which does decay via `apply_effect_to_drivers`). This means a factor-score effect's full severity always lands undiscounted at fire time — a deliberate design difference from the driver side (structural changes are meant to be a fire-and-forget shift, not something that fades day by day), so left as-is, but noted here in case decay-on-factor-scores is ever wanted.
 
+## Valuation Formula Revision #2 — PEG-Based Intrinsic Value ✅
+
+**2026-07-10.** Section 6.D replaced again: the pure `FairPE = PE_industry × Q(S)` approach (2026-07-07/09 revisions) is superseded by a **PEG-based** flow where market valuation multiples never directly enter the intrinsic-value calculation — only business quality and a company's own estimated sustainable growth rate do:
+
+```
+Financial Quality Score S (0-100, = IntrinsicScore)
+  -> M(S) = 0.6 + 1.4 / (1 + e^(-0.11*(S-60)))            (quality_multiplier)
+  -> Fair PEG = NeutralIndustryPEG x M(S)                   (fair_peg)
+  -> Fair P/E = Fair PEG x LongTermGrowthRate%              (fair_pe_from_peg)
+  -> Intrinsic Value = EPS x Fair P/E                       (intrinsic_value_per_share)
+```
+
+**`NeutralIndustryPEG`** — the long-term fair PEG a normal (~S=60) business deserves in its industry, a configurable per-industry constant (NOT a market-observed average). Seeded per the 15 given values (Banking 0.90, IT 1.40, Pharma 1.50, FMCG 1.60, Autos 1.00, Energy 0.70, Utilities 0.80, Metals 0.60, Construction 0.90, Real Estate 0.80, Telecom 1.00, Retail 1.40, Industrials 1.10, Chemicals 1.20, Media 1.20) as `config_parameters` rows (`key="neutral_industry_peg"`, `scope="industry"`, `scope_id=<industry.id>`) in `db/seeds/seed_industries.py`.
+
+**`M(S)` defaults:** `M_min=0.6`, `M_max=2.0`, `k=0.11`, `c=60` — matches the given `M(S) = 0.3 + 2.7/(1+e^{-0.11(S-60)})`... **note:** the uploaded image showed `M(S) = 0.3 + 2.7/(...)` (implying M_min=0.3, M_max=3.0) but the accompanying text explicitly stated "The multiplier ranges approximately from 0.6 to 2.0" and gave the formula as `M(S) = 0.6 + 1.4/(1+exp(-0.11*(S-60)))`. Implemented per the **text's explicit formula** (0.6 + 1.4/(...), consistent with its own stated 0.6–2.0 range), not the image, since the two conflicted and the text was more explicit/complete. Flagging this discrepancy here for visibility.
+
+**Growth rate input (new gap filled):** the PRD referenced an `ExpectedAnnualGrowth(Growth_i)` mapping that was never implemented. Added `growth_score_to_rate()` — a configurable linear map of the 0–100 `growth_potential` score to an estimated annual EPS growth rate, **per explicit user instruction**: 0 → 2%/yr, 100 → 60%/yr (`growth_rate_min`/`growth_rate_max` config keys). This is a fallback only; the spec calls for growth to ideally be derived from each company's own financials/industry context where possible.
+
+**Config parameters added:** `growth_rate_min` (2.0), `growth_rate_max` (60.0) in `seed_config.py`; `quality_mult_min`/`max`/`k`/`inflection` updated from the old Q(S) defaults (0.30/5.00/0.12) to the new M(S) defaults (0.6/2.0/0.11); `neutral_industry_peg` (15 industry-scoped rows) in `seed_industries.py`.
+
+**Files changed:** `engine/valuation.py` (removed `fair_pe()` entirely, replaced with `quality_multiplier()` [renamed params/defaults], `fair_peg()`, `fair_pe_from_peg()`, `growth_score_to_rate()`), `engine/__init__.py` (public API), `db/seeds/seed_config.py`, `db/seeds/seed_industries.py`, `db/seeds/seed_initial_prices.py`, `engine/orchestrator.py` (both call sites — `_refresh_fundamentals` and `_apply_factor_effects_to_company` — plus new `_load_neutral_industry_pegs` helper and `neutral_industry_pegs` threaded through `state`), `tests/test_valuation.py` (rewritten), `tests/test_orchestrator.py` + `apps/api/tests/conftest.py` (fixture config updated), `project.md` Section 6.D, `docs/valuation_dry_run.py` (rewritten with 3 real-company dry-run: Sun Pharma, Avenue Supermarts/DMart, TCS).
+
+**Scale change warning:** `LongTermGrowthRate` is entered as a raw percentage number (e.g. `18.0` for 18%), not a fraction — `FairPE = FairPEG × 18.0`, not `× 0.18`. This is a ~100× scale difference from the old formula's `FairPE = PE_industry × Q(S)` and produces materially larger absolute P/E numbers when growth rates are high; this is intentional per the spec, not a bug, but worth knowing when sanity-checking output.
+
 ## Phase 6–10
 
 See `docs/` directory for detailed phase documentation.

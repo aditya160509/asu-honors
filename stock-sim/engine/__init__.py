@@ -57,7 +57,14 @@ from engine.news_manager import generate_news, select_and_fire_events
 from engine.ohlc import apply_circuit_breaker, synthesize_ohlc
 from engine.orchestrator import run_tick as run_orchestrator_tick, run_ticks
 from engine.tick import CompanyTickInput, CompanyTickOutput, TickResult, TickState, run_tick
-from engine.valuation import drift_iv, fair_pe, intrinsic_value_per_share
+from engine.valuation import (
+    drift_iv,
+    fair_pe_from_peg,
+    fair_peg,
+    growth_score_to_rate,
+    intrinsic_value_per_share,
+    quality_multiplier,
+)
 
 __all__ = [
     "accruals_ratio",
@@ -87,12 +94,14 @@ __all__ = [
     "earnings_stability",
     "earnings_surprise",
     "economic_outlook",
-    "fair_pe",
+    "fair_peg",
+    "fair_pe_from_peg",
     "financial_quality_composite",
     "free_cash_flow_margin",
     "generate_news",
     "generate_sector_shocks",
     "gross_margin",
+    "growth_score_to_rate",
     "guidance",
     "institutional_buying",
     "interest_coverage",
@@ -111,6 +120,7 @@ __all__ = [
     "payout_sustainability",
     "percentile_rank_scores",
     "price_from_gap",
+    "quality_multiplier",
     "revenue_consistency",
     "roa",
     "roe",

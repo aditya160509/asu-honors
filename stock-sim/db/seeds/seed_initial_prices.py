@@ -59,11 +59,15 @@ from engine.scoring import (
     percentile_rank_scores,
 )
 from engine.valuation import (
-    DEFAULT_Q_INFLECTION,
-    DEFAULT_Q_MAX,
-    DEFAULT_Q_MIN,
-    DEFAULT_Q_STEEPNESS,
-    fair_pe,
+    DEFAULT_GROWTH_RATE_MAX,
+    DEFAULT_GROWTH_RATE_MIN,
+    DEFAULT_M_INFLECTION,
+    DEFAULT_M_MAX,
+    DEFAULT_M_MIN,
+    DEFAULT_M_STEEPNESS,
+    fair_pe_from_peg,
+    fair_peg,
+    growth_score_to_rate,
     intrinsic_value_per_share,
 )
 
@@ -74,7 +78,13 @@ TAX_RATE = 0.25
 
 def _load_company_data(session: Session) -> dict:
     """Load all reference data needed for the computation."""
-    params = {p.key: float(p.value) for p in session.query(ConfigParameter).all()}
+    params = {
+        p.key: float(p.value) for p in session.query(ConfigParameter).filter_by(scope="global").all()
+    }
+    neutral_industry_pegs = {
+        p.scope_id: float(p.value)
+        for p in session.query(ConfigParameter).filter_by(key="neutral_industry_peg", scope="industry").all()
+    }
     industries = {ind.id: ind for ind in session.query(Industry).all()}
     pw_rows = session.query(IndustryPillarWeight).all()
     industry_pw: dict[int, dict[str, float]] = {}
@@ -97,7 +107,8 @@ def _load_company_data(session: Session) -> dict:
     seed_scores = {s.company_id: s for s in seed_rows}
     timeline = session.query(Timeline).filter_by(is_live=True).first()
     return dict(
-        params=params, industries=industries, industry_pw=industry_pw,
+        params=params, neutral_industry_pegs=neutral_industry_pegs,
+        industries=industries, industry_pw=industry_pw,
         subfactor_pillar=subfactor_pillar, fq_directions=fq_directions,
         moat_weights=moat_weights, companies=companies,
         income_map=income_map, balance_map=balance_map, cashflow_map=cashflow_map,
@@ -196,10 +207,12 @@ def seed(session: Session) -> None:
 
     rng = _random.Random(42)
     params = d["params"]
-    q_min = params.get("quality_mult_min", DEFAULT_Q_MIN)
-    q_max = params.get("quality_mult_max", DEFAULT_Q_MAX)
-    q_k = params.get("quality_mult_k", DEFAULT_Q_STEEPNESS)
-    q_c = params.get("quality_mult_inflection", DEFAULT_Q_INFLECTION)
+    m_min = params.get("quality_mult_min", DEFAULT_M_MIN)
+    m_max = params.get("quality_mult_max", DEFAULT_M_MAX)
+    m_k = params.get("quality_mult_k", DEFAULT_M_STEEPNESS)
+    m_c = params.get("quality_mult_inflection", DEFAULT_M_INFLECTION)
+    growth_rate_min = params.get("growth_rate_min", DEFAULT_GROWTH_RATE_MIN)
+    growth_rate_max = params.get("growth_rate_max", DEFAULT_GROWTH_RATE_MAX)
 
     rows = []
     for company in d["companies"]:
@@ -248,10 +261,10 @@ def seed(session: Session) -> None:
         fcfq = float(r["seed_cfs"].fcf_quality)
         iscore = compute_intrinsic_score(mgmt, moat_val, fq, fcfq, growth)
         ind = d["industries"][ind_id]
-        fpe = fair_pe(
-            float(ind.baseline_pe), iscore,
-            q_min, q_max, q_k, q_c,
-        )
+        neutral_peg = d["neutral_industry_pegs"].get(ind_id, 1.0)
+        peg = fair_peg(neutral_peg, iscore, m_min, m_max, m_k, m_c)
+        growth_rate_pct = growth_score_to_rate(growth, growth_rate_min, growth_rate_max)
+        fpe = fair_pe_from_peg(peg, growth_rate_pct)
         eps_val = float(inc.eps) if inc else 0.0
         iv = intrinsic_value_per_share(fpe, eps_val)
 

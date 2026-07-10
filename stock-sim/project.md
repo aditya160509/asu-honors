@@ -236,7 +236,7 @@ Every company carries these. **Static/reference** attributes are set at seeding;
 
 ## 6. The Mathematical Engine (all formulas)
 
-> This section is the specification the engine must implement. Notation: subscript `i` = company, `t` = sim-day. All tunable coefficients (κ, θ, λ, k_*, Q_min, Q_max, k_Q, c_Q, …) live in a `config` / `parameters` table so they can be calibrated without code changes. Every stochastic draw uses a **seeded RNG stored per timeline per tick** for reproducibility.
+> This section is the specification the engine must implement. Notation: subscript `i` = company, `t` = sim-day. All tunable coefficients (κ, θ, λ, k_*, M_min, M_max, k_M, c_M, NeutralIndustryPEG per industry, …) live in a `config` / `parameters` table so they can be calibrated without code changes. Every stochastic draw uses a **seeded RNG stored per timeline per tick** for reproducibility.
 
 ### 6.A — Fundamentals → sub-factor scores (cross-sectional)
 For each Financial Quality metric `m` and company `i`, with raw value `x_{i,m}` (negate if "lower is better"):
@@ -257,26 +257,52 @@ IntrinsicScore_i = 0.25·Mgmt_i + 0.25·MOAT_i + 0.20·FQ_i + 0.10·FCFQ_i + 0.2
 ```
 (top-level weights from the DB; MOAT_i = Σ moat sub-weights × moat sub-scores.)
 
-### 6.D — Fair PE (logistic quality multiplier)
-**Revised 2026-07-07.** Fair PE is no longer a two-term additive/multiplicative tilt on quality and growth separately. Instead it is the industry's baseline PE stretched by a single **logistic quality multiplier `Q(S)`**, where `S` is the `IntrinsicScore` composite (Section 6.C — already combines management quality, MOAT, financial quality, FCF quality, and growth potential, so growth is *inside* `S`, not a separate term):
+### 6.D — Fair P/E (PEG-based valuation)
+**Revised 2026-07-10 — supersedes the pure P/E × Q(S) approach from the 2026-07-07/09 revisions.** Market valuation multiples no longer enter the intrinsic-value calculation at all, directly or indirectly. Fair P/E is built up from an industry-neutral **PEG** (P/E-to-Growth) ratio using only (a) business quality and (b) the company's own estimated sustainable long-term growth rate:
 
 ```
-Q(S) = Q_min + (Q_max − Q_min) / (1 + e^(−k·(S − c)))
-FairPE_i = PE0_{ind} × Q(IntrinsicScore_i)
+S = Financial Quality Score (0-100) = IntrinsicScore (Section 6.C — already combines
+    growth, moat, financial quality, management, capital allocation, and cash flow
+    quality, so none of those are re-applied here)
+
+M(S) = M_min + (M_max − M_min) / (1 + e^(−k·(S − c)))              // Quality Multiplier
+FairPEG_i = NeutralIndustryPEG_ind × M(S_i)                        // Fair PEG
+LongTermGrowthRate_i = company-specific estimated sustainable      // % number, e.g. 18.0 for 18%
+    annual EPS growth over the next ~5-10 years (financials +
+    industry-derived where possible; growth_score_to_rate() as a
+    configurable fallback mapping from the growth_potential score)
+FairPE_i = FairPEG_i × LongTermGrowthRate_i
+IV_i     = EPS_i × FairPE_i
 ```
 
-**No separate `pe_min`/`pe_max` clamp (revised 2026-07-09).** `Q(S)` is already bounded to `[Q_min, Q_max]` by construction, so `FairPE_i` is already bounded to `[PE0_ind × Q_min, PE0_ind × Q_max]` without a second clamp. An earlier revision clamped to per-industry `pe_min`/`pe_max` ranges that had been sized for the old additive/multiplicative formula's much narrower multiplier band (≈0.4×–1.6×); with `Q_max=5.00` those old ranges made the `pe_max` ceiling bite around `IntrinsicScore≈60` for *every* industry, collapsing all higher scores to an identical FairPE and defeating the logistic curve's whole point for the top ~40% of the score range. The `industries.pe_min`/`pe_max` columns remain in the schema (unused by `fair_pe` now) in case a future revision needs a hard external ceiling independent of `Q_max`.
+**`NeutralIndustryPEG`** — the long-term fair PEG a normal, ~S=60 business deserves in its industry. A configurable per-industry constant (seeded in `config_parameters` as `neutral_industry_peg`, scope=`industry`), **not** a market-observed average PEG. Initial values (Section 4.4 industries):
 
-- `Q_min` (default 0.30) — the multiplier floor: even the worst business retains ~30% of the industry baseline valuation.
-- `Q_max` (default 5.00) — the multiplier ceiling: even a perfect business is capped, since investors won't pay unboundedly more for incremental quality once it's already excellent.
-- `c` (default 60) — the inflection point on the 0–100 `IntrinsicScore` scale where investors begin assigning meaningful premiums; below it quality improvements barely move the multiplier, above it the business is entering "compounder" territory.
-- `k` (default 0.12) — steepness: how quickly the re-rating happens around `c`. Smaller `k` = smoother curve; larger `k` = sharper re-rating.
+| Industry | Neutral PEG | Industry | Neutral PEG |
+|---|---|---|---|
+| Banking & Financial Services | 0.90 | Real Estate | 0.80 |
+| IT Services | 1.40 | Telecommunications | 1.00 |
+| Pharma & Healthcare | 1.50 | Retail & E-commerce | 1.40 |
+| FMCG | 1.60 | Industrials & Capital Goods | 1.10 |
+| Automobiles & Components | 1.00 | Chemicals | 1.20 |
+| Energy (Oil & Gas) | 0.70 | Media & Entertainment | 1.20 |
+| Utilities (Power/Gas/Water) | 0.80 | | |
+| Metals & Mining | 0.60 | | |
+| Construction & Infrastructure | 0.90 | | |
 
-**Why logistic, not linear:** real markets exhibit diminishing marginal valuation — moving from 95 to 100 isn't nearly as valuable as moving from 55 to 65, because the latter often crosses the threshold into a category of business investors are willing to pay a structural premium for. A linear multiplier rewards every point equally; the logistic shape captures the actual S-curve of how quality re-rates a business (flat near the bottom, steep through the middle, flattening again near the top).
+**`M(S)` — Quality Multiplier.** Default parameters: `M_min=0.6`, `M_max=2.0`, `k=0.11`, `c=60`:
+```
+M(S) = 0.6 + 1.4 / (1 + e^(−0.11·(S − 60)))
+```
+- S in [0,20]: multiplier barely moves — still fundamentally weak businesses.
+- S in [20,70]: rapid re-rating — the business is becoming clearly investable.
+- S in [70,100]: continues earning a premium but at a decelerating rate — the market already prices it as high quality.
+- Range ≈ 0.6 to 2.0.
 
-`PE0_ind` (the industry baseline) is the industry's **average** P/E — currently a seeded per-industry constant (`industries.baseline_pe`); a future revision could instead compute it dynamically (mean or median) from the live company universe, and a median (or cycle-normalized median) would be more robust against a handful of richly-valued outliers skewing the baseline, per the spec's design note — neither is required by this revision.
+**`LongTermGrowthRate`** — the company's own estimated sustainable annual EPS growth over roughly the next 5–10 years (entered as a plain percentage number, e.g. `18.0` for 18%/yr), reflecting durable business growth rather than one-off or unusually high growth years. Prefer deriving this directly from a company's trailing fundamentals and industry context; `growth_score_to_rate()` (linear map of the 0–100 `growth_potential` score to a rate, default range 2%→60%) is a configurable fallback where a company-specific estimate isn't available.
 
-**Generalizes beyond P/E** — the same `Q(S)` architecture applies to any fair-valuation metric: `Intrinsic Value = Book Value × (Industry P/B × Q(S))` for banks, `Enterprise Value = Revenue × (Industry EV/Sales × Q(S))` for SaaS, `Enterprise Value = EBITDA × (Industry EV/EBITDA × Q(S))` for hotels/chemicals. Only the P/E-based path is implemented so far.
+**Under no circumstances does current market valuation directly influence the intrinsic value calculation.** Market price is computed entirely separately (Sections 6.G–6.M — supply/demand, news, macro, sentiment, momentum) and is allowed to diverge from intrinsic value; that divergence is the point of the simulation (Section 6.J mean-reversion).
+
+**All parameters configurable** — `NeutralIndustryPEG` per industry, and the logistic curve's `M_min`/`M_max`/`k`/`c`, live in `config_parameters` (industry-scoped and global respectively) so they can be calibrated against historical market data later without changing the engine code.
 
 ### 6.E — Intrinsic Value per share
 ```
@@ -420,7 +446,7 @@ industries ──< companies ──< financial_statements (income/balance/cashfl
      └──< industry_factor_weights (opt.)   (top-level weight overrides)
 
 factor_definitions            (defines every factor/sub-factor + formula ref + direction)
-config_parameters             (all engine coefficients: κ, θ, λ, Q_min/Q_max/k_Q/c_Q, k_drift, …)
+config_parameters             (all engine coefficients: κ, θ, λ, M_min/M_max/k_M/c_M, NeutralIndustryPEG, k_drift, …)
 market_events ──< event_instances ──> (company | industry | market)
 news_templates ──< news_feed
 economic_cycle_state          (time-series, per timeline)
@@ -478,7 +504,7 @@ leaderboard (view/materialized)
 **`industry_factor_weights`** *(optional)* — top-level weight overrides per industry; fallback to global defaults in `config_parameters`.
 
 **`config_parameters`** — every tunable coefficient
-`(key, value, scope [global|industry|company], scope_id, description)`. Holds κ_drift, θ (or per-industry), λ, the logistic quality-multiplier params (Q_min, Q_max, k_Q, c_Q — Section 6.D), ρ_news, circuit-breaker cap, trading_days_per_year, quarter_length, starting_cash, etc. **The engine reads all coefficients from here.**
+`(key, value, scope [global|industry|company], scope_id, description)`. Holds κ_drift, θ (or per-industry), λ, the logistic quality-multiplier params (M_min, M_max, k_M, c_M — Section 6.D), NeutralIndustryPEG per industry, growth-rate mapping bounds, ρ_news, circuit-breaker cap, trading_days_per_year, quarter_length, starting_cash, etc. **The engine reads all coefficients from here.**
 
 ### 7.3 Factor-score tables (derived, versioned by fiscal period)
 
@@ -732,7 +758,7 @@ The phase model, sequenced into concrete steps. **Do them in this order** — ea
 
 These have no single "correct" value — tune them so the simulated market *feels* real:
 - `k_drift` (pressure → daily return scale), `θ` mean-reversion speed (per industry), `σ_ind` industry vols.
-- `Q_min`, `Q_max`, `k_Q` (steepness), `c_Q` (inflection point) — the logistic quality-multiplier shape (Section 6.D) — plus industry baseline PEs and clamps.
+- `M_min`, `M_max`, `k_M` (steepness), `c_M` (inflection point) — the logistic quality-multiplier shape (Section 6.D); `NeutralIndustryPEG` per industry; growth-rate mapping bounds.
 - News/surprise decay rates `ρ`, guidance jump size, circuit-breaker cap.
 - Market/sector factor volatilities and default betas.
 - Liquidity `λ` impact scale, spread parameters, starting cash.
