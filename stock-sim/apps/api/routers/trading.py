@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from apps.api.auth import get_current_user
 from apps.api.config import settings
 from apps.api.database import get_db
+from apps.api.dependencies import get_user_portfolio
 from apps.api.exceptions import ConflictError, NotFoundError
 from apps.api.schemas import (
     HoldingResponse,
@@ -62,14 +63,9 @@ def get_portfolio_analytics_endpoint(
 
 @router.get("/portfolio", response_model=PortfolioResponse)
 def get_portfolio(
-    timeline_id: int = Query(default=settings.default_timeline_id),
+    portfolio: Portfolio = Depends(get_user_portfolio),
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
 ) -> PortfolioResponse:
-    portfolio = db.query(Portfolio).filter_by(user_id=user.id, timeline_id=timeline_id).first()
-    if portfolio is None:
-        raise NotFoundError("Portfolio not found")
-
     holdings = db.query(Holding).filter_by(portfolio_id=portfolio.id).all()
     company_ids = {h.company_id for h in holdings}
     companies_map = {

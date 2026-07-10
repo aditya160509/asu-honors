@@ -1,17 +1,17 @@
 """Shared FastAPI dependencies beyond get_db / get_current_user."""
 
-from fastapi import Depends
+from fastapi import Depends, Query
 from sqlalchemy.orm import Session
 
 from apps.api.auth import get_current_user
 from apps.api.config import settings
 from apps.api.database import get_db
 from apps.api.exceptions import NotFoundError
-from db.models import Company, Portfolio, User
+from db.models import Portfolio, User
 
 
 def get_user_portfolio(
-    timeline_id: int = settings.default_timeline_id,
+    timeline_id: int = Query(default=settings.default_timeline_id),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Portfolio:
@@ -24,11 +24,3 @@ def get_user_portfolio(
     if portfolio is None:
         raise NotFoundError("Portfolio not found")
     return portfolio
-
-
-def get_company_by_ticker(ticker: str, db: Session = Depends(get_db)) -> Company:
-    """Load a Company by ticker, or 404."""
-    company = db.query(Company).filter_by(ticker=ticker.upper()).first()
-    if company is None:
-        raise NotFoundError(f"Company '{ticker}' not found")
-    return company

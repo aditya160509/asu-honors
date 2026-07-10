@@ -60,19 +60,20 @@ from engine.fundamentals import (
     days_inventory_outstanding,
     days_payables_outstanding,
     days_sales_outstanding,
+    earnings_stability,
     interest_coverage,
     net_debt_to_ebitda,
     net_interest_margin,
     npa_ratio,
     operating_margin,
     payout_sustainability,
+    revenue_consistency,
     roa,
     roe,
     roic,
 )
 from engine.liquidity import (
     compute_volume_prd,
-    daily_volume,
     demand_from_pressure,
     market_liquidity_score,
     order_imbalance,
@@ -112,27 +113,12 @@ DRIVER_KEYS = frozenset({
 
 
 def run_tick(session: Session, timeline_id: int) -> dict:
-    """Advance the simulation by one trading day for the given timeline."""
-    now = datetime.now(timezone.utc)
-    timeline = session.query(Timeline).filter_by(id=timeline_id).first()
-    if timeline is None:
-        raise ValueError(f"Timeline {timeline_id} not found")
+    """Advance the simulation by one trading day for the given timeline.
 
-    sim_state = session.query(SimulationState).filter_by(timeline_id=timeline_id).first()
-    if sim_state is None:
-        raise ValueError(f"No SimulationState for timeline {timeline_id} -- run seed_initial_prices first")
-
-    sim_date = sim_state.current_sim_date
-    tick_count = sim_state.tick_count
-
-    existing = session.query(PriceHistory).filter_by(
-        timeline_id=timeline_id, sim_date=sim_date
-    ).first()
-    if existing is not None:
-        return {"status": "skipped", "reason": "already_executed", "sim_date": sim_date}
-
-    results = run_ticks(session, timeline_id, num_ticks=1)
-    return results[0]
+    Thin wrapper around run_ticks(num_ticks=1) -- existence and idempotency
+    checks live there so they aren't duplicated here.
+    """
+    return run_ticks(session, timeline_id, num_ticks=1)[0]
 
 
 def run_ticks(
@@ -364,6 +350,28 @@ def _load_tick_state(session: Session, timeline_id: int) -> SimpleNamespace:
         if ce.company_id not in latest_ce:
             latest_ce[ce.company_id] = ce
 
+    # Trailing closes for the technical_momentum moving average, batch-loaded
+    # so _compute_drivers doesn't issue N queries per company per tick.
+    ma_window = int(params.get("ma_window", 20))
+    recent_closes: dict[int, list[float]] = {}
+    if ma_window > 0:
+        window_start = sim_date - timedelta(days=ma_window * 3)  # calendar-day buffer for weekends/gaps
+        price_rows = (
+            session.query(PriceHistory.company_id, PriceHistory.close)
+            .filter(
+                PriceHistory.timeline_id == timeline_id,
+                PriceHistory.sim_date >= window_start,
+                PriceHistory.sim_date < sim_date,
+            )
+            .order_by(PriceHistory.sim_date.asc())
+            .all()
+        )
+        for company_id, close in price_rows:
+            closes = recent_closes.setdefault(company_id, [])
+            closes.append(float(close))
+            if len(closes) > ma_window:
+                closes.pop(0)
+
     prev_ns: dict[int, float] = {}
     if tick_count > 0:
         prev_date = sim_date - timedelta(days=1)
@@ -394,6 +402,7 @@ def _load_tick_state(session: Session, timeline_id: int) -> SimpleNamespace:
         latest_bal=latest_bal,
         latest_inc=latest_inc,
         latest_ce=latest_ce,
+        recent_closes=recent_closes,
         prev_ns=prev_ns,
         is_quarter_boundary=is_quarter_boundary,
     )
@@ -450,17 +459,25 @@ def _compute_drivers(
             sigma_val *= f_lev
 
     vo = value_opportunity(iv, prev_close)
-    tm = technical_momentum(prev_close, prev_close * 0.98, float(state.params.get("k_m", 0.5)))
+    trailing_closes = state.recent_closes.get(company.id, [])
+    moving_avg = sum(trailing_closes) / len(trailing_closes) if trailing_closes else prev_close
+    tm = technical_momentum(prev_close, moving_avg, float(state.params.get("k_m", 0.5)))
     eo = compute_economic_outlook(state.cycle_state["market_sentiment"])
 
     latest_inc = state.latest_inc.get(company.id)
     latest_ce = state.latest_ce.get(company.id)
+    # Days since the CURRENT quarter's earnings were released, not the
+    # absolute sim day -- earnings/guidance are only "fresh" news for the
+    # ~QUARTER_LENGTH ticks following a refresh, then the next quarter's
+    # results reset the clock. Using tick_count directly made both drivers
+    # decay to ~0 permanently after the first quarter and never recover.
+    days_since_earnings = tick_count % QUARTER_LENGTH
 
     es = 0.0
     if latest_inc and latest_ce:
         actual_eps = float(latest_inc.eps)
         consensus_eps = float(latest_ce.consensus_eps)
-        es = earnings_surprise(actual_eps, consensus_eps, tick_count, float(state.params.get("rho_es", 0.15)))
+        es = earnings_surprise(actual_eps, consensus_eps, days_since_earnings, float(state.params.get("rho_es", 0.15)))
 
     gd = 0.0
     if latest_inc and latest_ce:
@@ -469,9 +486,9 @@ def _compute_drivers(
         beat = actual_eps > consensus_eps
         miss = actual_eps < consensus_eps
         if beat:
-            gd = guidance("raised", min(abs(actual_eps - consensus_eps) / max(abs(consensus_eps), 0.01), 0.5), tick_count, float(state.params.get("rho_g", 0.15)))
+            gd = guidance("raised", min(abs(actual_eps - consensus_eps) / max(abs(consensus_eps), 0.01), 0.5), days_since_earnings, float(state.params.get("rho_g", 0.15)))
         elif miss:
-            gd = guidance("cut", min(abs(actual_eps - consensus_eps) / max(abs(consensus_eps), 0.01), 0.5), tick_count, float(state.params.get("rho_g", 0.15)))
+            gd = guidance("cut", min(abs(actual_eps - consensus_eps) / max(abs(consensus_eps), 0.01), 0.5), days_since_earnings, float(state.params.get("rho_g", 0.15)))
 
     ib = institutional_buying(state.rng.uniform(-0.1, 0.1) + state.cycle_state.get("market_sentiment", 0) * 0.05)
 
@@ -732,6 +749,37 @@ def _load_neutral_industry_pegs(session: Session) -> dict[int, float]:
     return {p.scope_id: float(p.value) for p in rows}
 
 
+def _recompute_valuation(
+    intrinsic_score: float,
+    growth_potential: float,
+    industry_id: int,
+    neutral_industry_pegs: dict[int, float],
+    params: dict[str, float],
+    eps: float,
+) -> tuple[float, float]:
+    """Section 6.D — IntrinsicScore -> M(S) -> Fair PEG -> Fair P/E -> IV.
+
+    Single shared implementation of the PEG valuation chain so
+    _refresh_fundamentals, _apply_factor_effects_to_company, and the initial
+    seed (db/seeds/seed_initial_prices.py) don't each hand-roll their own
+    copy of the same six lines with the risk of the defaults or param keys
+    drifting apart between copies. Returns (fair_pe, intrinsic_value).
+    """
+    m_min = float(params.get("quality_mult_min", DEFAULT_M_MIN))
+    m_max = float(params.get("quality_mult_max", DEFAULT_M_MAX))
+    m_k = float(params.get("quality_mult_k", DEFAULT_M_STEEPNESS))
+    m_c = float(params.get("quality_mult_inflection", DEFAULT_M_INFLECTION))
+    growth_rate_min = float(params.get("growth_rate_min", DEFAULT_GROWTH_RATE_MIN))
+    growth_rate_max = float(params.get("growth_rate_max", DEFAULT_GROWTH_RATE_MAX))
+
+    neutral_peg = neutral_industry_pegs.get(industry_id, 1.0)
+    peg = fair_peg(neutral_peg, intrinsic_score, m_min, m_max, m_k, m_c)
+    growth_rate_pct = growth_score_to_rate(growth_potential, growth_rate_min, growth_rate_max)
+    fpe = fair_pe_from_peg(peg, growth_rate_pct)
+    iv = intrinsic_value_per_share(fpe, eps)
+    return fpe, iv
+
+
 def _refresh_fundamentals(
     session: Session,
     timeline_id: int,
@@ -762,12 +810,19 @@ def _refresh_fundamentals(
         moat_scores.setdefault(ms.company_id, {})[ms.subfactor_key] = float(ms.score)
 
     latest_period = _compute_fiscal_period(tick_count)
-    m_min = params.get("quality_mult_min", DEFAULT_M_MIN)
-    m_max = params.get("quality_mult_max", DEFAULT_M_MAX)
-    m_k = params.get("quality_mult_k", DEFAULT_M_STEEPNESS)
-    m_c = params.get("quality_mult_inflection", DEFAULT_M_INFLECTION)
-    growth_rate_min = params.get("growth_rate_min", DEFAULT_GROWTH_RATE_MIN)
-    growth_rate_max = params.get("growth_rate_max", DEFAULT_GROWTH_RATE_MAX)
+
+    # Carry forward each company's existing management_quality/growth_potential/
+    # fcf_quality rather than re-rolling them from scratch every quarter.
+    # These are meant to be stable qualitative attributes (set at seed time,
+    # nudged only by explicit events) -- previously this function replaced
+    # them with fresh rng.uniform(30,85) draws every 63 ticks, discarding the
+    # seeded values and causing every company's IntrinsicScore (and hence
+    # FairPE/IV, since growth_potential drives growth_score_to_rate) to lurch
+    # randomly at each quarter boundary for reasons unrelated to its
+    # financials.
+    latest_cfs_by_company: dict[int, CompanyFactorScore] = {}
+    for cfs_row in session.query(CompanyFactorScore).order_by(CompanyFactorScore.id.asc()).all():
+        latest_cfs_by_company[cfs_row.company_id] = cfs_row
 
     company_rows = []
     for company in companies:
@@ -799,17 +854,16 @@ def _refresh_fundamentals(
         ind_pw = industry_pw.get(company.industry_id, {})
         fq = financial_quality_composite(r["fq_subscores"], ind_pw, subfactor_pillar)
         moat_val = moat_composite(moat_scores.get(company.id, {}), moat_weights)
-        mgmt = float(rng.uniform(30, 85))
-        growth = float(rng.uniform(30, 85))
-        fcfq = float(rng.uniform(30, 85))
+        prior_cfs = latest_cfs_by_company.get(company.id)
+        mgmt = float(prior_cfs.management_quality) if prior_cfs else 50.0
+        growth = float(prior_cfs.growth_potential) if prior_cfs else 50.0
+        fcfq = float(prior_cfs.fcf_quality) if prior_cfs else 50.0
         iscore = compute_intrinsic_score(mgmt, moat_val, fq, fcfq, growth)
 
-        neutral_peg = neutral_industry_pegs.get(company.industry_id, 1.0)
-        peg = fair_peg(neutral_peg, iscore, m_min, m_max, m_k, m_c)
-        growth_rate_pct = growth_score_to_rate(growth, growth_rate_min, growth_rate_max)
-        fpe = fair_pe_from_peg(peg, growth_rate_pct)
         eps_val = float(r["raw"].get("eps", 0.0))
-        iv = intrinsic_value_per_share(fpe, eps_val)
+        fpe, iv = _recompute_valuation(
+            iscore, growth, company.industry_id, neutral_industry_pegs, params, eps_val,
+        )
 
         cfs = CompanyFactorScore(
             company_id=company.id,
@@ -855,9 +909,16 @@ def _generate_fake_quarterly_financials(
     rng: random.Random,
 ) -> dict[str, float]:
     """Generate plausible next-quarter financials from the most recent quarter."""
-    latest_inc = session.query(IncomeStatement).filter_by(
+    # Full statement history (queried before this quarter's new rows are
+    # added below) so earnings_stability/revenue_consistency have real
+    # multi-period series instead of the seed's neutral 50.0 placeholders.
+    prior_incs = session.query(IncomeStatement).filter_by(
         company_id=company.id
-    ).order_by(IncomeStatement.fiscal_period.desc()).first()
+    ).order_by(IncomeStatement.fiscal_period.asc()).all()
+    eps_history = [float(i.eps) for i in prior_incs]
+    revenue_history = [float(i.revenue) for i in prior_incs]
+
+    latest_inc = prior_incs[-1] if prior_incs else None
 
     latest_bal = session.query(BalanceSheet).filter_by(
         company_id=company.id
@@ -964,11 +1025,15 @@ def _generate_fake_quarterly_financials(
 
     if sset == "financials":
         return _compute_banking_raw(inc, bal)
-    return _compute_standard_raw(inc, bal, cf)
+    eps_history.append(round(eps, 4))
+    revenue_history.append(round(rev, 2))
+    return _compute_standard_raw(inc, bal, cf, eps_history, revenue_history)
 
 
 def _compute_standard_raw(
     inc: IncomeStatement, bal: BalanceSheet, cf: CashFlowStatement,
+    eps_history: Optional[list[float]] = None,
+    revenue_history: Optional[list[float]] = None,
 ) -> dict[str, float]:
     ni_f = float(inc.net_profit)
     r = float(inc.revenue)
@@ -999,6 +1064,8 @@ def _compute_standard_raw(
         "interest_coverage": interest_coverage(ebit, float(inc.interest_expense)),
         "current_ratio": current_ratio(ca, cl),
         "accruals_ratio": accruals_ratio(ni_f, ocf, ta),
+        "earnings_stability": earnings_stability(eps_history or [float(inc.eps)]),
+        "revenue_consistency": revenue_consistency(revenue_history or [r]),
         "payout_sustainability": payout_sustainability(div, ni_f, ocf),
         "eps": float(inc.eps),
     }
@@ -1250,25 +1317,14 @@ def _apply_factor_effects_to_company(
     fcfq = updated["fcf_quality"]
     iscore = compute_intrinsic_score(mgmt, moat_val, fq, fcfq, growth)
 
-    m_min = float(params.get("quality_mult_min", DEFAULT_M_MIN))
-    m_max = float(params.get("quality_mult_max", DEFAULT_M_MAX))
-    m_k = float(params.get("quality_mult_k", DEFAULT_M_STEEPNESS))
-    m_c = float(params.get("quality_mult_inflection", DEFAULT_M_INFLECTION))
-    growth_rate_min = float(params.get("growth_rate_min", DEFAULT_GROWTH_RATE_MIN))
-    growth_rate_max = float(params.get("growth_rate_max", DEFAULT_GROWTH_RATE_MAX))
     ind_id = company_map[cid].industry_id
-    neutral_peg = neutral_industry_pegs.get(ind_id, 1.0)
-    peg = fair_peg(neutral_peg, iscore, m_min, m_max, m_k, m_c)
-    growth_rate_pct = growth_score_to_rate(growth, growth_rate_min, growth_rate_max)
-    fpe = fair_pe_from_peg(peg, growth_rate_pct)
-
     eps_val = 0.0
     latest_inc = session.query(IncomeStatement).filter_by(
         company_id=cid
     ).order_by(IncomeStatement.fiscal_period.desc()).first()
     if latest_inc:
         eps_val = float(latest_inc.eps)
-    iv = intrinsic_value_per_share(fpe, eps_val)
+    fpe, iv = _recompute_valuation(iscore, growth, ind_id, neutral_industry_pegs, params, eps_val)
 
     # Persist onto the actual CompanyFactorScore row (not just the
     # denormalized Company fields) so the next tick's driver computations

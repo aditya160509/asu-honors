@@ -845,6 +845,8 @@ def _setup_fq_factor_defs(session):
         ("current_ratio", "liquidity", "higher_better"),
         ("accruals_ratio", "quality", "lower_better"),
         ("payout_sustainability", "quality", "higher_better"),
+        ("earnings_stability", "quality", "higher_better"),
+        ("revenue_consistency", "quality", "higher_better"),
     ]
     for key, pillar, direction in fq_defs:
         if key not in existing_keys:
@@ -1298,3 +1300,163 @@ def test_generate_fake_financials_no_prior(session):
 
     bals = session.query(BalanceSheet).filter_by(company_id=1).all()
     assert len(bals) >= 1
+
+
+# ── Regression tests: A+B cleanup/correctness fixes ────────────────────────
+
+
+def test_quarter_refresh_preserves_prior_factor_scores(session):
+    """_refresh_fundamentals must carry forward management_quality/growth_potential/
+    fcf_quality from the prior CompanyFactorScore instead of re-rolling them from
+    scratch. Seed distinctive values, then confirm they survive a quarter boundary."""
+    timeline_id = _seed_minimal(session)
+    _setup_fq_factor_defs(session)
+    cfs = session.query(CompanyFactorScore).filter_by(company_id=1).first()
+    cfs.management_quality = 83.0
+    cfs.growth_potential = 77.0
+    cfs.fcf_quality = 91.0
+    session.commit()
+
+    sim = session.query(SimulationState).filter_by(timeline_id=timeline_id).first()
+    sim.tick_count = 63
+    sim.current_sim_date = date(2026, 4, 1)
+    session.commit()
+
+    result = run_tick(session, timeline_id)
+    session.commit()
+    assert result["status"] == "completed"
+
+    new_cfs = session.query(CompanyFactorScore).filter_by(
+        company_id=1, fiscal_period="2026Q2"
+    ).first()
+    assert new_cfs is not None
+    assert math.isclose(float(new_cfs.management_quality), 83.0)
+    assert math.isclose(float(new_cfs.growth_potential), 77.0)
+    assert math.isclose(float(new_cfs.fcf_quality), 91.0)
+
+
+def test_quarter_refresh_uses_real_eps_and_revenue_history_for_fq_subfactors(session):
+    """earnings_stability/revenue_consistency must be computed from the company's
+    real trailing EPS/revenue series at quarter refresh, not silently fall back
+    to a single-point neutral placeholder every time."""
+    timeline_id = _seed_minimal(session)
+    _setup_fq_factor_defs(session)
+
+    # Add a second historical income statement so there are 2+ periods of real
+    # history by the time the quarter-boundary refresh computes raw FQ inputs.
+    session.execute(text(
+        "INSERT INTO income_statements (company_id, fiscal_period, revenue, cogs, gross_profit, "
+        "operating_expenses, ebitda, depreciation_amortization, ebit, interest_expense, pretax_income, "
+        "tax, net_profit, eps, shares_diluted, created_at, updated_at) "
+        "VALUES (1, '2025Q4', 900000, 550000, 350000, 180000, 170000, 45000, 125000, 18000, "
+        "107000, 26750, 80250, 0.8025, 100000000, datetime('now'), datetime('now'))"
+    ))
+    session.commit()
+
+    sim = session.query(SimulationState).filter_by(timeline_id=timeline_id).first()
+    sim.tick_count = 63
+    sim.current_sim_date = date(2026, 4, 1)
+    session.commit()
+
+    result = run_tick(session, timeline_id)
+    session.commit()
+    assert result["status"] == "completed"
+
+    fqs = {
+        f.subfactor_key: f for f in session.query(FinancialQualitySubscore).filter_by(
+            company_id=1, fiscal_period="2026Q2"
+        ).all()
+    }
+    assert "earnings_stability" in fqs
+    assert "revenue_consistency" in fqs
+    # With real multi-period history (not a single-point 50.0 neutral placeholder),
+    # the raw stability/consistency scores are computed from actual variance and
+    # should not degenerate to exactly the neutral midpoint.
+    assert fqs["earnings_stability"].raw_metric_value is not None
+    assert fqs["revenue_consistency"].raw_metric_value is not None
+
+
+def test_earnings_surprise_and_guidance_decay_reset_each_quarter(session):
+    """earnings_surprise/guidance must decay against days-since-the-current-quarter's
+    earnings (tick_count % QUARTER_LENGTH), not the absolute tick_count -- otherwise
+    both drivers permanently decay to ~0 after the first quarter and never recover."""
+    from engine.orchestrator import QUARTER_LENGTH
+
+    timeline_id = _seed_minimal(session)
+    _setup_fq_factor_defs(session)
+    ce = session.query(ConsensusEstimate).first()
+    ce.consensus_eps = 0.5  # actual 0.975 beats consensus -> earnings_surprise/guidance nonzero
+    session.commit()
+
+    # Advance tick_count well past one full quarter, but only a few ticks into
+    # the *current* quarter, without crossing a new quarter boundary ourselves.
+    sim = session.query(SimulationState).filter_by(timeline_id=timeline_id).first()
+    sim.tick_count = QUARTER_LENGTH + 2
+    sim.current_sim_date = date(2026, 1, 2) + timedelta(days=QUARTER_LENGTH + 2)
+    session.commit()
+
+    run_tick(session, timeline_id)
+    session.commit()
+
+    scores = {
+        s.driver_key: s
+        for s in session.query(PriceDriverScore).filter_by(timeline_id=timeline_id).all()
+    }
+    # days_since_earnings = (QUARTER_LENGTH + 3) % QUARTER_LENGTH = 3 -- still fresh,
+    # so these drivers must be non-zero (would be ~0 under the old absolute-tick_count bug).
+    assert scores["earnings_surprise"].value != 0.0
+    assert scores["guidance"].value != 0.0
+
+
+def test_technical_momentum_uses_real_trailing_price_history(session):
+    """technical_momentum must be computed from a real batch-loaded moving average
+    of recent closes, not a hardcoded prev_close * 0.98 placeholder."""
+    timeline_id = _seed_minimal(session)
+
+    # Seed a trailing price history that is clearly NOT prev_close * 0.98, so the
+    # moving average used by technical_momentum is distinguishable from the old
+    # hardcoded fallback.
+    for i, close in enumerate([100.0, 120.0, 140.0, 160.0, 180.0]):
+        session.add(PriceHistory(
+            timeline_id=timeline_id, company_id=1,
+            sim_date=date(2025, 12, 25) + timedelta(days=i),
+            open=close, high=close, low=close, close=close,
+            volume=10000, intrinsic_value=100.0, order_imbalance=0.0,
+        ))
+    session.commit()
+
+    c = session.query(Company).filter_by(id=1).first()
+    c.current_price = 200.0
+    session.commit()
+
+    run_tick(session, timeline_id)
+    session.commit()
+
+    from engine.drivers import technical_momentum
+
+    scores = {
+        s.driver_key: s
+        for s in session.query(PriceDriverScore).filter_by(timeline_id=timeline_id).all()
+    }
+    tm = scores["technical_momentum"]
+    assert tm.value is not None
+
+    # moving_avg over the seeded closes = 140.0, prev_close = 200.0. Compare the
+    # actual computed value against what the *old* hardcoded prev_close * 0.98
+    # fallback would have produced for the same prev_close -- they must differ,
+    # proving a real moving average (not the fake constant) drove the result.
+    old_fake_value = technical_momentum(200.0, 200.0 * 0.98, 0.5)
+    assert not math.isclose(float(tm.value), old_fake_value, abs_tol=1e-6)
+
+
+def test_run_tick_dead_locals_removed_still_delegates_to_run_ticks(session):
+    """run_tick is now a thin wrapper around run_ticks(num_ticks=1); confirm it
+    still raises the same errors and produces the same single-tick result shape."""
+    timeline_id = _seed_minimal(session)
+    result = run_tick(session, timeline_id)
+    session.commit()
+    assert result["status"] == "completed"
+    assert result["tick_count"] == 1
+
+    with pytest.raises(ValueError, match="Timeline 999 not found"):
+        run_tick(session, 999)

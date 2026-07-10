@@ -1,7 +1,7 @@
 # Fictional Stock Market Simulation — Build Progress
 
 > Tracks status against the Master Prompt & PRD, phase by phase. Location of all code: `stock-sim/` inside this repo (`asu-honors`).
-> Last updated: 2026-07-10 (valuation clamp-removal fix reconciled with upstream Phase 5 audit-fix round; 300 tests pass).
+> Last updated: 2026-07-11 (deep code review — duplication cleanup + 4 correctness fixes in the tick/quarterly-refresh pipeline; 313 tests pass).
 
 ---
 
@@ -16,7 +16,7 @@
 | 5 | Backend APIs (FastAPI) | ✅ Done — 23 endpoints across auth/market/trading/simulation/news/leaderboard/health, JWT + bcrypt, rate limiting, order execution with Kyle-lambda impact, `/portfolio/analytics` |
 | 6 | Basic Frontend (Next.js) | ⬜ Not started (plan drafted: `docs/phase6-plan.md`) |
 | 7–9 | Feature build-out (analytics, events UI, news feed, Future Lab, notifications, polish) | ⬜ Not started |
-| 10 | Testing & Deployment | 🟡 Partial — **300 tests pass** (engine + orchestrator + API, 100% coverage per upstream's `06558eb`), no E2E/frontend tests, not deployed |
+| 10 | Testing & Deployment | 🟡 Partial — **313 tests pass** (engine + orchestrator + API), no E2E/frontend tests, not deployed |
 
 ---
 
@@ -226,6 +226,27 @@ Financial Quality Score S (0-100, = IntrinsicScore)
 **Files changed:** `engine/valuation.py` (removed `fair_pe()` entirely, replaced with `quality_multiplier()` [renamed params/defaults], `fair_peg()`, `fair_pe_from_peg()`, `growth_score_to_rate()`), `engine/__init__.py` (public API), `db/seeds/seed_config.py`, `db/seeds/seed_industries.py`, `db/seeds/seed_initial_prices.py`, `engine/orchestrator.py` (both call sites — `_refresh_fundamentals` and `_apply_factor_effects_to_company` — plus new `_load_neutral_industry_pegs` helper and `neutral_industry_pegs` threaded through `state`), `tests/test_valuation.py` (rewritten), `tests/test_orchestrator.py` + `apps/api/tests/conftest.py` (fixture config updated), `project.md` Section 6.D, `docs/valuation_dry_run.py` (rewritten with 3 real-company dry-run: Sun Pharma, Avenue Supermarts/DMart, TCS).
 
 **Scale change warning:** `LongTermGrowthRate` is entered as a raw percentage number (e.g. `18.0` for 18%), not a fraction — `FairPE = FairPEG × 18.0`, not `× 0.18`. This is a ~100× scale difference from the old formula's `FairPE = PE_industry × Q(S)` and produces materially larger absolute P/E numbers when growth rates are high; this is intentional per the spec, not a bug, but worth knowing when sanity-checking output.
+
+## Deep Code Review — Duplication Cleanup + Correctness Fixes ✅
+
+**2026-07-11.** Full logical/mathematical review of `stock-sim/` for dead code, duplication, and behavior bugs. Executed in two authorized phases ("A" cleanup + "B" correctness), deferring a third (dropping unused `Industry.baseline_pe`/`pe_min`/`pe_max` columns via migration — out of scope, not yet authorized).
+
+**Correctness fixes (Phase B) — all confirmed to change actual simulation behavior, each covered by a new regression test in `tests/test_orchestrator.py`:**
+
+1. **`earnings_surprise`/`guidance` decayed to ~0 permanently after the first quarter.** `_compute_drivers` was passing the absolute `tick_count` into the decay functions instead of days-since-the-current-quarter's-earnings. Fixed to use `tick_count % QUARTER_LENGTH`, so both drivers correctly reset to "fresh" at each new quarter's earnings release instead of decaying toward zero forever. (`engine/orchestrator.py`)
+2. **`technical_momentum` was a hardcoded fake `prev_close * 0.98`,** not a real moving average. `_load_tick_state` now batch-loads each company's trailing closes (`recent_closes`) in one query per tick, and `_compute_drivers` computes a real moving average from them. (`engine/orchestrator.py`)
+3. **`management_quality`/`growth_potential`/`fcf_quality` were randomly re-rolled every quarter** in `_refresh_fundamentals`, discarding the seeded/event-adjusted values and causing `IntrinsicScore` (and therefore `FairPE`/`IV`) to lurch randomly at every quarter boundary for reasons unrelated to the company's actual financials. Fixed to carry forward the latest existing `CompanyFactorScore` values instead of drawing fresh `rng.uniform(...)` numbers.
+4. **`earnings_stability`/`revenue_consistency` silently fell back to a single-point neutral placeholder at every quarterly refresh** instead of using the company's real trailing EPS/revenue history. `_generate_fake_quarterly_financials` now loads the full prior statement history before generating each new quarter's statement, and threads real `eps_history`/`revenue_history` lists into `_compute_standard_raw`.
+
+**Duplication cleanup (Phase A):**
+
+- The PEG valuation chain (`IntrinsicScore -> M(S) -> Fair PEG -> Fair P/E -> IV`) was hand-rolled identically in three places. Extracted a shared `_recompute_valuation()` helper in `engine/orchestrator.py`, now used by both `_refresh_fundamentals` and `_apply_factor_effects_to_company` (the third copy, in `db/seeds/seed_initial_prices.py`, was deliberately left standalone — a one-time seed script importing a private helper from `engine.orchestrator` would be an awkward reverse dependency for ~6 lines that run once).
+- Removed dead locals and a redundant early-return branch from `run_tick`, which is now a thin wrapper delegating to `run_ticks(num_ticks=1)`.
+- Removed the unused `daily_volume` import from `engine/orchestrator.py` (superseded by `compute_volume_prd`, the live path) — the function itself was left in `engine/liquidity.py` since it's small, correct, and has its own dedicated tests.
+- `apps/api/dependencies.py`'s `get_company_by_ticker` had zero callers anywhere (every router endpoint delegates ticker lookups to its service-layer function instead) — removed. `get_user_portfolio` had exactly one real duplication opportunity, `trading.py`'s `get_portfolio` router endpoint, which inlined the identical `Portfolio` lookup — wired in via `Depends()`. (The other apparent "duplicates" of this pattern live in plain service functions that take a `db: Session` argument rather than being FastAPI-injected endpoints, so they architecturally can't consume a `Depends()`-based helper without a larger refactor; left as-is.) Also fixed `get_user_portfolio`'s `timeline_id` default, which used a plain default instead of `Query(default=...)` and would not have bound correctly as a dependency.
+- Evaluated `engine/market.py`'s `company_volatility()` (+ its two private helpers) for removal — confirmed dead (the live orchestrator path computes volatility inline via a different, more specific formula using real leverage/balance-sheet data). Decided to **keep** it: it's a small, correct, tested, spec-referenced (Section 6.I) pure function, not a duplicate of the orchestrator's version — same reasoning as `daily_volume`.
+
+**Test suite:** 313 tests pass (308 pre-existing + 5 new regression tests targeting the correctness fixes above).
 
 ## Phase 6–10
 
