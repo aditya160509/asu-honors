@@ -1,6 +1,132 @@
 # Calibration Strategy & Data Opportunity
 
-## 1. Data Inventory
+> **For collaborators**: This is the master reference doc. Every dataset is listed below with what it enables.
+> If you're working on a specific task (calibration, new features, analysis), scan the "What This Enables" sections
+> to see what's available before writing new code or asking for new data.
+
+---
+
+## Data Catalog: Complete Index of Available Datasets
+
+### Legend
+| Icon | Meaning |
+|------|---------|
+| ✅ In repo | File is committed to this repo at the given path |
+| 📁 External | File is outside the repo (too large) — reference by absolute path |
+
+---
+
+### ✅ `data/fundamentals/master_fundamentals.parquet`
+**32 MB | 37,123 rows | 364 columns | 3,833 tickers | 2021–2025 | Quarterly + Annual**
+
+Full financial statements (income statement, balance sheet, cash flow) + market data per company per quarter.
+
+**Key columns**: `trailingPE`, `forwardPE`, `priceToBook`, `dividendYield`, `debtToEquity`, `returnOnEquity`,
+`grossMargins`, `currentRatio`, `marketCap`, `sector`, `industry`, `TotalRevenue`, `OperatingIncome`,
+`NetIncome`, `FreeCashFlow`, `TotalAssets`, `TotalDebt`, `StockholdersEquity`, `CashAndCashEquivalents`,
+`CapitalExpenditure`, and 350+ more.
+
+**What this enables:**
+| Capability | How |
+|---|---|
+| Calibrate industry PE baselines | Compute sector/industry median trailing PE → update `industries.baseline_pe` |
+| Fit the Q(S) logistic curve | Regress real PEs on quality proxies → new `quality_mult_*` config params |
+| Replace synthetic financials | Use real sector-median ratios (COGS/Rev, OpEx/Rev, etc.) in `_generate_fake_quarterly_financials()` |
+| Score real companies | Run engine's scoring logic on real data → validate score ~ PE relationship |
+| Set industry volatility ranges | Market cap distributions per sector → update `base_volatility` |
+| Compute sector betas | Correlation of sector returns with market (if daily returns available) |
+| Seed simulation with real tickers | Pick N real companies, use their actual financials as initial seed data |
+| Backtest valuation model | Run engine on historical real companies → compare predicted vs actual PEs |
+| Industry financial norms | 20+ financial ratio distributions per sector for realistic synthetic generation |
+
+---
+
+### ✅ `data/factors/` — Fama-French Factors (9 parquet files)
+
+**All files: 1.1 MB total | US + Global Developed | 1926–2026**
+
+| File | Rows | Freq | Period | Factors |
+|---|---|---|---|---|
+| `F_F_Research_Data_Factors_daily.parquet` | 26,191 | Daily | 1926-07 – 2026-02 | Mkt-RF, SMB, HML, RF |
+| `F_F_Research_Data_Factors.parquet` | 1,298 | Monthly | 1926-07 – 2025 | Mkt-RF, SMB, HML, RF |
+| `F_F_Research_Data_5_Factors_2x3_daily.parquet` | 15,771 | Daily | 1963-07 – 2026-02 | Mkt-RF, SMB, HML, RMW, CMA, RF |
+| `F_F_Research_Data_5_Factors_2x3.parquet` | 817 | Monthly | 1963-07 – 2025 | Mkt-RF, SMB, HML, RMW, CMA, RF |
+| `F_F_Momentum_Factor_daily.parquet` | 26,090 | Daily | 1926-11 – 2026-02 | Mom |
+| `global_Developed_5_Factors_Daily.parquet` | 9,285 | Daily | 1990-07 – 2026-01 | Mkt-RF, SMB, HML, RMW, CMA, RF |
+| `global_Developed_3_Factors_Daily.parquet` | 9,285 | Daily | 1990-07 – 2026-01 | Mkt-RF, SMB, HML, RF |
+| `global_Developed_MOM_Factor_Daily.parquet` | 9,197 | Daily | 1990-11 – 2026-01 | WML |
+| `global_Developed_ex_US_5_Factors_Daily.parquet` | 9,285 | Daily | 1990-07 – 2026-01 | Mkt-RF, SMB, HML, RMW, CMA, RF |
+
+**What this enables:**
+| Capability | How |
+|---|---|
+| Factor-driven price engine | Replace synthetic OU price process with `Price = IV + β_mkt·MKT + β_smb·SMB + β_hml·HML + β_mom·MOM + ε` |
+| Backtest any multi-factor strategy | 100 years of daily factor returns — test portfolio strategies historically |
+| Compute real betas for companies | Regress company returns on MKT, SMB, HML → use as seed betas |
+| Arbitrage-free factor simulation | Add MKT/SMB/HML/MOM factor exposure to every synthetic company's return |
+| Global simulation mode | Use global developed factors for ex-US market simulation |
+| Validate price driver weights | Factor attribution tells you how much each risk factor explains returns — compare to our 7 synthetic drivers |
+
+---
+
+### ✅ `data/factors/` — AQR Factors (3 CSV files)
+
+**Files: 14 MB total | 23 countries + aggregates | Daily/Monthly**
+
+| File | Size | Period | What it is |
+|---|---|---|---|
+| `Betting-Against-Beta-Equity-Factors-Daily__BAB_Factors.csv` | 6.9 MB | ~1990–2026 | BAB (low-beta minus high-beta) for 23 countries + Global, NA, Europe, Pacific — daily self-financing excess returns |
+| `The-Devil-in-HMLs-Details-Factors-Daily__HML_Devil.csv` | 6.7 MB | ~1990–2026 | "Devil HML" — Asness-Frazzini improved value factor, same country coverage |
+| `Quality-Minus-Junk-Factors-Monthly__QMJ_Factors.csv` | 254 KB | 1957–2026 | QMJ (quality minus junk) — monthly factor returns, US + global aggregates |
+| `Quality-Minus-Junk-Factors-Monthly__HML_Devil.csv` | 308 KB | 1957–2026 | Devil HML monthly version |
+
+**What this enables:**
+| Capability | How |
+|---|---|
+| Low-volatility factor (BAB) | Add BAB factor to engine — simulates the "betting against beta" anomaly |
+| Quality factor (QMJ) | Add QMJ — high-quality stocks outperforming junk, complements our quality scoring |
+| Improved value factor (HML Devil) | Use Asness-Frazzini HML instead of Fama-French HML — better value signal |
+| Country-specific simulation | BAB has data for 23 individual countries → calibrate to specific markets |
+| Multi-factor extensions | BAB + QMJ + HML Devil + FF 5-factor = academic state-of-the-art factor set |
+
+---
+
+### ✅ `data/` — Macro & Sentiment
+
+**Three small files — ~22 KB total**
+
+| File | Rows | Content | What it enables |
+|---|---|---|---|
+| `announcement_surprises.parquet` | 572 | Macro event surprises (actual vs forecast) for US | Macro shock engine: rate decisions, GDP, CPI surprises → sentiment/price shocks |
+| `country_metadata.parquet` | 22 | 22 countries: DM/EM flag, retail share %, analyst coverage | Multi-country simulation calibration |
+| `google_trends.parquet` | 334 | Search volume for "market crash", "bear market", "sell stocks", "recession fear" | Sentiment index → retail fear/greed signal → contrarian price pressure |
+
+---
+
+### 📁 External (Available at `~/Downloads/quant\ 2/` — 5,391 parquet files total)
+
+These are NOT in the repo (too large), but are available by absolute path for ad-hoc analysis.
+
+| Dataset | Path | Size | What it enables |
+|---|---|---|---|
+| Market Universe | `APDI/data/processed/market_universe.parquet` | 312 MB, 10.8M rows | Daily OHLCV + returns for global stocks 2015+ — compute real volatility, betas, correlations |
+| Hourly Indices | `APDI/data/processed/hourly/*.parquet` | ~30 files | S&P 500, FTSE, N225, HSI, NSEI, VIX, etc. hourly bars — intraday volatility patterns |
+| Announcement Calendar | `APDI/data/processed/announcement_calendar.parquet` | Small | Macro event calendar — scheduled FOMC, GDP, CPI, employment dates |
+| Holiday Calendars | `APDI/data/processed/holiday_calendars.pkl` | 164 KB | Trading holiday calendars by country |
+| MSCI Rebalancing | `APDI/data/processed/msci_rebalancing.parquet` | 4.1 KB | MSCI index rebalancing dates — institutional flow events |
+| World Bank | `APDI/data/processed/world_bank.pkl` | 150 KB | Country-level macro indicators for multi-country simulation |
+| AQR Full Set | `factors/data/processed/aqr_csv/*.csv` | All files | Additional AQR definitions, sources, disclosures, SMB/HML/RF/MKT data |
+
+**What external data enables (that in-repo data doesn't):**
+- Compute company-specific daily volatility from 10.8M daily price observations
+- Intraday volatility patterns from hourly index data
+- Country-level trading calendars for global simulation
+- Macro event timing for scheduled shock injection
+- MSCI rebalancing for institutional flow modeling
+
+---
+
+## 1. Data Inventory (Detailed)
 
 ### Master Fundamentals — 3,833 tickers, 364 columns, 37K rows
 Full financial statements (BS/IS/CF) + market data per company per quarter.
