@@ -1071,6 +1071,27 @@ def _mark_to_market(
         pf.total_value = round(total_value, 2)
 
 
+def _scope_target_company_ids(
+    ei: "EventInstance", company_map: dict[int, Company],
+) -> list[int]:
+    """Section 6.N -- companies affected by an event instance's scope.
+
+    company scope -> just that company; industry scope -> every company in
+    that industry; market scope -> every company. Previously only
+    scope_type == "company" was handled here, silently dropping factor-score
+    effects for industry- and market-scope events (e.g. sector-wide
+    regulation, recessions) even though their effect_profile may target
+    financial_quality/moat_score/etc. exactly like company-scope events.
+    """
+    if ei.scope_type == "company":
+        return [ei.scope_ref] if ei.scope_ref in company_map else []
+    if ei.scope_type == "industry":
+        return [cid for cid, c in company_map.items() if c.industry_id == ei.scope_ref]
+    if ei.scope_type == "market":
+        return list(company_map.keys())
+    return []
+
+
 def _apply_event_factor_effects(
     session: Session,
     companies: list[Company],
@@ -1081,8 +1102,11 @@ def _apply_event_factor_effects(
     params: dict[str, float],
     now: datetime,
     industries: dict[int, object],
-) -> None:
-    """Section 6.N -- apply structural event effect_profiles to factor scores and recompute IV."""
+) -> set[int]:
+    """Section 6.N -- apply structural event effect_profiles to factor scores and recompute IV.
+
+    Returns the set of company ids whose factor scores/IV were touched.
+    """
     company_map = {c.id: c for c in companies}
     affected_company_ids: set[int] = set()
 
@@ -1091,11 +1115,6 @@ def _apply_event_factor_effects(
             event_id=ev.id, timeline_id=timeline_id, sim_date=sim_date
         ).all()
         for ei in event_instances:
-            if ei.scope_type != "company":
-                continue
-            cid = ei.scope_ref
-            if cid not in company_map:
-                continue
             profile = ei.applied_effects
             if not profile or not isinstance(profile, dict):
                 continue
@@ -1103,84 +1122,137 @@ def _apply_event_factor_effects(
             if not factor_keys:
                 continue
 
+            target_cids = _scope_target_company_ids(ei, company_map)
+            if not target_cids:
+                continue
+
             days_elapsed = 0
             severity = float(ei.resolved_severity)
             event = session.query(MarketEvent).filter_by(id=ei.event_id).first()
             rho = float(event.decay_rate) if event else 0.1
 
-            # Load current factor scores from MoatSubscore
-            moat_rows = session.query(MoatSubscore).filter_by(company_id=cid).all()
-            factor_scores = {ms.subfactor_key: float(ms.score) for ms in moat_rows}
-
-            # Also include top-level factor scores from CompanyFactorScore
-            latest_cfs = session.query(CompanyFactorScore).filter_by(
-                company_id=cid
-            ).order_by(CompanyFactorScore.fiscal_period.desc()).first()
-            if latest_cfs:
-                factor_scores["management_quality"] = float(latest_cfs.management_quality)
-                factor_scores["growth_potential"] = float(latest_cfs.growth_potential)
-                factor_scores["fcf_quality"] = float(latest_cfs.fcf_quality)
-
-            updated = apply_effect_to_factor_scores(
-                factor_scores, {k: profile[k] for k in factor_keys},
-                severity, rho, days_elapsed,
-            )
-
-            # Write back MoatSubscore updates
-            for ms in moat_rows:
-                if ms.subfactor_key in updated:
-                    ms.score = round(updated[ms.subfactor_key], 4)
-
-            if "management_quality" in updated or "growth_potential" in updated or "fcf_quality" in updated:
-                pw_rows = session.query(IndustryPillarWeight).all()
-                industry_pw: dict[int, dict[str, float]] = {}
-                for pw in pw_rows:
-                    industry_pw.setdefault(pw.industry_id, {})[pw.pillar] = float(pw.weight)
-
-                fq_defs = session.query(FactorDefinition).filter_by(factor_type="fq_sub").all()
-                subfactor_pillar = {fd.key: fd.pillar for fd in fq_defs}
-
-                ind = industries.get(company_map[cid].industry_id)
-                ind_pw = industry_pw.get(company_map[cid].industry_id, {})
-
-                # Gather latest FQ subscores
-                latest_fq_subs = session.query(FinancialQualitySubscore).filter_by(
-                    company_id=cid
-                ).order_by(FinancialQualitySubscore.fiscal_period.desc()).all()
-                fq_subs = {fs.subfactor_key: float(fs.subscore) for fs in latest_fq_subs}
-                fq = financial_quality_composite(fq_subs, ind_pw, subfactor_pillar)
-
-                moat_defs = session.query(FactorDefinition).filter_by(factor_type="moat_sub").all()
-                moat_weights = {md.key: float(md.default_weight) for md in moat_defs if md.default_weight}
-                moat_val = moat_composite(
-                    {ms.subfactor_key: float(ms.score) for ms in moat_rows},
-                    moat_weights,
+            for cid in target_cids:
+                _apply_factor_effects_to_company(
+                    session, cid, company_map, industries, params,
+                    {k: profile[k] for k in factor_keys}, severity, rho, days_elapsed,
                 )
-                mgmt = updated.get("management_quality", 50.0)
-                growth = updated.get("growth_potential", 50.0)
-                fcfq = updated.get("fcf_quality", 50.0)
-                iscore = compute_intrinsic_score(mgmt, moat_val, fq, fcfq, growth)
+                affected_company_ids.add(cid)
 
-                event_q_min = float(params.get("quality_mult_min", DEFAULT_Q_MIN))
-                event_q_max = float(params.get("quality_mult_max", DEFAULT_Q_MAX))
-                event_q_k = float(params.get("quality_mult_k", DEFAULT_Q_STEEPNESS))
-                event_q_c = float(params.get("quality_mult_inflection", DEFAULT_Q_INFLECTION))
-                baseline_pe = float(ind.baseline_pe) if ind else 15.0
-                fpe = fair_pe(
-                    baseline_pe, iscore,
-                    event_q_min, event_q_max, event_q_k, event_q_c,
-                )
+    return affected_company_ids
 
-                eps_val = 0.0
-                latest_inc = session.query(IncomeStatement).filter_by(
-                    company_id=cid
-                ).order_by(IncomeStatement.fiscal_period.desc()).first()
-                if latest_inc:
-                    eps_val = float(latest_inc.eps)
-                iv = intrinsic_value_per_share(fpe, eps_val)
 
-                company_map[cid].intrinsic_value = round(iv, 4)
-                company_map[cid].intrinsic_score = round(iscore, 4)
-                company_map[cid].fair_pe = round(fpe, 4)
+def _apply_factor_effects_to_company(
+    session: Session,
+    cid: int,
+    company_map: dict[int, Company],
+    industries: dict[int, object],
+    params: dict[str, float],
+    effects: dict[str, float],
+    severity: float,
+    rho: float,
+    days_elapsed: int,
+) -> None:
+    """Apply one event's factor-score effects to a single company and recompute IV.
 
-            affected_company_ids.add(cid)
+    Handles all 5 top-level CompanyFactorScore fields (management_quality,
+    moat_score, financial_quality, fcf_quality, growth_potential) plus
+    individual MoatSubscore sub-factor keys. A direct "moat_score" effect
+    nudges the composite after sub-factor aggregation, distinct from
+    sub-factor keys like "innovation" which feed into the composite itself.
+    """
+    moat_rows = session.query(MoatSubscore).filter_by(company_id=cid).all()
+    latest_cfs = session.query(CompanyFactorScore).filter_by(
+        company_id=cid
+    ).order_by(CompanyFactorScore.fiscal_period.desc()).first()
+    if latest_cfs is None:
+        return
+
+    top_level_keys = {"management_quality", "moat_score", "financial_quality", "fcf_quality", "growth_potential"}
+    factor_scores = {ms.subfactor_key: float(ms.score) for ms in moat_rows}
+    factor_scores["management_quality"] = float(latest_cfs.management_quality)
+    factor_scores["moat_score"] = float(latest_cfs.moat_score)
+    factor_scores["financial_quality"] = float(latest_cfs.financial_quality)
+    factor_scores["fcf_quality"] = float(latest_cfs.fcf_quality)
+    factor_scores["growth_potential"] = float(latest_cfs.growth_potential)
+
+    updated = apply_effect_to_factor_scores(factor_scores, effects, severity, rho, days_elapsed)
+
+    # Write back MoatSubscore sub-factor updates (keys that aren't top-level).
+    for ms in moat_rows:
+        if ms.subfactor_key in updated and ms.subfactor_key not in top_level_keys:
+            ms.score = round(updated[ms.subfactor_key], 4)
+
+    pw_rows = session.query(IndustryPillarWeight).all()
+    industry_pw: dict[int, dict[str, float]] = {}
+    for pw in pw_rows:
+        industry_pw.setdefault(pw.industry_id, {})[pw.pillar] = float(pw.weight)
+
+    fq_defs = session.query(FactorDefinition).filter_by(factor_type="fq_sub").all()
+    subfactor_pillar = {fd.key: fd.pillar for fd in fq_defs}
+
+    ind = industries.get(company_map[cid].industry_id)
+    ind_pw = industry_pw.get(company_map[cid].industry_id, {})
+
+    # financial_quality is normally re-derived each fiscal period from
+    # FinancialQualitySubscore rows; an event's direct delta on it is a
+    # temporary override on top of that base, not replaced by a fresh
+    # recompute (otherwise the effect would always be silently discarded).
+    latest_fq_subs = session.query(FinancialQualitySubscore).filter_by(
+        company_id=cid
+    ).order_by(FinancialQualitySubscore.fiscal_period.desc()).all()
+    fq_subs = {fs.subfactor_key: float(fs.subscore) for fs in latest_fq_subs}
+    base_fq = financial_quality_composite(fq_subs, ind_pw, subfactor_pillar) if fq_subs else float(latest_cfs.financial_quality)
+    fq_delta = updated["financial_quality"] - factor_scores["financial_quality"]
+    fq = max(0.0, min(100.0, base_fq + fq_delta))
+
+    moat_defs = session.query(FactorDefinition).filter_by(factor_type="moat_sub").all()
+    moat_weights = {md.key: float(md.default_weight) for md in moat_defs if md.default_weight}
+    # moat_composite requires every subfactor key to have a matching weight;
+    # only pass sub-factors that are actually weighted (seed data may have
+    # MoatSubscore rows with no corresponding moat_sub FactorDefinition yet).
+    weighted_subfactors = {
+        ms.subfactor_key: float(ms.score) for ms in moat_rows
+        if ms.subfactor_key not in top_level_keys and ms.subfactor_key in moat_weights
+    }
+    subfactor_moat = (
+        moat_composite(weighted_subfactors, moat_weights)
+        if weighted_subfactors else float(latest_cfs.moat_score)
+    )
+    moat_delta = updated["moat_score"] - factor_scores["moat_score"]
+    moat_val = max(0.0, min(100.0, subfactor_moat + moat_delta))
+
+    mgmt = updated["management_quality"]
+    growth = updated["growth_potential"]
+    fcfq = updated["fcf_quality"]
+    iscore = compute_intrinsic_score(mgmt, moat_val, fq, fcfq, growth)
+
+    q_min = float(params.get("quality_mult_min", DEFAULT_Q_MIN))
+    q_max = float(params.get("quality_mult_max", DEFAULT_Q_MAX))
+    q_k = float(params.get("quality_mult_k", DEFAULT_Q_STEEPNESS))
+    q_c = float(params.get("quality_mult_inflection", DEFAULT_Q_INFLECTION))
+    baseline_pe = float(ind.baseline_pe) if ind else 15.0
+    fpe = fair_pe(baseline_pe, iscore, q_min, q_max, q_k, q_c)
+
+    eps_val = 0.0
+    latest_inc = session.query(IncomeStatement).filter_by(
+        company_id=cid
+    ).order_by(IncomeStatement.fiscal_period.desc()).first()
+    if latest_inc:
+        eps_val = float(latest_inc.eps)
+    iv = intrinsic_value_per_share(fpe, eps_val)
+
+    # Persist onto the actual CompanyFactorScore row (not just the
+    # denormalized Company fields) so the next tick's driver computations
+    # and any direct query of CompanyFactorScore see the updated scores.
+    latest_cfs.management_quality = round(mgmt, 4)
+    latest_cfs.moat_score = round(moat_val, 4)
+    latest_cfs.financial_quality = round(fq, 4)
+    latest_cfs.fcf_quality = round(fcfq, 4)
+    latest_cfs.growth_potential = round(growth, 4)
+    latest_cfs.intrinsic_score = round(iscore, 4)
+    latest_cfs.fair_pe = round(fpe, 4)
+    latest_cfs.intrinsic_value = round(iv, 4)
+
+    company_map[cid].intrinsic_value = round(iv, 4)
+    company_map[cid].intrinsic_score = round(iscore, 4)
+    company_map[cid].fair_pe = round(fpe, 4)

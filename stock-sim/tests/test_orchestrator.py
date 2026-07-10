@@ -623,6 +623,118 @@ def test_apply_event_factor_effects_only_driver_keys_skipped(session):
     assert result["status"] == "completed"
 
 
+def _run_factor_effects_directly(session, timeline_id, event_id, scope_type, scope_ref, effect_profile, sim_date=None):
+    """Directly exercise _apply_event_factor_effects for one MarketEvent/EventInstance pair."""
+    from engine.orchestrator import _apply_event_factor_effects
+
+    sim_date = sim_date or date(2026, 1, 2)
+    me = MarketEvent(
+        id=event_id, name=f"Test Event {event_id}", category="governance",
+        scope=scope_type, severity_range="(1.0, 1.0)",
+        sentiment="negative", effect_profile=effect_profile,
+        duration_days=10, decay_rate=0.1, probability_weight=1.0,
+    )
+    session.add(me)
+    session.flush()
+    ei = EventInstance(
+        event_id=event_id, timeline_id=timeline_id, scope_ref=scope_ref, scope_type=scope_type,
+        sim_date=sim_date, resolved_severity=1.0,
+        applied_effects=effect_profile,
+        expires_on=sim_date + timedelta(days=10),
+    )
+    session.add(ei)
+    session.commit()
+
+    companies = session.query(Company).all()
+    industries = {ind.id: ind for ind in session.query(Industry).all()}
+    affected = _apply_event_factor_effects(
+        session, companies, [me], sim_date, timeline_id,
+        random.Random(1), {"quality_mult_min": "0.30", "quality_mult_max": "5.00",
+                            "quality_mult_k": "0.12", "quality_mult_inflection": "60"},
+        None, industries,
+    )
+    session.commit()
+    return affected
+
+
+def test_financial_quality_effect_persists_to_company_factor_score(session):
+    """A financial_quality effect must move the real CFS field, not be dropped against a phantom 0 baseline."""
+    timeline_id = _seed_minimal(session)
+    before = session.query(CompanyFactorScore).filter_by(company_id=1).order_by(
+        CompanyFactorScore.fiscal_period.desc()
+    ).first()
+    before_iv = float(before.intrinsic_value)
+    assert float(before.financial_quality) == 50.0
+
+    affected = _run_factor_effects_directly(
+        session, timeline_id, event_id=101, scope_type="company", scope_ref=1,
+        effect_profile={"financial_quality": -10.0},
+    )
+    assert 1 in affected
+
+    after = session.query(CompanyFactorScore).filter_by(company_id=1).order_by(
+        CompanyFactorScore.fiscal_period.desc()
+    ).first()
+    # base 50.0 + (-10.0 * severity=1.0 * decay(0.1, 0)=1.0) = 40.0, not 0.0 - 10.0.
+    assert math.isclose(float(after.financial_quality), 40.0, abs_tol=0.01)
+    assert float(after.intrinsic_value) != before_iv
+
+
+def test_moat_score_direct_key_effect_applies_on_top_of_subfactor_composite(session):
+    """A direct 'moat_score' effect_profile key must nudge the composite, not be silently dropped."""
+    timeline_id = _seed_minimal(session)
+    before = session.query(CompanyFactorScore).filter_by(company_id=1).order_by(
+        CompanyFactorScore.fiscal_period.desc()
+    ).first()
+    before_moat = float(before.moat_score)
+
+    _run_factor_effects_directly(
+        session, timeline_id, event_id=102, scope_type="company", scope_ref=1,
+        effect_profile={"moat_score": 8.0},
+    )
+
+    after = session.query(CompanyFactorScore).filter_by(company_id=1).order_by(
+        CompanyFactorScore.fiscal_period.desc()
+    ).first()
+    assert float(after.moat_score) > before_moat
+
+
+def test_industry_scope_event_applies_factor_effects_to_member_companies(session):
+    """Industry-scope events must apply factor effects to companies in that industry, not be skipped."""
+    timeline_id = _seed_minimal(session)
+    before = session.query(CompanyFactorScore).filter_by(company_id=1).order_by(
+        CompanyFactorScore.fiscal_period.desc()
+    ).first()
+    assert float(before.financial_quality) == 50.0
+
+    affected = _run_factor_effects_directly(
+        session, timeline_id, event_id=103, scope_type="industry", scope_ref=1,
+        effect_profile={"financial_quality": -5.0},
+    )
+    assert 1 in affected
+
+    after = session.query(CompanyFactorScore).filter_by(company_id=1).order_by(
+        CompanyFactorScore.fiscal_period.desc()
+    ).first()
+    assert math.isclose(float(after.financial_quality), 45.0, abs_tol=0.01)
+
+
+def test_market_scope_event_applies_factor_effects_to_all_companies(session):
+    """Market-scope events must apply factor effects to every company, not be skipped."""
+    timeline_id = _seed_minimal(session)
+
+    affected = _run_factor_effects_directly(
+        session, timeline_id, event_id=104, scope_type="market", scope_ref=0,
+        effect_profile={"management_quality": -5.0},
+    )
+    assert 1 in affected
+
+    after = session.query(CompanyFactorScore).filter_by(company_id=1).order_by(
+        CompanyFactorScore.fiscal_period.desc()
+    ).first()
+    assert math.isclose(float(after.management_quality), 45.0, abs_tol=0.01)
+
+
 # ── Multiple companies scenario ────────────────────────────────────────────
 
 
