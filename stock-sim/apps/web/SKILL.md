@@ -42,7 +42,17 @@ Design Read:
   Motion: minimal, purposeful (data updates, no decoration)
   Key constraint: dark theme, custom Canvas charts, monospace numbers,
     green/red throughout, no third-party chart libs
+  Surface class: [TERMINAL | MARKETING] — declare per page before coding
+    TERMINAL → Sections 2, 9, 11, 12 apply at full strictness, zero exceptions
+    MARKETING → full Awwwards license: hero motion, scroll narrative,
+      WebGL/Three.js, signature typography moments allowed
 ```
+
+Every page must be tagged one or the other before a single component is written.
+`/market`, `/companies/[ticker]`, `/portfolio`, `/simulation`, `/leaderboard`,
+`/news` = TERMINAL. `/`, `/login`, `/register`, `/about`, `/pricing` = MARKETING.
+This one tag prevents the single most common failure mode: a beautiful animated
+hero bleeding into the order book, or a terminal grid trying to have a hero section.
 
 If the brief is ambiguous, ask exactly one clarifying question. Never default
 to AI-purple, centered-hero, or "modern SaaS" aesthetics.
@@ -154,6 +164,37 @@ to AI-purple, centered-hero, or "modern SaaS" aesthetics.
 
 ---
 
+### Marketing tokens — TERMINAL surfaces never import these
+
+```css
+--mkt-bg-void: #030304;          /* near-black, deeper than terminal bg */
+--mkt-bg-elevated: #0d0d10;
+--mkt-text-hero: #f4f4f6;
+--mkt-text-muted: #7a7a82;
+
+/* Signature accent — distinct from terminal's functional blue.
+   Used ONLY in marketing hero typography, cursor trails,
+   and the landing chart animation. Never in TERMINAL surfaces. */
+--mkt-signature: #d4ff3f;        /* acid/lime — "quant," not "fintech-blue" */
+--mkt-signature-dim: #8fae2a;
+--mkt-signature-glow: #d4ff3f33;
+
+/* Marketing gets exactly ONE gradient, used once, on the hero
+   background mesh only — never on cards, buttons, or text */
+--mkt-mesh-1: #0a0e14;
+--mkt-mesh-2: #10151d;
+--mkt-mesh-accent: #d4ff3f0d;    /* 5% opacity lime wash */
+
+/* Marketing type scale — larger and looser than terminal */
+--mkt-fs-display: clamp(3rem, 8vw, 7rem);   /* hero headline */
+--mkt-fs-subhead: clamp(1.125rem, 2vw, 1.5rem);
+--mkt-tracking-display: -0.03em;
+```
+
+**Rule:** acid-lime never appears in a TERMINAL surface. It exists so the marketing site has a visual signature distinct from every other fintech landing page's blue-on-navy, without touching the terminal's strict green=up/red=down semantics. If a component ever needs both palettes in the same file, that's a sign the page wasn't tagged correctly in Section 0 — split the file.
+
+---
+
 ## 2. Anti-Slop Rules (Hard Bans)
 
 ### Banned aesthetics (never use)
@@ -206,6 +247,33 @@ to AI-purple, centered-hero, or "modern SaaS" aesthetics.
 - **Right-click context menus** without browser-default fallback.
 - **Drag-and-drop** unless it adds real value (it probably doesn't).
 - **Confetti, celebrations, or success animations** on trades — this is a terminal.
+
+### Marketing anti-slop (still hard bans, different target)
+- No stock-photo hero images of "diverse people looking at laptops."
+- No generic 3-word value prop + rotating word ("Trade Smarter / Faster / Better").
+- No testimonial carousel with fake avatars.
+- No "as seen in" logo strip unless the logos are real.
+- No countdown timers, fake scarcity, or "X people viewing this."
+- No auto-playing background video of stock tickers scrolling (our live Canvas hero in Section 2 replaces this).
+- Motion must be tied to scroll position, cursor, or real data — never decorative looping animation with no input source.
+
+**The one Awwwards moment worth building:** a full-viewport WebGL/Canvas hero where the simulation's actual live market data (150 companies, real OHLC generator) drives a generative visual — not a stock hero image, not an abstract particle field, but literally your own fictional market's price action rendered as art.
+
+```
+components/marketing/HeroMarketPulse.tsx
+
+Renders: full-viewport Canvas, one animated line per sector (15 lines),
+  each line is that sector's real average price history for the sim,
+  rendered as a flowing, glowing ribbon (bezier-smoothed, not raw candles).
+  Lines drift vertically on scroll (parallax by sector volatility —
+  higher volatility sectors have more vertical motion).
+  On cursor move: nearest line brightens, shows sector name + return% label.
+  Colors: --mkt-signature for the sector under cursor, --mkt-text-muted
+  for all others (single accent discipline — never full rainbow).
+  Background: single radial gradient using --mkt-mesh-accent, 5% opacity,
+  centered on cursor position (recalculated via requestAnimationFrame,
+  not on every mousemove event — throttle to rAF).
+```
 
 ---
 
@@ -413,6 +481,65 @@ export function PriceChart({ data, height = 400, indicators = [] }) {
 }
 ```
 
+### 3.1 Sub-pixel rendering correctness
+
+```typescript
+// lib/charts/core/utils.ts — single biggest visual-quality lever
+function alignToDevicePixel(value: number, lineWidth: number, dpr: number): number {
+  const scaled = value * dpr;
+  const isOdd = Math.round(lineWidth * dpr) % 2 === 1;
+  return isOdd ? Math.floor(scaled) + 0.5 : Math.round(scaled);
+}
+```
+
+Apply this to every grid line, axis line, and 1px series line. This one function is worth more to "does this look like Bloomberg or a tutorial" than almost anything else.
+
+### 3.2 Multi-resolution data (LOD — level of detail)
+
+```
+lib/charts/core/LODManager.ts
+
+Given raw 1-minute OHLC data, pre-compute and cache:
+  - 5m, 15m, 1H, 4H, 1D, 1W aggregated candles (open=first, high=max,
+    low=min, close=last, volume=sum)
+  - Store as Map<timeframe, OHLC[]>, computed once on data load
+  - Viewport picks the coarsest resolution where visible candles
+    stays under ~500 (beyond that, render is slow and visually
+    indistinguishable from noise)
+  - Cross-fade opacity over 150ms when the active resolution changes
+    so switching timeframes on zoom doesn't visually "pop"
+```
+
+### 3.3 Volume profile / VPVR
+
+```
+components/charts/VolumeProfile.tsx
+
+Horizontal histogram on the right edge of the chart showing volume
+traded at each price level over the visible range.
+
+Algorithm:
+  1. Filter candles to visible range.
+  2. Compute price range (min low, max high) across visible candles.
+  3. Divide into 40 equal-height price buckets.
+  4. For each candle, distribute its volume proportionally across
+     the buckets its [low, high] spans.
+  5. Render as horizontal bars, right-aligned, ~60% transparency.
+  6. Highlight Point of Control (POC) — the bucket with max volume —
+     with --accent color and a thin horizontal line across full chart width.
+  7. Value Area (VA): contiguous bucket range containing 70% of total
+     volume, shaded differently.
+```
+
+### 3.4 Multi-timeframe overlay ghosting
+
+```
+On crosshair hover in intraday mode: draw a single semi-transparent
+(15% opacity) larger candle in the background showing what daily
+candle this intraday bar belongs to. Pure craft/delight detail,
+built after core chart engine is stable — stretch goal, not blocking.
+```
+
 ---
 
 ## 4. Data Grid System (Virtual Scrolling)
@@ -505,6 +632,38 @@ When a cell value changes on re-render (polling update):
   a `data-changed` attribute on the cell element.
 - Only flash if the value actually changed (deep compare).
 
+### Column resize + reorder (persisted)
+
+```typescript
+// lib/grid/useColumnState.ts
+interface ColumnState {
+  key: string;
+  width: number;
+  order: number;
+  visible: boolean;
+}
+```
+
+- Drag column border to resize (min 40px, max 400px)
+- Drag column header to reorder (ghost preview during drag)
+- Right-click header → "Hide column" / column visibility menu
+- Persist to `localStorage` keyed by grid id: `grid-cols:${gridId}`
+- Reset button restores default order/width/visibility
+
+### Heat coloring + inline sparklines
+
+Add optional column format: `'heatcell'`
+  - Background color intensity scales with the cell's numeric value
+    (e.g. Day Chg column: dim green/red wash, opacity =
+    `Math.min(Math.abs(value) / capValue, 1) * 0.15`)
+  - Present in literally every real trading grid (Bloomberg FLDS,
+    TradingView screener, Koyfin) and absent from almost every
+    generic admin dashboard — cheap to build, instantly recognizable.
+
+MiniChart column: wire as first-class grid column format `'sparkline'`
+  so it's not bolted on — render inline in the grid row, 60x20px,
+  no axes, colored by direction.
+
 ---
 
 ## 5. Complete Component Specs
@@ -592,8 +751,15 @@ Renders 7 horizontal bars (one per price driver):
   - Color: gradient from --negative (score=0) to --positive (score=100)
     via a simple lerp: r = score/100 * g + (1-score/100) * r mix
   - Label: driver name on left, score value on right (mono)
-  - Weight indicator: thin bar behind showing the driver's pillar weight
+  - Weight indicator: thin bar behind — reads as "capacity" (battery/progress
+    track) using a subtly lighter shade of --bg-tertiary, not a second colored bar
   - Bar height: 16px, gap: 4px
+  - Bars animate width on data change (not on mount) — 400ms ease-out,
+    animated via transform: scaleX() (transform-origin: left), not CSS width
+    (CSS transition on width causes layout thrash on Canvas-adjacent elements)
+  - On hover: tooltip with driver's underlying calculation string
+    ("Momentum: 30d price trend, weighted 15% of composite score")
+    — pulls copy from a static driver-definitions map, not hardcoded per instance
 
 State:
   Empty:  "No driver data available."
@@ -640,11 +806,16 @@ Elements:
   3. Quantity input with +/- stepper buttons
      - Min: 1, Max: floor(cashBalance / price) for buy
      - Step: 1
-  4. Estimated execution price display:
+  4. Quick-select percentage buttons for sell: [25%] [50%] [75%] [Max]
+     — computed from current holdings, one tap to set quantity
+  5. Real-time slippage/impact visualization: as quantity changes,
+     show a small horizontal bar where the estimated fill price sits
+     relative to the current bid/ask spread (mini DepthChart, ~120px wide)
+  6. Estimated execution price display:
      - Market price + Kyle-lambda impact = final price
      - Show impact cost as separate line: "Impact: $0.XX"
-  5. Total cost: quantity × estimated price (mono, large)
-  6. Submit button:
+  7. Total cost: quantity × estimated price (mono, large)
+  8. Submit button:
      - Buy mode: green background
      - Sell mode: red background
      - Text: "Buy {N} {TICKER}" / "Sell {N} {TICKER}"
@@ -654,7 +825,12 @@ Elements:
 Behavior:
   - Disable on click — prevent double-submit
   - Show loading spinner in button during submission
-  - On success: toast "Order filled: Bought/Sold {N} {TICKER} @ ${price}"
+  - Order confirmation: slide-up micro-interaction (150ms, translateY + opacity)
+    showing a receipt-style summary before final submit — NOT a blocking modal,
+    an inline expansion within the form itself
+  - On success: brief 200ms scale-pulse (1 → 1.05 → 1) on the total cost number
+    — closest thing to "celebration" in a TERMINAL surface: data confirmation,
+    not a party
   - On error: inline error message below the button
   - Reset quantity to 0 after successful order
   - Call onOrderPlaced() → triggers portfolio refetch
@@ -704,6 +880,14 @@ Renders a donut chart on Canvas:
   - Center text: "Total" + formatted value (mono, bold)
   - Legend below or to the right: colored square + label + "%"
   - Max 5 segments. Group smaller into "Other" (gray).
+  - On hover over a segment: that segment scales outward slightly
+    (translate along its radial angle, 4px, 150ms) and all other
+    segments dim to 40% opacity — a very common "focus" interaction
+    in real analytics tools (Amplitude, Linear) that reads as
+    expensive craft for cheap effort.
+  - Center text transitions between "Total" and the hovered segment's
+    label/value on hover, reverting on mouse leave — no layout shift,
+    just a 100ms crossfade of the text content.
 
 If data is empty: draw an empty donut (full circle in --border color)
   + "No holdings" centered.
@@ -922,6 +1106,23 @@ ErrorState props:
   onRetry?: () => void
 ```
 
+### 5.17 PriceTickerTape (marketing-surface only)
+
+```
+File: components/marketing/PriceTickerTape.tsx
+
+A horizontally scrolling ticker strip (classic Bloomberg/CNBC lower-third
+aesthetic) showing the sim's top 20 movers, auto-scrolling at a constant
+pixel/second rate (CSS transform, not JS interval — use a duplicated
+content trick so the loop is seamless, translateX from 0 to -50% of a
+doubled content block).
+  - Green/red per direction, monospace, ticker + price + change%
+  - Pauses on hover (mouse or touch)
+  - Used ONLY on the marketing landing page header — exactly the kind of
+    "recognizable finance-media signature" that reads as craft on a landing
+    page and would be pointless clutter inside the actual terminal
+```
+
 ---
 
 ## 6. Page-Specific Data Flow
@@ -971,8 +1172,22 @@ Data flow:
   3. useTransactions(timelineId, limit, offset)
      → returns paginated transactions
   4. AllocationChart from holdings sector breakdown
-  5. PerformanceChart from performanceHistory
-  6. HoldingsTable from holdings
+   5. PerformanceChart from performanceHistory
+   6. HoldingsTable from holdings
+```
+
+### `/` — Marketing landing page
+
+```
+Data flow:
+  1. usePublicMarketSnapshot() — GET /api/v1/market?public=true
+     → lightweight, cached 60s server-side, top 20 movers only
+     → powers PriceTickerTape + HeroMarketPulse sector lines
+  2. No auth required, no polling (staleTime: 60000, no refetchInterval)
+  3. CTA → /register, secondary CTA → /login
+  4. Below-fold sections use content-visibility: auto — not rendered/
+     hydrated until scrolled near (hero's WebGL/Canvas work shouldn't
+     compete with lazy sections for main-thread time on load)
 ```
 
 ---
@@ -1015,6 +1230,14 @@ function formatDateFull(ts: number | string): string {
 // Tickers — always uppercase
 function formatTicker(s: string): string {
   return s.toUpperCase();
+}
+
+// Marketing hero numbers — for landing page stat callouts ONLY
+// Splits into huge display number + small suffix for oversized typography
+// Never use for actual portfolio/price data — marketing surfaces exclusively
+function formatHeroNumber(value: number): { display: string; suffix: string } {
+  if (value >= 1000) return { display: (value / 1000).toFixed(1), suffix: 'K' };
+  return { display: value.toString(), suffix: '' };
 }
 ```
 
@@ -1094,6 +1317,30 @@ function formatTicker(s: string): string {
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-sm);
 }
+
+/* Marketing scoped overrides — @layer so they never leak into terminal */
+@layer marketing {
+  .mkt-button {
+    height: 56px;
+    font-size: 1rem;
+    font-weight: 600;
+    border-radius: var(--radius-full);
+    background: var(--mkt-signature);
+    color: #0a0a0b;
+    transition: transform 150ms ease, box-shadow 150ms ease;
+  }
+  .mkt-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px var(--mkt-signature-glow);
+  }
+
+  .mkt-headline {
+    font-size: var(--mkt-fs-display);
+    letter-spacing: var(--mkt-tracking-display);
+    line-height: 0.95;
+    text-wrap: balance;
+  }
+}
 ```
 
 ---
@@ -1111,6 +1358,26 @@ function formatTicker(s: string): string {
 - **Chart crosshair:** instant. No fade-in.
 - **Tab switches:** instant (no slide transitions).
 - **Price flash on poll update:** 300ms color pulse on changed cells only.
+
+### MARKETING motion budget (separate from terminal)
+
+- Hero entrance: staggered fade+translateY on headline words
+  (30ms stagger per word, 400ms duration, ease-out), runs once on
+  page load only, never re-triggers on scroll-back.
+- Scroll-driven reveals ARE allowed here (banned in terminal):
+  sections fade+translateY into view via Intersection Observer,
+  one-shot per section, 500ms, no bounce/spring.
+- Cursor-following elements allowed in hero only (the sector-line
+  brightening in HeroMarketPulse) — never elsewhere.
+- Page transition between marketing routes: 200ms crossfade,
+  View Transitions API (`document.startViewTransition`) where
+  supported, graceful no-op fallback otherwise.
+- Hard line: motion NEVER simulates false urgency (no countdown
+  timers, no "3 people just signed up" toasts). Motion sells craft,
+  not manufactured scarcity.
+- The instant you cross from a marketing route into the authenticated
+  app shell (post-login), motion budget snaps back to TERMINAL rules
+  immediately — no lingering hero-style transitions into /market.
 
 ---
 
@@ -1139,6 +1406,14 @@ function formatTicker(s: string): string {
 - shadcn/ui components are local copies, fully tree-shakable.
 - No moment.js, no lodash — use native Intl + Date APIs.
 
+### Marketing-specific performance budgets
+
+| Metric | Budget |
+|---|---|
+| Marketing hero FCP | < 2.0s (relaxed vs terminal's 1.5s — WebGL/Canvas init cost acceptable) |
+| Marketing hero — main thread block during init | < 100ms |
+| Marketing → terminal transition (login → /market) | < 800ms |
+
 ---
 
 ## 11. State Handling Matrix
@@ -1165,6 +1440,7 @@ function formatTicker(s: string): string {
 | **404 company** | Company detail | "Company '{ticker}' not found" + back link. |
 | **404 route** | layout | Custom 404 page with link to /market. |
 | **API offline** | All | React Query retry 3x with backoff. Toast after 3 failures. |
+| **prefers-reduced-motion** | All | Disable HeroMarketPulse cursor-follow and scroll reveals; show static final-state frame instead. Terminal surfaces already minimal motion, no change needed. |
 
 ---
 
@@ -1200,6 +1476,8 @@ Before handing back any page or component:
 - [ ] Responsive: works at 375px / 768px / 1440px+
 - [ ] Build passes: `npm run build` — zero errors
 - [ ] Lint passes: `npm run lint` — zero warnings
+- [ ] Every page is tagged TERMINAL or MARKETING per Section 0, and only pulls tokens from its own palette
+- [ ] Marketing motion never appears inside an authenticated route
 
 ---
 
@@ -1298,8 +1576,16 @@ Build in this exact dependency chain:
 25. Simulation hooks + AdvanceControls + TimelineBranch + CycleIndicator
 26. `/simulation` page
 27. `/admin` page (stretch)
-28. Polish: loading/empty/error states audit, responsive, dark mode consistency
-29. E2E tests (Playwright)
+28. **Marketing landing page (build AFTER full terminal is functional):**
+    - HeroMarketPulse (Canvas sector visualization)
+    - PriceTickerTape
+    - Landing sections (feature explainer, "how it works," CTA)
+    - Uses only @layer marketing styles + --mkt-* tokens
+    - Zero shared components with authenticated app shell except
+      shadcn primitives (Button, Dialog base — restyled via
+      @layer marketing, never the terminal's @layer components)
+29. Polish: loading/empty/error states audit, responsive, dark mode consistency
+30. E2E tests (Playwright)
 
 ---
 
@@ -1434,6 +1720,17 @@ components/ShortcutCheatSheet.tsx // ? overlay with all shortcuts grouped
 - Block shortcuts when `input`/`textarea`/`contenteditable` focused (except explicit allowlist)
 - No conflicts with native browser shortcuts (`Ctrl/Cmd + P`, `Ctrl/Cmd + T`)
 
+### Discoverability mechanic (Figma/Linear-style modifier reveal)
+
+- Holding `Alt` for 400ms+ reveals small keycap badges overlaid on every
+  actionable element — the badge shows the keyboard shortcut for that
+  action (e.g. `R` next to the reset-viewport button, `G` next to the
+  grid). Badges fade out on modifier release.
+- Implemented via a `useKeyboardReveal` hook that listens for modifier-
+  key held state and toggles a `data-keyboard-hints` attribute on body,
+  with CSS `::after` pseudo-elements for the badge rendering (no
+  additional DOM nodes per element).
+
 ---
 
 ## 18. Color Accessibility (CVD — Color Vision Deficiency)
@@ -1461,6 +1758,13 @@ components/ShortcutCheatSheet.tsx // ? overlay with all shortcuts grouped
 - Order book: buy-side always top-aligned regardless of mode, size bars for depth
 - P/L display: always includes `+`/`-` prefix and arrow icon, never just color
 - Config driven: `lib/theme/cvd-modes.ts` exports all 4 palette objects + selector context
+
+### Mode selector preview
+
+- The CVD dropdown includes a live mini-preview swatch showing a sample
+  up/down pair rendered in each mode, so a user can see the difference
+  before committing — a real accessibility-craft detail, not just a
+  settings toggle.
 
 ### Testing
 
@@ -1528,7 +1832,9 @@ LayoutTree
 ### Interaction patterns
 
 - Drag pane tab to reorder
-- Drag pane edge to resize (min 200px width, 150px height)
+- Drag pane edge to resize (min 200px width, 150px height) — show live
+  numeric readout of the resulting pane dimensions in the resize handle's
+  cursor tooltip while dragging (`420px × 680px`)
 - Right-click pane tab → Split Vertical / Split Horizontal / Close / Duplicate
 - Double-click pane tab → Maximize (full window), double-click again to restore
 - Each pane remembers its state (symbol, timeframe, indicator flags)
@@ -1554,6 +1860,10 @@ LayoutTree
 - Search experience:
   - Fuzzy match on ticker, company name, and description
   - Search results grouped: Exact > Prefix > Fuzzy
+  - Recency + frequency-weighted ranking: recently/frequently viewed
+    tickers surface above alphabetical/fuzzy matches when the query
+    is short (1-2 chars) — traders overwhelmingly re-visit the same
+    handful of symbols, matching how real terminal "go to" dialogs behave
   - Show ticker + exchange + sector icon on each result row
   - Highlight matched characters with `<mark>` styling
   - Keyboard: arrow keys select, Enter confirms, Escape dismisses
