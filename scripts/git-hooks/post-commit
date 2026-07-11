@@ -1,0 +1,25 @@
+#!/bin/sh
+# Warns when a commit touches price/value engine code without updating
+# stock-sim/docs/price-value-engine.md in the same commit.
+
+changed=$(git diff-tree --no-commit-id --name-only -r HEAD)
+
+doc="stock-sim/docs/price-value-engine.md"
+doc_touched=$(echo "$changed" | grep -Fx "$doc")
+
+engine_touched=$(echo "$changed" | grep -E \
+  '^stock-sim/engine/(valuation|scoring|drivers|market|tick|cycle|ohlc|liquidity|events|fundamentals|news_manager)\.py$|^stock-sim/engine/orchestrator\.py$|^stock-sim/db/seeds/seed_config\.py$|^stock-sim/db/seeds/seed_industries\.py$')
+
+if [ -n "$engine_touched" ] && [ -z "$doc_touched" ]; then
+  echo ""
+  echo "⚠️  This commit touched price/value engine files but did not update:"
+  echo "    $doc"
+  echo ""
+  echo "    Changed engine files:"
+  echo "$engine_touched" | sed 's/^/      - /'
+  echo ""
+  echo "    Please reconcile the doc (see its 'Maintenance Protocol' section) and amend/commit."
+  echo ""
+fi
+
+exit 0
