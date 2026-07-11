@@ -1,7 +1,7 @@
 # Fictional Stock Market Simulation — Build Progress
 
 > Tracks status against the Master Prompt & PRD, phase by phase. Location of all code: `stock-sim/` inside this repo (`asu-honors`).
-> Last updated: 2026-07-11 (deep code review — duplication cleanup + 4 correctness fixes in the tick/quarterly-refresh pipeline; 313 tests pass).
+> Last updated: 2026-07-11 (added calibration strategy doc reference + real data asset inventory). See `docs/calibration-strategy.md` for the full 900-line strategic plan mapping all 80+ engine parameters to real financial data (3,833 tickers, Fama-French factors 1926–2026, AQR BAB/QMJ factors).
 
 ---
 
@@ -262,6 +262,29 @@ Financial Quality Score S (0-100, = IntrinsicScore)
 **Not done:** Phase C was scoped to just these three columns; no other schema changes were made. A live Postgres `alembic upgrade head` verification wasn't run (no Postgres instance available in this environment) — `alembic history` confirms the migration chain resolves cleanly (`0001 -> ... -> 0005 (head)`) and the file compiles, but the migration should be smoke-tested against a real Postgres instance before deploying.
 
 **Test suite:** 313 tests pass (SQLite in-memory tests bypass Alembic via `Base.metadata.create_all`, so they validate the ORM model change but not the migration itself).
+
+## Calibration Strategy & Data Assets (Added 2026-07-10)
+
+**`docs/calibration-strategy.md`** — comprehensive 900-line strategic document mapping all 80+ engine parameters to real data columns, with per-dataset action tables, prioritized sprint plan (P0–P3), and 8 ready-to-run Python calibration scripts in sections 6.1–6.8.
+
+**Data files committed to `data/`:**
+| Dataset | Size | Content | Enables |
+|---------|------|---------|---------|
+| `fundamentals/master_fundamentals.parquet` | 32 MB | 3,833 tickers, 364 columns, 37K rows (2021–2025) | Calibrate PEs, fit Q-curve, sector norms, seed with real tickers |
+| `factors/*.parquet` (9 Fama-French files) | 1.1 MB | MKT/SMB/HML/RMW/CMA/Mom — US + Global, daily 1926–2026 | Factor-driven price engine, 100yr backtesting, real beta computation |
+| `factors/*.csv` (3 AQR files) | 14 MB | BAB (23 countries), QMJ, HML Devil — daily/monthly | Low-volatility, quality, and improved-value factor exposures |
+| `announcement_surprises.parquet` | 12 KB | 572 macro event surprises | Macro shock engine wiring |
+| `google_trends.parquet` | 5 KB | Retail sentiment search volume | Sentiment index → contrarian price pressure |
+| `country_metadata.parquet` | 4 KB | 22 countries DM/EM + retail share | Multi-country simulation calibration |
+
+**What's not yet started (Sprint A–E in calibration doc):**
+- Sprint A: Valuation calibration (fit PEs, Q-curve, vols, betas to real data)
+- Sprint B: Financial statement realism (replace `rng.uniform()` with sector-median ratios)
+- Sprint C: Score calibration (distill real financials into quality score distributions)
+- Sprint D: Factor-driven price engine (integrate Fama-French/AQR factors into OU process)
+- Sprint E: Post-capstone (real company seeds, macro shocks, global mode)
+
+**Recommendation for next collaborator:** `docs/calibration-strategy.md` section 6 contains ready-to-run Python scripts. Sprint A is the highest-ROI next step — pure parameter changes, no new models or tables needed.
 
 ## Phase 6–10
 
