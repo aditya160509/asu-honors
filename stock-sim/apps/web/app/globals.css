@@ -1,0 +1,243 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    /* Dark theme — the only theme */
+    --bg-primary: #0a0a0b;
+    --bg-secondary: #121214;
+    --bg-tertiary: #1a1a1e;
+    --bg-hover: #222226;
+    --border: #2a2a2e;
+    --border-light: #333338;
+
+    --text-primary: #e8e8ea;
+    --text-secondary: #98989e;
+    --text-tertiary: #5c5c62;
+    --text-link: #4a9eff;
+
+    --positive: #22c55e;
+    --negative: #ef4444;
+    --neutral: #6b7280;
+    --positive-dim: #166534;
+    --negative-dim: #7f1d1d;
+
+    --accent: #3b82f6;
+    --accent-dim: #1e3a5f;
+    --warning: #f59e0b;
+
+    --chart-grid: #1e1e22;
+    --chart-crosshair: #ffffff22;
+    --chart-volume: #3b82f620;
+    --chart-volume-up: #22c55e20;
+    --chart-volume-down: #ef444420;
+
+    --font-sans: "Inter", "SF Pro Display", -apple-system, BlinkMacSystemFont,
+      "Segoe UI", Roboto, sans-serif;
+    --font-mono: "JetBrains Mono", "SF Mono", "Fira Code", "IBM Plex Mono",
+      "Cascadia Code", "Consolas", monospace;
+
+    --fs-micro: 0.6875rem;
+    --fs-small: 0.75rem;
+    --fs-body: 0.8125rem;
+    --fs-base: 0.875rem;
+    --fs-header: 0.9375rem;
+    --fs-h3: 1.125rem;
+    --fs-h2: 1.375rem;
+    --fs-h1: 1.75rem;
+
+    --space-1: 2px;
+    --space-2: 4px;
+    --space-3: 8px;
+    --space-4: 12px;
+    --space-5: 16px;
+    --space-6: 20px;
+    --space-7: 24px;
+    --space-8: 32px;
+    --space-9: 40px;
+    --space-10: 48px;
+
+    --radius-sm: 4px;
+    --radius-md: 6px;
+    --radius-lg: 8px;
+    --radius-full: 9999px;
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.4);
+    --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.5);
+    --shadow-xl: 0 8px 32px rgba(0, 0, 0, 0.6);
+
+    /* Marketing tokens — TERMINAL surfaces never import these */
+    --mkt-bg-void: #030304;
+    --mkt-bg-elevated: #0d0d10;
+    --mkt-text-hero: #f4f4f6;
+    --mkt-text-muted: #7a7a82;
+
+    --mkt-signature: #d4ff3f;
+    --mkt-signature-dim: #8fae2a;
+    --mkt-signature-glow: #d4ff3f33;
+
+    --mkt-mesh-1: #0a0e14;
+    --mkt-mesh-2: #10151d;
+    --mkt-mesh-accent: #d4ff3f0d;
+
+    --mkt-fs-display: clamp(3rem, 8vw, 7rem);
+    --mkt-fs-subhead: clamp(1.125rem, 2vw, 1.5rem);
+    --mkt-tracking-display: -0.03em;
+
+    /* shadcn/ui CLI-generated components (button, dialog, table, etc.) expect
+       these standard semantic variable names — mapped onto our design tokens
+       above so `npx shadcn add` output works without per-component edits. */
+    --background: var(--bg-primary);
+    --foreground: var(--text-primary);
+    --primary: var(--accent);
+    --primary-foreground: #ffffff;
+    --secondary: var(--bg-tertiary);
+    --secondary-foreground: var(--text-primary);
+    --destructive: var(--negative);
+    --destructive-foreground: #ffffff;
+    --muted: var(--bg-tertiary);
+    --muted-foreground: var(--text-secondary);
+    --accent-foreground: #ffffff;
+    --card: var(--bg-secondary);
+    --card-foreground: var(--text-primary);
+    --input: var(--border);
+    --ring: var(--accent);
+    --radius: var(--radius-md);
+  }
+
+  html,
+  body {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    font-size: var(--fs-base);
+  }
+
+  * {
+    border-color: var(--border);
+  }
+}
+
+@layer components {
+  .table-dense {
+    font-size: var(--fs-small);
+  }
+  .table-dense th {
+    font-weight: 500;
+    color: var(--text-secondary);
+    text-transform: none;
+    letter-spacing: normal;
+    border-bottom: 1px solid var(--border);
+    padding: var(--space-2) var(--space-3);
+  }
+  .table-dense td {
+    border-bottom: 1px solid var(--border);
+    padding: var(--space-2) var(--space-3);
+    vertical-align: middle;
+  }
+
+  .card-flat {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+  }
+  .card-flat:hover {
+    border-color: var(--border-light);
+  }
+
+  .badge-compact {
+    font-size: var(--fs-micro);
+    font-weight: 500;
+    padding: 1px 6px;
+    border-radius: var(--radius-full);
+    text-transform: none;
+  }
+
+  .num {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .text-positive {
+    color: var(--positive);
+  }
+  .text-negative {
+    color: var(--negative);
+  }
+  .text-neutral {
+    color: var(--neutral);
+  }
+}
+
+@layer marketing {
+  .mkt-button {
+    height: 56px;
+    font-size: 1rem;
+    font-weight: 600;
+    border-radius: var(--radius-full);
+    background: var(--mkt-signature);
+    color: #0a0a0b;
+    transition:
+      transform 150ms ease,
+      box-shadow 150ms ease;
+  }
+  .mkt-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px var(--mkt-signature-glow);
+  }
+
+  .mkt-headline {
+    font-size: var(--mkt-fs-display);
+    letter-spacing: var(--mkt-tracking-display);
+    line-height: 0.95;
+    text-wrap: balance;
+  }
+}
+
+@keyframes flash {
+  0% {
+    background-color: var(--accent-dim);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+.cell-flash {
+  animation: flash 300ms ease-out;
+}
+
+@keyframes skeleton-pulse {
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+.skeleton-shimmer {
+  animation: skeleton-pulse 1s ease-in-out infinite;
+}
+
+::selection {
+  background: var(--accent-dim);
+  color: var(--text-primary);
+}
+
+@keyframes ticker {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-shimmer,
+  .cell-flash {
+    animation: none !important;
+  }
+}
