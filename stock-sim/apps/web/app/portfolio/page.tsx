@@ -3,6 +3,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatCard } from "@/components/ui/stat-card";
 import { TerminalShell } from "@/components/layout/TerminalShell";
+import { PageHeader } from "@/components/layout/PageHeader";
 import { HoldingsTable } from "@/components/portfolio/HoldingsTable";
 import { AllocationChart } from "@/components/charts/AllocationChart";
 import { PerformanceChart } from "@/components/charts/PerformanceChart";
@@ -31,7 +32,7 @@ export default function PortfolioPage() {
 
   return (
     <TerminalShell>
-      <h1 className="text-h2 font-semibold text-text-primary mb-4">Portfolio</h1>
+      <PageHeader title="Portfolio" description="Holdings, performance, and trade history for your active timeline." />
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
         <StatCard label="Total Value" value={portfolio.data ? Number(portfolio.data.total_value) : 0} format="price" loading={portfolio.isLoading} size="lg" />

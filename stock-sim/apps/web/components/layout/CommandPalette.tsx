@@ -7,6 +7,7 @@ import {
   LayoutDashboard,
   LineChart,
   Newspaper,
+  Search,
   Trophy,
   Wallet,
 } from "lucide-react";
@@ -51,19 +52,30 @@ export function CommandPalette() {
   }
 
   return (
-    <CommandDialog open={open} onOpenChange={setOpen}>
-      <CommandInput placeholder="Go to page…" />
-      <CommandList>
-        <CommandEmpty>No results found.</CommandEmpty>
-        <CommandGroup heading="Navigation">
-          {NAV_COMMANDS.map((cmd) => (
-            <CommandItem key={cmd.label} onSelect={() => handleSelect(cmd.href)}>
-              <cmd.icon size={14} className="mr-2 text-text-tertiary" />
-              <span>{cmd.label}</span>
-            </CommandItem>
-          ))}
-        </CommandGroup>
-      </CommandList>
-    </CommandDialog>
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        aria-label="Open command palette"
+        className="flex items-center gap-2 h-8 px-2.5 rounded-sm text-text-secondary hover:bg-bg-hover hover:text-text-primary transition-colors"
+      >
+        <Search size={15} />
+        <span className="text-micro text-text-tertiary font-mono hidden md:inline">&#8984;`</span>
+      </button>
+      <CommandDialog open={open} onOpenChange={setOpen}>
+        <CommandInput placeholder="Go to page…" />
+        <CommandList>
+          <CommandEmpty>No results found.</CommandEmpty>
+          <CommandGroup heading="Navigation">
+            {NAV_COMMANDS.map((cmd) => (
+              <CommandItem key={cmd.label} onSelect={() => handleSelect(cmd.href)}>
+                <cmd.icon size={14} className="mr-2 text-text-tertiary" />
+                <span>{cmd.label}</span>
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        </CommandList>
+      </CommandDialog>
+    </>
   );
 }

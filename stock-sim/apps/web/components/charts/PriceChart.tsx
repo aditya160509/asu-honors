@@ -24,7 +24,7 @@ export interface PriceChartProps {
   ticker: string;
 }
 
-const PADDING = { top: 8, right: 8, bottom: 24, left: 64 };
+const PADDING = { top: 8, right: 56, bottom: 24, left: 8 };
 const VOLUME_HEIGHT = 60;
 
 function toOHLC(items: PriceHistoryItem[]): OHLC[] {

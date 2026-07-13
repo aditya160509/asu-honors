@@ -40,7 +40,7 @@ function GridRowInner<T>({ row, columns, rowHeight, top, onClick, changedKeys }:
             }}
           >
             {col.render ? col.render(value, row) : (
-              <GridCell value={value} format={col.format} align={col.align} changed={changed} heatCap={col.heatCap} />
+              <GridCell value={value} format={col.format} align={col.align} changed={changed} heatCap={col.heatCap} colorize={col.colorize} />
             )}
           </div>
         );

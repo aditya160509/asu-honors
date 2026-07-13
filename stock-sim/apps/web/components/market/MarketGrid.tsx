@@ -20,7 +20,7 @@ const COLUMNS: GridColumn<CompanyGridItem>[] = [
   { key: "ticker", header: "Ticker", width: 80, format: "ticker", sortable: true, pin: "left" },
   { key: "name", header: "Name", width: "grow", format: "text", sortable: true },
   { key: "industry_name", header: "Industry", width: 130, format: "badge", sortable: true },
-  { key: "current_price", header: "Price", width: 100, align: "right", format: "price", sortable: true },
+  { key: "current_price", header: "Price", width: 100, align: "right", format: "price", sortable: true, colorize: false },
   { key: "day_change_pct", header: "Day Chg", width: 90, align: "right", format: "pct", sortable: true, heatCap: 5 },
   {
     key: "iv_gap_pct",
@@ -35,7 +35,7 @@ const COLUMNS: GridColumn<CompanyGridItem>[] = [
         : null,
   },
   { key: "market_cap", header: "Mcap", width: 100, align: "right", format: "large", sortable: true },
-  { key: "volatility", header: "Volatility", width: 90, align: "right", format: "pct", sortable: true },
+  { key: "volatility", header: "Volatility", width: 90, align: "right", format: "pct", sortable: true, colorize: false },
 ];
 
 export function MarketGrid({ companies, loading, error, onRetry }: MarketGridProps) {

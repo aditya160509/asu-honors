@@ -19,7 +19,7 @@ export default function LandingPage() {
           <HeroMarketPulse companies={companies} height={800} />
         </div>
 
-        <div className="relative z-10 flex flex-col justify-center h-full px-8 md:px-16 max-w-3xl">
+        <div className="relative z-10 flex flex-col justify-center h-full px-8 md:px-16 max-w-4xl">
           <h1 className="mkt-headline text-mkt-text-hero font-semibold mb-6">
             A simulated market.
             <br />
@@ -44,30 +44,35 @@ export default function LandingPage() {
       </section>
 
       <section className="px-8 md:px-16 py-20 border-t border-white/10" style={{ contentVisibility: "auto" }}>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-10 max-w-5xl">
-          <div>
-            <h3 className="text-mkt-text-hero text-h2 font-semibold mb-2">Intrinsic value engine</h3>
-            <p className="text-mkt-text-muted text-body">
-              Every company has a real fundamentals chain — financial statements, factor scores,
-              and a PEG-based fair value that drifts with growth expectations and economic
-              sentiment.
-            </p>
-          </div>
-          <div>
-            <h3 className="text-mkt-text-hero text-h2 font-semibold mb-2">Seven price drivers</h3>
-            <p className="text-mkt-text-muted text-body">
-              Price moves on value gap, earnings surprises, news sentiment, economic outlook,
-              guidance, technical momentum, and institutional buying pressure — mean-reverting
-              toward intrinsic value.
-            </p>
-          </div>
-          <div>
-            <h3 className="text-mkt-text-hero text-h2 font-semibold mb-2">Branch the timeline</h3>
-            <p className="text-mkt-text-muted text-body">
-              Fork the simulation at any point to test a different scenario, with its own
-              seeded randomness and event overrides.
-            </p>
-          </div>
+        <div className="max-w-5xl flex flex-col">
+          {[
+            {
+              n: "01",
+              title: "Intrinsic value engine",
+              body: "Every company has a real fundamentals chain — financial statements, factor scores, and a PEG-based fair value that drifts with growth expectations and economic sentiment.",
+            },
+            {
+              n: "02",
+              title: "Seven price drivers",
+              body: "Price moves on value gap, earnings surprises, news sentiment, economic outlook, guidance, technical momentum, and institutional buying pressure — mean-reverting toward intrinsic value.",
+            },
+            {
+              n: "03",
+              title: "Branch the timeline",
+              body: "Fork the simulation at any point to test a different scenario, with its own seeded randomness and event overrides.",
+            },
+          ].map((item, i) => (
+            <div
+              key={item.n}
+              className={`grid grid-cols-[64px_1fr] md:grid-cols-[96px_280px_1fr] gap-x-6 gap-y-2 py-8 ${
+                i > 0 ? "border-t border-white/10" : ""
+              }`}
+            >
+              <span className="num text-mkt-signature-dim text-h1 font-semibold leading-none">{item.n}</span>
+              <h3 className="text-mkt-text-hero text-h2 font-semibold col-span-1">{item.title}</h3>
+              <p className="text-mkt-text-muted text-body max-w-lg md:col-start-3">{item.body}</p>
+            </div>
+          ))}
         </div>
       </section>
 

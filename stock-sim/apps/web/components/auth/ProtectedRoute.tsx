@@ -16,8 +16,9 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
   if (isLoading || !isAuthenticated) {
     return (
-      <div className="flex h-[60vh] items-center justify-center text-text-secondary text-body">
-        Loading…
+      <div className="flex h-[60vh] flex-col items-center justify-center gap-3">
+        <span className="h-6 w-6 rounded-sm bg-accent skeleton-shimmer" aria-hidden />
+        <span className="text-small text-text-tertiary">Loading…</span>
       </div>
     );
   }

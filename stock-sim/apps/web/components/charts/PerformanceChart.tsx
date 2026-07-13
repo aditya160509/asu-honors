@@ -18,7 +18,7 @@ export interface PerformanceChartProps {
   loading?: boolean;
 }
 
-const PADDING = { top: 8, right: 8, bottom: 24, left: 64 };
+const PADDING = { top: 8, right: 56, bottom: 24, left: 8 };
 
 export function PerformanceChart({ portfolioValues, indexValues, height = 250, loading }: PerformanceChartProps) {
   const [hover, setHover] = React.useState<{ x: number; y: number } | null>(null);

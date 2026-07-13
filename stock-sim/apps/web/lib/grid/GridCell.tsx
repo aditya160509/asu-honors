@@ -9,6 +9,7 @@ export interface GridCellProps {
   align?: "left" | "right" | "center";
   changed?: boolean;
   heatCap?: number;
+  colorize?: boolean;
 }
 
 function formatByType(value: unknown, format?: GridColumnFormat): string {
@@ -43,14 +44,14 @@ function colorClassFor(value: unknown, format?: GridColumnFormat): string {
 
 const MONO_FORMATS: GridColumnFormat[] = ["price", "pct", "large", "ticker", "date"];
 
-export const GridCell = React.memo(function GridCell({ value, format, align = "left", changed, heatCap }: GridCellProps) {
+export const GridCell = React.memo(function GridCell({ value, format, align = "left", changed, heatCap, colorize = true }: GridCellProps) {
   if (value == null && format !== "badge") {
     return <span className="text-text-tertiary num">N/A</span>;
   }
 
   const formatted = formatByType(value, format);
   const monoClass = MONO_FORMATS.includes(format ?? "text") ? "num" : "";
-  const colorClass = format === "pct" || format === "price" ? colorClassFor(value, format) : "";
+  const colorClass = colorize && (format === "pct" || format === "price") ? colorClassFor(value, format) : "";
   const alignClass = align === "right" ? "text-right block" : align === "center" ? "text-center block" : "";
   const tickerClass = format === "ticker" ? "font-bold uppercase" : "";
 

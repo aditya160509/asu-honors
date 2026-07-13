@@ -40,7 +40,7 @@ export function drawCrosshairTooltip({ ctx, x, y, lines }: CrosshairTooltipArgs)
   const padY = 6;
   const lineHeight = 14;
   ctx.save();
-  ctx.font = "11px var(--font-mono), monospace";
+  ctx.font = "11px 'JetBrains Mono', monospace";
   const textWidth = Math.max(...lines.map((l) => ctx.measureText(l).width));
   const boxW = textWidth + padX * 2;
   const boxH = lines.length * lineHeight + padY * 2;

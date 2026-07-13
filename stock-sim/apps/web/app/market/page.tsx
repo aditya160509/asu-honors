@@ -1,6 +1,7 @@
 "use client";
 
 import { TerminalShell } from "@/components/layout/TerminalShell";
+import { PageHeader } from "@/components/layout/PageHeader";
 import { MarketGrid } from "@/components/market/MarketGrid";
 import { CycleIndicator } from "@/components/simulation/CycleIndicator";
 import { useMarketGrid, useCycleState } from "@/lib/api/hooks/useMarket";
@@ -11,10 +12,11 @@ export default function MarketPage() {
 
   return (
     <TerminalShell>
-      <div className="flex items-center justify-between mb-4">
-        <h1 className="text-h2 font-semibold text-text-primary">Market</h1>
-        {cycle && <CycleIndicator phase={cycle.cycle_phase} tooltip={`Sim date: ${cycle.sim_date}`} />}
-      </div>
+      <PageHeader
+        title="Market"
+        description="150 companies across 15 industries — live simulated pricing."
+        actions={cycle && <CycleIndicator phase={cycle.cycle_phase} tooltip={`Sim date: ${cycle.sim_date}`} />}
+      />
       <MarketGrid
         companies={data?.companies ?? []}
         loading={isLoading}

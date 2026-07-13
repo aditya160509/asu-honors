@@ -14,6 +14,8 @@ export interface GridColumn<T> {
   /** For 'heatcell' format: value magnitude that maps to full-intensity background. */
   heatCap?: number;
   accessor?: (row: T) => unknown;
+  /** Set false for magnitude-only pct/price fields (e.g. volatility) that shouldn't imply directionality via green/red. Default true. */
+  colorize?: boolean;
 }
 
 export type SortDirection = "asc" | "desc" | null;

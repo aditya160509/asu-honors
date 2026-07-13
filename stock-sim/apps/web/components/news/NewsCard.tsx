@@ -12,11 +12,18 @@ const SENTIMENT_VARIANT: Record<string, "positive" | "negative" | "default"> = {
   neutral: "default",
 };
 
+// Backend severity is a 0-100 scale (see db/seeds/seed_events.py severity_range, e.g. "10..50").
 function severityLabel(severity: number): string {
-  if (severity >= 0.75) return "Critical";
-  if (severity >= 0.5) return "High";
-  if (severity >= 0.25) return "Med";
+  if (severity >= 75) return "Critical";
+  if (severity >= 50) return "High";
+  if (severity >= 25) return "Med";
   return "Low";
+}
+
+function severityVariant(severity: number): "default" | "warning" | "negative" {
+  if (severity >= 75) return "negative";
+  if (severity >= 25) return "warning";
+  return "default";
 }
 
 export function NewsCard({ item }: NewsCardProps) {
@@ -25,7 +32,7 @@ export function NewsCard({ item }: NewsCardProps) {
       <div className="flex items-center gap-2">
         <span className="num text-micro text-text-tertiary">{formatDate(item.sim_date)}</span>
         <Badge variant={SENTIMENT_VARIANT[item.sentiment] ?? "default"}>{item.sentiment}</Badge>
-        <Badge variant="warning">{severityLabel(item.severity)}</Badge>
+        <Badge variant={severityVariant(item.severity)}>{severityLabel(item.severity)}</Badge>
         {(item.company_name || item.industry_name) && (
           <Badge variant="accent">{item.company_name ?? item.industry_name}</Badge>
         )}

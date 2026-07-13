@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { TerminalShell } from "@/components/layout/TerminalShell";
+import { PageHeader } from "@/components/layout/PageHeader";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -107,7 +108,7 @@ export default function AdminPage() {
 
   return (
     <TerminalShell>
-      <h1 className="text-h2 font-semibold text-text-primary mb-4">Admin</h1>
+      <PageHeader title="Admin" description="Simulation config parameters and manual event injection." />
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4">
         <Card>
           <CardHeader>
