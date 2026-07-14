@@ -6,6 +6,8 @@ import { Input } from "@/components/ui/input";
 import { usePlaceOrder } from "@/lib/api/hooks/useOrders";
 import { formatPrice } from "@/lib/utils";
 import { cn } from "@/lib/utils";
+import { DashboardPanel } from "@/components/dashboard/primitives/DashboardPanel";
+import { MER_HAIRLINE } from "@/components/dashboard/primitives/tokens";
 import type { OrderSide } from "@/lib/api/types";
 
 export interface OrderFormProps {
@@ -61,109 +63,133 @@ export function OrderForm({ ticker, currentPrice, cashBalance, sharesHeld = 0, o
   }
 
   return (
-    <div className="card-flat p-4 flex flex-col gap-3">
-      <div className="flex rounded-sm overflow-hidden border border-border">
-        <button
-          type="button"
-          onClick={() => {
-            setSide("buy");
-            setShowConfirm(false);
-          }}
-          className={cn("flex-1 h-8 text-body font-medium", side === "buy" ? "bg-positive text-white" : "bg-bg-tertiary text-text-secondary")}
-        >
-          Buy
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            setSide("sell");
-            setShowConfirm(false);
-          }}
-          className={cn("flex-1 h-8 text-body font-medium", side === "sell" ? "bg-negative text-white" : "bg-bg-tertiary text-text-secondary")}
-        >
-          Sell
-        </button>
-      </div>
-
-      {priceUnavailable ? (
-        <p className="text-small text-text-tertiary">No price available.</p>
-      ) : (
-        <>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="icon" onClick={() => setQuantity((q) => clampQty(q - 1))}>
-              −
-            </Button>
-            <Input
-              type="number"
-              min={0}
-              max={maxQty}
-              value={quantity}
-              onChange={(e) => setQuantity(clampQty(Number(e.target.value) || 0))}
-              className="text-center num"
-            />
-            <Button variant="outline" size="icon" onClick={() => setQuantity((q) => clampQty(q + 1))}>
-              +
-            </Button>
-          </div>
-
-          {side === "sell" && sharesHeld > 0 && (
-            <div className="flex gap-1.5">
-              {SELL_PRESETS.map((pct) => (
-                <button
-                  key={pct}
-                  type="button"
-                  onClick={() => setQuantity(clampQty(Math.floor(sharesHeld * pct)))}
-                  className="flex-1 h-6 text-micro rounded-sm border border-border text-text-secondary hover:bg-bg-hover"
-                >
-                  {pct === 1 ? "Max" : `${pct * 100}%`}
-                </button>
-              ))}
-            </div>
-          )}
-
-          <div className="flex flex-col gap-1 text-small">
-            <div className="flex justify-between">
-              <span className="text-text-secondary">Est. price</span>
-              <span className="num text-text-primary">{formatPrice(currentPrice)}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-text-secondary">Total</span>
-              <span className={cn("num text-text-primary font-semibold text-base transition-transform", pulse && "scale-105")}>
-                {formatPrice(estimatedTotal)}
-              </span>
-            </div>
-          </div>
-
-          {insufficientFunds && (
-            <p className="text-micro text-negative">
-              Need {formatPrice(estimatedTotal - cashBalance)} more. Cash: {formatPrice(cashBalance)}
-            </p>
-          )}
-          {noSharesToSell && <p className="text-micro text-negative">You don&apos;t hold any {ticker}</p>}
-          {quantity >= maxQty && maxQty > 0 && <p className="text-micro text-text-tertiary">Max: {maxQty}</p>}
-
-          {showConfirm && !disabled && (
-            <div className="rounded-sm border border-border bg-bg-tertiary p-2 text-small animate-in fade-in slide-in-from-bottom-1 duration-150">
-              Confirm: {side === "buy" ? "Buy" : "Sell"} {quantity} {ticker} @ {formatPrice(currentPrice)} ={" "}
-              {formatPrice(estimatedTotal)}
-            </div>
-          )}
-
-          {placeOrder.isError && <p className="text-micro text-negative">{(placeOrder.error as Error)?.message ?? "Order failed"}</p>}
-
-          <Button
-            variant={side === "buy" ? "buy" : "sell"}
-            disabled={disabled}
-            onClick={handleSubmit}
+    <DashboardPanel eyebrow="Trade" title={`Order Ticket — ${ticker}`}>
+      <div className="flex flex-col gap-3">
+        <div className={cn("flex overflow-hidden rounded-mer-sm border", MER_HAIRLINE)}>
+          <button
+            type="button"
+            onClick={() => {
+              setSide("buy");
+              setShowConfirm(false);
+            }}
+            className={cn(
+              "h-8 flex-1 text-body font-medium transition-colors",
+              "focus-visible:outline focus-visible:outline-2 focus-visible:outline-[color:var(--mer-accent-500)] focus-visible:outline-offset-[-2px]",
+              side === "buy" ? "bg-positive text-white" : "bg-mer-surface-3 text-mer-ink-secondary"
+            )}
           >
-            {placeOrder.isPending
-              ? "Submitting…"
-              : showConfirm
-                ? `Confirm ${side === "buy" ? "Buy" : "Sell"}`
-                : `${side === "buy" ? "Buy" : "Sell"} ${quantity || ""} ${ticker}`}
-          </Button>
-        </>
-      )}
-    </div>
+            Buy
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setSide("sell");
+              setShowConfirm(false);
+            }}
+            className={cn(
+              "h-8 flex-1 text-body font-medium transition-colors",
+              "focus-visible:outline focus-visible:outline-2 focus-visible:outline-[color:var(--mer-accent-500)] focus-visible:outline-offset-[-2px]",
+              side === "sell" ? "bg-negative text-white" : "bg-mer-surface-3 text-mer-ink-secondary"
+            )}
+          >
+            Sell
+          </button>
+        </div>
+
+        {priceUnavailable ? (
+          <p className="text-small text-mer-ink-tertiary">No price available.</p>
+        ) : (
+          <>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="icon" onClick={() => setQuantity((q) => clampQty(q - 1))}>
+                −
+              </Button>
+              <Input
+                type="number"
+                min={0}
+                max={maxQty}
+                value={quantity}
+                onChange={(e) => setQuantity(clampQty(Number(e.target.value) || 0))}
+                className="num text-center"
+              />
+              <Button variant="outline" size="icon" onClick={() => setQuantity((q) => clampQty(q + 1))}>
+                +
+              </Button>
+            </div>
+
+            {side === "sell" && sharesHeld > 0 && (
+              <div className="flex gap-1.5">
+                {SELL_PRESETS.map((pct) => (
+                  <button
+                    key={pct}
+                    type="button"
+                    onClick={() => setQuantity(clampQty(Math.floor(sharesHeld * pct)))}
+                    className={cn(
+                      "h-6 flex-1 rounded-mer-sm border text-micro text-mer-ink-secondary transition-colors hover:bg-mer-surface-3",
+                      "focus-visible:outline focus-visible:outline-2 focus-visible:outline-[color:var(--mer-accent-500)] focus-visible:outline-offset-1",
+                      MER_HAIRLINE
+                    )}
+                  >
+                    {pct === 1 ? "Max" : `${pct * 100}%`}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <div className="flex flex-col gap-1 text-small">
+              <div className="flex justify-between">
+                <span className="text-mer-ink-secondary">Est. price</span>
+                <span className="num text-mer-ink-primary">{formatPrice(currentPrice)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-mer-ink-secondary">Total</span>
+                <span
+                  className={cn(
+                    "num text-base font-semibold text-mer-ink-primary transition-transform",
+                    pulse && "scale-105"
+                  )}
+                >
+                  {formatPrice(estimatedTotal)}
+                </span>
+              </div>
+            </div>
+
+            {insufficientFunds && (
+              <p className="text-micro text-negative">
+                Need {formatPrice(estimatedTotal - cashBalance)} more. Cash: {formatPrice(cashBalance)}
+              </p>
+            )}
+            {noSharesToSell && <p className="text-micro text-negative">You don&apos;t hold any {ticker}</p>}
+            {quantity >= maxQty && maxQty > 0 && <p className="text-micro text-mer-ink-tertiary">Max: {maxQty}</p>}
+
+            {showConfirm && !disabled && (
+              <div
+                className={cn(
+                  "animate-in fade-in slide-in-from-bottom-1 rounded-mer-sm border bg-mer-surface-3 p-2 text-small duration-150",
+                  MER_HAIRLINE
+                )}
+              >
+                Confirm: {side === "buy" ? "Buy" : "Sell"} {quantity} {ticker} @ {formatPrice(currentPrice)} ={" "}
+                {formatPrice(estimatedTotal)}
+              </div>
+            )}
+
+            {placeOrder.isError && <p className="text-micro text-negative">{(placeOrder.error as Error)?.message ?? "Order failed"}</p>}
+
+            <Button
+              variant={side === "buy" ? "buy" : "sell"}
+              disabled={disabled}
+              onClick={handleSubmit}
+            >
+              {placeOrder.isPending
+                ? "Submitting…"
+                : showConfirm
+                  ? `Confirm ${side === "buy" ? "Buy" : "Sell"}`
+                  : `${side === "buy" ? "Buy" : "Sell"} ${quantity || ""} ${ticker}`}
+            </Button>
+          </>
+        )}
+      </div>
+    </DashboardPanel>
   );
 }

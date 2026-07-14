@@ -1,6 +1,8 @@
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
+"use client";
+
 import { EmptyState } from "@/components/ui/empty-state";
+import { Skeleton } from "@/components/ui/skeleton";
+import { DashboardPanel } from "@/components/dashboard/primitives/DashboardPanel";
 import { cn } from "@/lib/utils";
 import type { ValuationResponse } from "@/lib/api/types";
 
@@ -20,10 +22,10 @@ function ScoreBar({ label, value }: { label: string; value: number | string }) {
   return (
     <div className="flex flex-col gap-1">
       <div className="flex items-center justify-between text-small">
-        <span className="text-text-secondary">{label}</span>
-        <span className="num text-text-primary">{num.toFixed(0)}</span>
+        <span className="text-mer-ink-secondary">{label}</span>
+        <span className="num text-mer-ink-primary">{num.toFixed(0)}</span>
       </div>
-      <div className="h-1 bg-bg-tertiary rounded-full overflow-hidden">
+      <div className="h-1 overflow-hidden rounded-full bg-mer-surface-4">
         <div className={cn("h-full", scoreColor(num))} style={{ width: `${Math.min(100, Math.max(0, num))}%` }} />
       </div>
     </div>
@@ -32,11 +34,8 @@ function ScoreBar({ label, value }: { label: string; value: number | string }) {
 
 export function ValuationCard({ valuation, loading }: ValuationCardProps) {
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Valuation</CardTitle>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-3">
+    <DashboardPanel eyebrow="Fair Value Model" title="Valuation">
+      <div className="flex flex-col gap-3">
         {loading ? (
           <>
             <Skeleton width="100%" height={14} />
@@ -48,12 +47,12 @@ export function ValuationCard({ valuation, loading }: ValuationCardProps) {
         ) : (
           <>
             <div className="flex items-center justify-between text-small">
-              <span className="text-text-secondary">Intrinsic Score</span>
-              <span className="num text-text-primary font-semibold">{Number(valuation.intrinsic_score).toFixed(1)}</span>
+              <span className="text-mer-ink-secondary">Intrinsic Score</span>
+              <span className="num font-semibold text-mer-ink-primary">{Number(valuation.intrinsic_score).toFixed(1)}</span>
             </div>
             <div className="flex items-center justify-between text-small">
-              <span className="text-text-secondary">Fair P/E</span>
-              <span className="num text-text-primary">{Number(valuation.fair_pe).toFixed(2)}</span>
+              <span className="text-mer-ink-secondary">Fair P/E</span>
+              <span className="num text-mer-ink-primary">{Number(valuation.fair_pe).toFixed(2)}</span>
             </div>
             <ScoreBar label="Moat Score" value={valuation.moat_score} />
             <ScoreBar label="Management Quality" value={valuation.management_quality} />
@@ -62,7 +61,7 @@ export function ValuationCard({ valuation, loading }: ValuationCardProps) {
             <ScoreBar label="Financial Quality" value={valuation.financial_quality} />
           </>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </DashboardPanel>
   );
 }
