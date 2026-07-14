@@ -1,110 +1,104 @@
 "use client";
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { StatCard } from "@/components/ui/stat-card";
+import * as React from "react";
 import { TerminalShell } from "@/components/layout/TerminalShell";
 import { PageHeader } from "@/components/layout/PageHeader";
-import { HoldingsTable } from "@/components/portfolio/HoldingsTable";
-import { AllocationChart } from "@/components/charts/AllocationChart";
-import { PerformanceChart } from "@/components/charts/PerformanceChart";
-import { AnalyticsCards } from "@/components/portfolio/AnalyticsCards";
+import { useStaggerReveal } from "@/lib/dashboard/useStaggerReveal";
 import { usePortfolio, usePortfolioAnalytics, useTransactions } from "@/lib/api/hooks/usePortfolio";
-import { formatPrice } from "@/lib/utils";
+import { useMarketGrid } from "@/lib/api/hooks/useMarket";
+import { PortfolioHero } from "@/components/portfolio/PortfolioHero";
+import { PortfolioHealthStrip } from "@/components/portfolio/PortfolioHealthStrip";
+import { HoldingsTable } from "@/components/portfolio/HoldingsTable";
+import { AllocationStudio } from "@/components/portfolio/AllocationStudio";
+import { RiskExposureSection } from "@/components/portfolio/RiskExposureSection";
+import { TransactionTimeline } from "@/components/portfolio/TransactionTimeline";
+import { PortfolioIntelligence } from "@/components/portfolio/PortfolioIntelligence";
+import { WatchlistPreviewSection } from "@/components/dashboard/WatchlistPreviewSection";
+import { QuickActionsSection } from "@/components/dashboard/QuickActionsSection";
 
-const SECTOR_COLORS = ["#3b82f6", "#22c55e", "#f59e0b", "#ef4444", "#6b7280"];
+const TRANSACTIONS_PAGE_SIZE = 25;
 
+/**
+ * Institutional portfolio management workspace. Composition follows the five questions a portfolio
+ * manager actually asks, in order: performance (Hero) -> why (Health Strip + Holdings) -> risk
+ * (Risk & Exposure) -> opportunity (Allocation Studio, Risk & Exposure winners/losers) -> what next
+ * (Intelligence, Watchlist, Quick Actions). Layout is a 12-column grid with each module owning its
+ * own col-span (same convention as components/dashboard/DashboardGrid.tsx) so the page reads as an
+ * asymmetric composition — one full-width protagonist (Hero), not a uniform tile grid.
+ */
 export default function PortfolioPage() {
   const portfolio = usePortfolio();
   const analytics = usePortfolioAnalytics();
-  const transactions = useTransactions();
+  const [transactionsLimit, setTransactionsLimit] = React.useState(TRANSACTIONS_PAGE_SIZE);
+  const transactions = useTransactions(undefined, transactionsLimit);
+  const market = useMarketGrid();
 
-  const allocation = (analytics.data?.allocation_by_sector ?? []).map((s, i) => ({
-    label: s.sector,
-    value: Number(s.value),
-    color: SECTOR_COLORS[i % SECTOR_COLORS.length],
-  }));
+  const containerRef = useStaggerReveal<HTMLDivElement>();
 
-  const performanceSeries =
-    transactions.data
-      ?.slice()
-      .reverse()
-      .map((t, i) => ({ time: new Date(t.sim_date).getTime(), value: i })) ?? [];
+  const totalValue = portfolio.data ? Number(portfolio.data.total_value) : 0;
+  const allocation = analytics.data?.allocation_by_sector ?? [];
+  const companies = market.data?.companies ?? [];
 
   return (
     <TerminalShell>
-      <PageHeader title="Portfolio" description="Holdings, performance, and trade history for your active timeline." />
+      <PageHeader title="Portfolio" description="Holdings, performance, and risk for your active timeline." />
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-        <StatCard label="Total Value" value={portfolio.data ? Number(portfolio.data.total_value) : 0} format="price" loading={portfolio.isLoading} size="lg" />
-        <StatCard label="Cash Balance" value={portfolio.data ? Number(portfolio.data.cash_balance) : 0} format="price" loading={portfolio.isLoading} />
-        <StatCard
-          label="Day Change"
-          value={portfolio.data?.day_change_pct ?? 0}
-          format="pct"
-          trend={portfolio.data?.day_change_pct != null && portfolio.data.day_change_pct >= 0 ? "up" : "down"}
-          loading={portfolio.isLoading}
-        />
-        <StatCard
-          label="Total Return"
-          value={analytics.data?.total_return_pct ?? 0}
-          format="pct"
-          trend={analytics.data && analytics.data.total_return_pct >= 0 ? "up" : "down"}
-          loading={analytics.isLoading}
-        />
-      </div>
-
-      <AnalyticsCards analytics={analytics.data} loading={analytics.isLoading} />
-
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4 mt-4">
-        <div className="flex flex-col gap-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Holdings</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <HoldingsTable holdings={portfolio.data?.holdings ?? []} loading={portfolio.isLoading} error={portfolio.isError} onRetry={() => portfolio.refetch()} />
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Performance</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <PerformanceChart portfolioValues={performanceSeries} loading={transactions.isLoading} />
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Transaction History</CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-2">
-              {(transactions.data ?? []).length === 0 && !transactions.isLoading && (
-                <p className="text-small text-text-tertiary">No transactions yet.</p>
-              )}
-              {(transactions.data ?? []).map((t) => (
-                <div key={t.id} className="flex justify-between text-small border-b border-border py-1.5 last:border-0">
-                  <span className="text-text-tertiary num">{t.sim_date}</span>
-                  <span className={t.side === "buy" ? "text-positive" : "text-negative"}>{t.side.toUpperCase()}</span>
-                  <span className="num text-text-primary">
-                    {t.quantity} {t.ticker}
-                  </span>
-                  <span className="num text-text-primary">{formatPrice(Number(t.price))}</span>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
+      <div ref={containerRef} className="grid grid-cols-1 gap-5 lg:grid-cols-12">
+        <div className="col-span-full">
+          <PortfolioHero
+            portfolio={portfolio.data}
+            analytics={analytics.data}
+            transactions={transactions.data ?? []}
+            loading={portfolio.isLoading}
+            transactionsLoading={transactions.isLoading}
+            isError={portfolio.isError}
+            onRetry={() => portfolio.refetch()}
+          />
         </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Allocation</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <AllocationChart data={allocation} loading={analytics.isLoading} />
-          </CardContent>
-        </Card>
+        <div className="col-span-full">
+          <PortfolioHealthStrip
+            portfolio={portfolio.data}
+            analytics={analytics.data}
+            companies={companies}
+            loading={portfolio.isLoading || analytics.isLoading}
+          />
+        </div>
+
+        <div className="col-span-full">
+          <HoldingsTable
+            holdings={portfolio.data?.holdings ?? []}
+            totalValue={totalValue}
+            loading={portfolio.isLoading}
+            error={portfolio.isError}
+            onRetry={() => portfolio.refetch()}
+          />
+        </div>
+
+        <div className="col-span-full lg:col-span-6">
+          <AllocationStudio allocation={allocation} loading={analytics.isLoading} />
+        </div>
+        <div className="col-span-full lg:col-span-6">
+          <RiskExposureSection holdings={portfolio.data?.holdings ?? []} totalValue={totalValue} loading={portfolio.isLoading} />
+        </div>
+
+        <div className="col-span-full lg:col-span-8">
+          <TransactionTimeline
+            transactions={transactions.data ?? []}
+            loading={transactions.isLoading}
+            error={transactions.isError}
+            onRetry={() => transactions.refetch()}
+            hasMore={(transactions.data?.length ?? 0) >= transactionsLimit}
+            loadingMore={transactions.isFetching && !transactions.isLoading}
+            onLoadMore={() => setTransactionsLimit((n) => n + TRANSACTIONS_PAGE_SIZE)}
+          />
+        </div>
+        <div className="col-span-full lg:col-span-4">
+          <PortfolioIntelligence portfolio={portfolio.data} analytics={analytics.data} loading={portfolio.isLoading || analytics.isLoading} />
+        </div>
+
+        <WatchlistPreviewSection />
+        <QuickActionsSection />
       </div>
     </TerminalShell>
   );
