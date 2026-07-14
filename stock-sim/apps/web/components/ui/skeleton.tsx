@@ -10,7 +10,7 @@ export interface SkeletonProps {
 export function Skeleton({ className, width, height }: SkeletonProps) {
   return (
     <div
-      className={cn("skeleton-shimmer bg-bg-tertiary rounded-sm", className)}
+      className={cn("skeleton-sweep rounded-sm", className)}
       style={{ width, height }}
     />
   );

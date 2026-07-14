@@ -1,9 +1,15 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
+import { surfaceVariants, type SurfaceProps } from "@/components/ui/surface";
 
-export const Card = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
-  ({ className, ...props }, ref) => (
-    <div ref={ref} className={cn("card-flat", className)} {...props} />
+export interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
+  /** @default "flat" — pass "raised" for page-level panels that want extra depth */
+  variant?: SurfaceProps["variant"];
+}
+
+export const Card = React.forwardRef<HTMLDivElement, CardProps>(
+  ({ className, variant = "flat", ...props }, ref) => (
+    <div ref={ref} className={cn(surfaceVariants({ variant }), className)} {...props} />
   )
 );
 Card.displayName = "Card";

@@ -67,15 +67,86 @@
     --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.5);
     --shadow-xl: 0 8px 32px rgba(0, 0, 0, 0.6);
 
+    /* Glow shadows — focus rings, active buy/sell affordances */
+    --shadow-glow-accent: 0 0 0 1px var(--accent-dim), 0 4px 20px -4px rgba(59, 130, 246, 0.35);
+    --shadow-glow-positive: 0 0 0 1px var(--positive-dim), 0 4px 20px -4px rgba(34, 197, 94, 0.3);
+    --shadow-glow-negative: 0 0 0 1px var(--negative-dim), 0 4px 20px -4px rgba(239, 68, 68, 0.3);
+
+    /* Surface system — layered depth for panels, cards, and floating UI */
+    --surface-flat: var(--bg-secondary);
+    --surface-raised: linear-gradient(180deg, var(--bg-tertiary) 0%, var(--bg-secondary) 100%);
+    --surface-glass-bg: rgba(18, 18, 20, 0.72);
+    --surface-glass-border: rgba(255, 255, 255, 0.08);
+    --surface-glass-blur: 16px;
+
+    /* Larger radius, reserved for elevated/glass surfaces (modals, drawers) */
+    --radius-xl: 12px;
+
+    /* Motion tokens — single source of truth for CSS transitions + GSAP */
+    --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+    --ease-in-out-smooth: cubic-bezier(0.65, 0, 0.35, 1);
+    --duration-fast: 120ms;
+    --duration-base: 200ms;
+    --duration-slow: 400ms;
+
+    /* Meridian (mer) — Global Layout design tokens, from DESIGN_SPEC.md.
+       Namespaced the same way --mkt-* already is: a second token set that
+       lives alongside the main one rather than replacing it, consumed only
+       by the shell (Sidebar/Header/StatusBar/etc). Pages keep using the
+       tokens above until their own redesign pass. Market-direction color
+       intentionally reuses --positive/--negative/--warning above — never a
+       second competing pair. */
+    --mer-bg-canvas: #0a0c10;
+    --mer-surface-1: #101318;
+    --mer-surface-2: #161a21;
+    --mer-surface-3: #1d222b;
+    --mer-surface-4: #242a35;
+    --mer-glass-bg: rgba(16, 19, 24, 0.72);
+    --mer-glass-border: rgba(255, 255, 255, 0.1);
+    --mer-glass-blur: 20px;
+
+    --mer-ink-primary: #e8eaee;
+    --mer-ink-secondary: #9ba3b0;
+    --mer-ink-tertiary: #5c6470;
+
+    --mer-stroke-hairline: rgba(255, 255, 255, 0.07);
+    --mer-stroke-emphasis: rgba(255, 255, 255, 0.13);
+    --mer-stroke-accent: rgba(62, 111, 224, 0.55);
+
+    --mer-accent-500: #3e6fe0;
+    --mer-accent-600: #3159be;
+    --mer-accent-300: #7c9ef0;
+
+    --mer-shadow-rest: 0 1px 2px rgba(4, 6, 10, 0.5), 0 0 0 1px var(--mer-stroke-hairline);
+    --mer-shadow-raised: 0 4px 12px rgba(4, 6, 10, 0.5), 0 1px 3px rgba(4, 6, 10, 0.6),
+      0 0 0 1px var(--mer-stroke-emphasis);
+    --mer-shadow-overlay: 0 24px 64px rgba(4, 6, 10, 0.6), 0 8px 24px rgba(4, 6, 10, 0.5),
+      0 0 0 1px var(--mer-stroke-emphasis);
+    --mer-glow-accent: 0 0 0 3px rgba(62, 111, 224, 0.22);
+
+    --mer-radius-xs: 4px;
+    --mer-radius-sm: 6px;
+    --mer-radius-md: 10px;
+    --mer-radius-lg: 14px;
+
     /* Marketing tokens — TERMINAL surfaces never import these */
-    --mkt-bg-void: #030304;
+    --mkt-bg-void: #000000; /* pure black — explicit deviation from DESIGN_SPEC.md's "no pure black" rule,
+      scoped to the marketing/landing surface only, per explicit user direction. Never used on TERMINAL
+      surfaces (--bg-primary/--mer-bg-canvas remain near-black, unaffected). */
     --mkt-bg-elevated: #0d0d10;
     --mkt-text-hero: #f4f4f6;
     --mkt-text-muted: #7a7a82;
+    --mkt-text-desat: #b4b4bc; /* default body text for the AI-fintech landing direction — high-contrast, desaturated gray */
 
     --mkt-signature: #d4ff3f;
     --mkt-signature-dim: #8fae2a;
     --mkt-signature-glow: #d4ff3f33;
+
+    /* "Action Hue" — the single accent for the AI-fintech landing direction. Flat only: no gradient,
+       no glow/shadow variant. Distinct from --mkt-signature (the older landing direction's accent);
+       both exist so neither section silently borrows the other's color. */
+    --mkt-action-hue: #0055ff;
+    --mkt-action-hue-pressed: #0040c4;
 
     --mkt-mesh-1: #0a0e14;
     --mkt-mesh-2: #10151d;
@@ -101,6 +172,8 @@
     --accent-foreground: #ffffff;
     --card: var(--bg-secondary);
     --card-foreground: var(--text-primary);
+    --popover: var(--bg-tertiary);
+    --popover-foreground: var(--text-primary);
     --input: var(--border);
     --ring: var(--accent);
     --radius: var(--radius-md);
@@ -146,6 +219,67 @@
     border-color: var(--border-light);
   }
 
+  /* Surface system — see components/ui/surface.tsx for the React variant API */
+  .surface-raised {
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
+  }
+  .surface-raised:hover {
+    border-color: var(--border-light);
+  }
+
+  .surface-glass {
+    background: var(--surface-glass-bg);
+    border: 1px solid var(--surface-glass-border);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-lg);
+    backdrop-filter: blur(var(--surface-glass-blur));
+    -webkit-backdrop-filter: blur(var(--surface-glass-blur));
+  }
+
+  /* Meridian glass — Global Layout overlays only (dropdowns, panels, mobile
+     drawer). Persistent chrome (Sidebar/Header/StatusBar) never uses this —
+     it stays matte + "lit" (see .mer-surface-lit below). */
+  .mer-glass {
+    background: var(--mer-glass-bg);
+    border: 1px solid var(--mer-glass-border);
+    border-radius: var(--mer-radius-lg);
+    box-shadow: var(--mer-shadow-overlay);
+    backdrop-filter: blur(var(--mer-glass-blur)) saturate(140%);
+    -webkit-backdrop-filter: blur(var(--mer-glass-blur)) saturate(140%);
+  }
+
+  /* Ambient mesh canvas — fixed, non-scrolling, near-imperceptible.
+     Applied once at the shell root (TerminalShell), behind everything. */
+  .mer-mesh-canvas {
+    background-color: var(--mer-bg-canvas);
+    background-image: radial-gradient(
+        ellipse 1000px 800px at 0% 0%,
+        rgba(62, 111, 224, 0.05),
+        transparent 60%
+      ),
+      radial-gradient(ellipse 1000px 800px at 100% 100%, rgba(78, 143, 184, 0.04), transparent 60%),
+      url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix type='matrix' values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.015 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+    background-repeat: no-repeat, no-repeat, repeat;
+    background-size: cover, cover, 160px 160px;
+  }
+
+  /* "Lit" matte surface — Meridian's top-light gradient (+3% lightness
+     fading over ~120px). Applied to persistent chrome so it never reads as
+     a flat solid fill, without resorting to glass. */
+  .mer-surface-lit {
+    position: relative;
+  }
+  .mer-surface-lit::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, rgba(255, 255, 255, 0) 120px);
+    pointer-events: none;
+  }
+
   .badge-compact {
     font-size: var(--fs-micro);
     font-weight: 500;
@@ -157,6 +291,7 @@
   .num {
     font-family: var(--font-mono);
     font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
   }
 
   .text-positive {
@@ -198,6 +333,71 @@
     line-height: 0.95;
     text-wrap: balance;
   }
+
+  /* Action Hue CTA — sharp corners, flat fill, no gradient/shadow. Deliberately not a variant of
+     .mkt-button (which is intentionally soft/rounded/glowing for the older landing direction). */
+  .mkt-action-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 48px;
+    padding: 0 24px;
+    font-size: 0.875rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    white-space: nowrap;
+    border-radius: 0;
+    background: var(--mkt-action-hue);
+    color: #ffffff;
+    transition: background-color 100ms cubic-bezier(0.19, 1, 0.22, 1);
+  }
+  .mkt-action-button:hover,
+  .mkt-action-button:focus-visible {
+    background: var(--mkt-action-hue-pressed);
+  }
+  .mkt-action-button:active {
+    background: var(--mkt-action-hue-pressed);
+  }
+  /* Crisp, sharp-edged focus ring — an offset outline, never a blurred box-shadow "glow", to stay
+     inside the "no soft consumer UI patterns" rule while still meeting WCAG 2.4.7. */
+  .mkt-action-button:focus-visible {
+    outline: 2px solid #ffffff;
+    outline-offset: 2px;
+  }
+
+  /* Shared card-lighting treatment — top-light gradient + a crisp (non-blurred) inset border-glow
+     on hover. Reused by the Executive Tear Sheet, Cross-Asset Matrix cells, the Order Ticket panel,
+     and the AI Hero's mock data grid, so "premium lighting" is one rule, not four near-duplicates. */
+  .mkt-card-lit {
+    position: relative;
+    transition:
+      background-color 150ms cubic-bezier(0.16, 1, 0.3, 1),
+      box-shadow 150ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .mkt-card-lit::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, transparent 55%);
+    pointer-events: none;
+  }
+  .mkt-card-lit:hover {
+    background-color: rgba(255, 255, 255, 0.02);
+    box-shadow: inset 0 0 0 1px rgba(0, 85, 255, 0.4);
+  }
+
+  /* Cross-Asset Matrix tick flash — flat, linear decay to neutral. No easing curve. */
+  @keyframes mkt-tick-flash {
+    0% {
+      background-color: var(--flash-color, var(--mkt-action-hue));
+    }
+    100% {
+      background-color: transparent;
+    }
+  }
+  .mkt-tick-flash {
+    animation: mkt-tick-flash 300ms linear;
+  }
 }
 
 @keyframes flash {
@@ -227,9 +427,61 @@
   animation: skeleton-pulse 1s ease-in-out infinite;
 }
 
+@keyframes skeleton-sweep {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.skeleton-sweep {
+  background-image: linear-gradient(
+    100deg,
+    var(--bg-tertiary) 30%,
+    var(--bg-hover) 50%,
+    var(--bg-tertiary) 70%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-sweep 1.6s ease-in-out infinite;
+}
+
+/* Marketing-scoped skeleton — reuses the @keyframes skeleton-sweep motion above (no new animation),
+   just mkt-toned colors so a marketing surface never pulls in --bg-tertiary/--bg-hover. */
+.mkt-skeleton-sweep {
+  background-image: linear-gradient(100deg, #0d0d10 30%, #1a1a1e 50%, #0d0d10 70%);
+  background-size: 200% 100%;
+  animation: skeleton-sweep 1.6s ease-in-out infinite;
+}
+
 ::selection {
   background: var(--accent-dim);
   color: var(--text-primary);
+}
+
+/* Scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-light) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background-color: var(--border-light);
+  border-radius: var(--radius-full);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--text-tertiary);
+  background-clip: padding-box;
 }
 
 @keyframes ticker {
@@ -243,7 +495,10 @@
 
 @media (prefers-reduced-motion: reduce) {
   .skeleton-shimmer,
-  .cell-flash {
+  .skeleton-sweep,
+  .cell-flash,
+  .mkt-skeleton-sweep,
+  .mkt-tick-flash {
     animation: none !important;
   }
 }

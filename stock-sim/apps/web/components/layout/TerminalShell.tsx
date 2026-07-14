@@ -1,14 +1,55 @@
-import { Header } from "@/components/layout/Header";
-import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
+"use client";
 
-/** Shared shell for all TERMINAL-surface authenticated routes. */
+import * as React from "react";
+import { usePathname } from "next/navigation";
+import { Header } from "@/components/layout/Header";
+import { Sidebar, SidebarProvider } from "@/components/layout/Sidebar";
+import { StatusBar } from "@/components/layout/StatusBar";
+import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
+import { logActivity } from "@/lib/activity/useActivityLog";
+import { getPageLabel } from "@/lib/nav/routeLabels";
+import { fadeIn } from "@/lib/motion";
+
+/**
+ * Shared shell for all TERMINAL-surface authenticated routes: Sidebar +
+ * 3-layer Header + content + StatusBar, over the ambient mesh canvas.
+ *
+ * Note: each page currently mounts its own <TerminalShell>, rather than a
+ * persistent Next.js route-group layout — so the shell remounts on every
+ * navigation (no cross-page shared state beyond localStorage). That's an
+ * existing architectural pattern predating this pass; changing it would mean
+ * moving every page file into a route group, which is out of scope for a
+ * Global-Layout-only change. Flagged as a follow-up recommendation.
+ */
 export function TerminalShell({ children }: { children: React.ReactNode }) {
   return (
     <ProtectedRoute>
-      <div className="min-h-screen bg-bg-primary">
-        <Header />
-        <main className="px-5 py-5 max-w-[1800px] mx-auto">{children}</main>
-      </div>
+      <SidebarProvider>
+        <div className="mer-mesh-canvas flex h-screen flex-col">
+          <div className="flex flex-1 overflow-hidden">
+            <Sidebar />
+            <div className="flex flex-1 flex-col overflow-y-auto">
+              <Header />
+              <RouteFadeContent>
+                <main className="mx-auto w-full max-w-[1800px] px-5 py-5">{children}</main>
+              </RouteFadeContent>
+            </div>
+          </div>
+          <StatusBar />
+        </div>
+      </SidebarProvider>
     </ProtectedRoute>
   );
+}
+
+function RouteFadeContent({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  const contentRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (pathname) logActivity({ kind: "nav", label: `Visited ${getPageLabel(pathname)}` });
+    if (contentRef.current) fadeIn(contentRef.current);
+  }, [pathname]);
+
+  return <div ref={contentRef}>{children}</div>;
 }

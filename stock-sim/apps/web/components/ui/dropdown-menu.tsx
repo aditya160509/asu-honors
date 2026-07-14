@@ -3,6 +3,7 @@
 import * as React from "react";
 import * as DropdownPrimitive from "@radix-ui/react-dropdown-menu";
 import { cn } from "@/lib/utils";
+import { surfaceVariants } from "@/components/ui/surface";
 
 export const DropdownMenu = DropdownPrimitive.Root;
 export const DropdownMenuTrigger = DropdownPrimitive.Trigger;
@@ -16,7 +17,8 @@ export const DropdownMenuContent = React.forwardRef<
       ref={ref}
       sideOffset={sideOffset}
       className={cn(
-        "z-50 min-w-[180px] rounded-md border border-border bg-bg-secondary p-1 shadow-md",
+        "z-50 min-w-[180px] p-1",
+        surfaceVariants({ variant: "glass" }),
         className
       )}
       {...props}

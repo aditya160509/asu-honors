@@ -3,6 +3,7 @@
 import * as React from "react";
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 import { cn } from "@/lib/utils";
+import { surfaceVariants } from "@/components/ui/surface";
 
 export const TooltipProvider = TooltipPrimitive.Provider;
 export const Tooltip = TooltipPrimitive.Root;
@@ -16,7 +17,8 @@ export const TooltipContent = React.forwardRef<
     ref={ref}
     sideOffset={sideOffset}
     className={cn(
-      "z-50 rounded-sm border border-border bg-bg-tertiary px-3 py-2 text-micro text-text-primary max-w-[240px]",
+      "z-50 px-3 py-2 text-micro text-text-primary max-w-[240px]",
+      surfaceVariants({ variant: "glass" }),
       className
     )}
     {...props}

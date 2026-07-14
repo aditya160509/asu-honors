@@ -4,6 +4,7 @@ import * as React from "react";
 import * as SelectPrimitive from "@radix-ui/react-select";
 import { Check, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { surfaceVariants } from "@/components/ui/surface";
 
 export const Select = SelectPrimitive.Root;
 export const SelectValue = SelectPrimitive.Value;
@@ -15,7 +16,7 @@ export const SelectTrigger = React.forwardRef<
   <SelectPrimitive.Trigger
     ref={ref}
     className={cn(
-      "flex h-8 w-full items-center justify-between rounded-sm border border-border bg-bg-primary px-3 text-body text-text-primary focus:border-accent focus:outline-none",
+      "flex h-8 w-full items-center justify-between rounded-sm border border-border bg-bg-primary px-3 text-body text-text-primary focus:border-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring",
       className
     )}
     {...props}
@@ -31,10 +32,7 @@ SelectTrigger.displayName = "SelectTrigger";
 export function SelectContent({ className, children, ...props }: React.ComponentPropsWithoutRef<typeof SelectPrimitive.Content>) {
   return (
     <SelectPrimitive.Portal>
-      <SelectPrimitive.Content
-        className={cn("z-50 rounded-md border border-border bg-bg-secondary shadow-md", className)}
-        {...props}
-      >
+      <SelectPrimitive.Content className={cn("z-50", surfaceVariants({ variant: "glass" }), className)} {...props}>
         <SelectPrimitive.Viewport className="p-1">{children}</SelectPrimitive.Viewport>
       </SelectPrimitive.Content>
     </SelectPrimitive.Portal>

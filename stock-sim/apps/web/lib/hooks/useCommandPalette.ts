@@ -1,10 +1,16 @@
 "use client";
 
 import * as React from "react";
+import { createSharedToggle } from "./createSharedToggle";
+
+const commandPaletteToggle = createSharedToggle();
+
+/** Call from anywhere (Sidebar quick actions, Header search trigger) to open the palette. */
+export const openCommandPalette = commandPaletteToggle.open;
 
 /** Basic command palette open state + global trigger shortcuts (reduced scope — see SKILL.md section 17). */
 export function useCommandPalette() {
-  const [open, setOpen] = React.useState(false);
+  const open = commandPaletteToggle.useValue();
 
   React.useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -14,11 +20,11 @@ export function useCommandPalette() {
 
       if ((e.metaKey || e.ctrlKey) && (e.key === "`" || e.key.toLowerCase() === "f")) {
         e.preventDefault();
-        setOpen((v) => !v);
+        commandPaletteToggle.set(!commandPaletteToggle.get());
         return;
       }
       if (e.key === "Escape") {
-        setOpen(false);
+        commandPaletteToggle.close();
       }
       if (e.key === "/" && !isEditable) {
         const searchInput = document.querySelector<HTMLInputElement>('input[aria-label*="earch" i]');
@@ -32,5 +38,5 @@ export function useCommandPalette() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  return { open, setOpen };
+  return { open, setOpen: commandPaletteToggle.set };
 }

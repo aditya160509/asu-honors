@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { useMe } from "@/lib/api/hooks/useAuth";
+import { logActivity } from "@/lib/activity/useActivityLog";
 import type { UserResponse } from "@/lib/api/types";
 
 interface AuthContextValue {
@@ -23,7 +24,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const { data: user, isLoading } = useMe(hasToken);
 
+  const prevUserRef = React.useRef<UserResponse | undefined>(undefined);
+  React.useEffect(() => {
+    if (!prevUserRef.current && user) {
+      logActivity({ kind: "auth", label: `Signed in as ${user.display_name}` });
+    }
+    prevUserRef.current = user;
+  }, [user]);
+
   const logout = React.useCallback(() => {
+    logActivity({ kind: "auth", label: "Signed out" });
     localStorage.removeItem("token");
     setHasToken(false);
     window.location.href = "/login";
