@@ -108,7 +108,7 @@ export function PreviewDrawer({ ticker, onClose, watched, onToggleWatch }: Previ
               <Separator className="mt-3" />
 
               <div className="flex-1 overflow-y-auto px-5 py-3">
-                <div className="text-micro font-medium uppercase tracking-wide text-text-tertiary">Key stats</div>
+                <div className="text-micro font-medium uppercase text-text-tertiary">Key stats</div>
                 <div className="mt-1">
                   <StatRow label="Market cap" value={formatLarge(company.data?.market_cap ?? null)} />
                   <StatRow label="P/E ratio" value={company.data?.pe_ratio != null ? Number(company.data.pe_ratio).toFixed(2) : "N/A"} />
@@ -124,7 +124,7 @@ export function PreviewDrawer({ ticker, onClose, watched, onToggleWatch }: Previ
 
                 {company.data?.description && (
                   <>
-                    <div className="mt-4 text-micro font-medium uppercase tracking-wide text-text-tertiary">About</div>
+                    <div className="mt-4 text-micro font-medium uppercase text-text-tertiary">About</div>
                     <p className="mt-1.5 text-small leading-relaxed text-text-secondary">{company.data.description}</p>
                   </>
                 )}

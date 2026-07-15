@@ -42,7 +42,7 @@ export function KpiCounter({
 
   return (
     <div className="flex flex-col gap-1.5">
-      <span className="flex items-center gap-1.5 text-micro font-medium uppercase tracking-wide text-mer-ink-tertiary">
+      <span className="flex items-center gap-1.5 text-micro font-medium uppercase text-mer-ink-tertiary">
         {Icon && <Icon size={11} />}
         {label}
       </span>

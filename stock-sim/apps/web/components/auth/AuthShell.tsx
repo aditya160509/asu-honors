@@ -23,7 +23,7 @@ export function AuthShell({ children }: AuthShellProps) {
 
   return (
     <main className="min-h-screen bg-mkt-bg-void flex items-center justify-center px-4 py-8">
-      <div className="w-full max-w-[1040px] rounded-2xl border border-white/10 bg-mkt-bg-elevated shadow-xl overflow-hidden grid grid-cols-1 md:grid-cols-2">
+      <div className="w-full max-w-[1040px] rounded-lg border border-border bg-bg-secondary shadow-md overflow-hidden grid grid-cols-1 md:grid-cols-2">
         <div className="relative hidden md:flex flex-col justify-end min-h-[600px] bg-mkt-bg-void overflow-hidden">
           <div className="absolute inset-0">
             <HeroMarketPulse companies={companies} height={600} />
@@ -63,7 +63,7 @@ export function AuthShell({ children }: AuthShellProps) {
             </Link>
           )}
           {showTabs && (
-          <div className="flex items-center gap-1 mb-8 self-start rounded-full bg-white/5 p-1">
+          <div className="flex items-center gap-1 mb-8 self-start rounded-full bg-bg-tertiary p-1">
             <button
               type="button"
               onClick={() => router.push("/register")}

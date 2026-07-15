@@ -24,7 +24,7 @@ interface RankedHolding {
 function HoldingList({ title, items, empty }: { title: string; items: RankedHolding[]; empty: string }) {
   return (
     <div className="flex flex-col gap-1">
-      <span className="px-2 text-micro uppercase tracking-wide text-mer-ink-tertiary">{title}</span>
+      <span className="px-2 text-micro uppercase text-mer-ink-tertiary">{title}</span>
       {items.length === 0 ? (
         <p className="px-2 py-2 text-small text-mer-ink-tertiary">{empty}</p>
       ) : (

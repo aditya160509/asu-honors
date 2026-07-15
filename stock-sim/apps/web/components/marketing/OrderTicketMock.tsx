@@ -59,7 +59,7 @@ export function OrderTicketMock({ simulatedLoadMs = 850 }: { simulatedLoadMs?: n
           type="button"
           tabIndex={-1}
           onClick={() => setSide("buy")}
-          className={`mkt-press num h-grid-8 flex-1 border border-white/10 text-small font-semibold uppercase tracking-wide transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-white focus-visible:outline-offset-[-2px] ${
+          className={`mkt-press num h-grid-8 flex-1 border border-white/10 text-small font-semibold uppercase tracking-tight transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-white focus-visible:outline-offset-[-2px] ${
             side === "buy" ? "bg-positive text-black" : "text-mkt-text-muted"
           }`}
         >
@@ -69,7 +69,7 @@ export function OrderTicketMock({ simulatedLoadMs = 850 }: { simulatedLoadMs?: n
           type="button"
           tabIndex={-1}
           onClick={() => setSide("sell")}
-          className={`mkt-press num h-grid-8 flex-1 border border-l-0 border-white/10 text-small font-semibold uppercase tracking-wide transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-white focus-visible:outline-offset-[-2px] ${
+          className={`mkt-press num h-grid-8 flex-1 border border-l-0 border-white/10 text-small font-semibold uppercase tracking-tight transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-white focus-visible:outline-offset-[-2px] ${
             side === "sell" ? "bg-negative text-black" : "text-mkt-text-muted"
           }`}
         >
@@ -78,7 +78,7 @@ export function OrderTicketMock({ simulatedLoadMs = 850 }: { simulatedLoadMs?: n
       </div>
 
       <label className="flex flex-col gap-grid-1">
-        <span className="text-micro uppercase tracking-wide text-mkt-text-muted">Quantity</span>
+        <span className="text-micro uppercase tracking-tight text-mkt-text-muted">Quantity</span>
         <input
           value={quantity}
           onChange={(e) => setQuantity(e.target.value)}
@@ -89,7 +89,7 @@ export function OrderTicketMock({ simulatedLoadMs = 850 }: { simulatedLoadMs?: n
       </label>
 
       <label className="flex flex-col gap-grid-1">
-        <span className="text-micro uppercase tracking-wide text-mkt-text-muted">Limit Price</span>
+        <span className="text-micro uppercase tracking-tight text-mkt-text-muted">Limit Price</span>
         <input
           value={limitPrice}
           onChange={(e) => setLimitPrice(e.target.value)}

@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     otp_max_attempts: int = 5
     cookie_secure: bool = False  # set True behind HTTPS in production
     frontend_base_url: str = "http://localhost:3000"
+    skip_email_verification: bool = False  # auto-verify emails in dev
     # Email delivery: when resend_api_key is set, ResendEmailService is used;
     # otherwise emails are console-logged (dev mode).
     resend_api_key: str = ""

@@ -31,7 +31,7 @@ export function RangeSelector<T extends string>({ options, value, onChange, clas
           onClick={() => onChange(opt.value)}
           aria-pressed={value === opt.value}
           className={cn(
-            "rounded-mer-xs px-2 py-1 text-micro font-medium uppercase tracking-wide transition-colors",
+            "rounded-mer-xs px-2 py-1 text-micro font-medium uppercase transition-colors",
             "focus-visible:outline focus-visible:outline-2 focus-visible:outline-[color:var(--mer-accent-500)] focus-visible:outline-offset-1",
             value === opt.value ? "bg-mer-accent-500 text-white" : "text-mer-ink-tertiary hover:text-mer-ink-primary"
           )}

@@ -39,7 +39,7 @@ function FilterSection({
         className="flex w-full items-center justify-between text-left group"
       >
         <span className="flex items-center gap-2">
-          <span className="text-micro font-medium uppercase tracking-wide text-text-secondary group-hover:text-text-primary transition-colors">
+          <span className="text-micro font-medium uppercase text-text-secondary group-hover:text-text-primary transition-colors">
             {title}
           </span>
           {count > 0 && (
@@ -95,7 +95,7 @@ export function FilterRail({
   return (
     <div className="flex w-[280px] shrink-0 flex-col border-r border-border">
       <div className="flex items-center justify-between px-3 pt-1 pb-2">
-        <span className="text-micro font-medium uppercase tracking-wide text-text-secondary">Filters</span>
+        <span className="text-micro font-medium uppercase text-text-secondary">Filters</span>
         <Button variant="ghost" size="icon" onClick={onToggleCollapsed} aria-label="Collapse filters">
           <ChevronsLeft size={15} />
         </Button>

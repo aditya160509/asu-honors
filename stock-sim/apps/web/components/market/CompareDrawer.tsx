@@ -87,7 +87,7 @@ export function CompareDrawer({ open, onClose, tickers, companies, onRemove }: C
               <table className="w-full border-collapse">
                 <thead>
                   <tr className="border-b border-border bg-bg-secondary">
-                    <th className="w-32 px-5 py-2.5 text-left text-micro font-medium uppercase tracking-wide text-text-secondary">
+                    <th className="w-32 px-5 py-2.5 text-left text-micro font-medium uppercase text-text-secondary">
                       Metric
                     </th>
                     {selected.map((c) => (

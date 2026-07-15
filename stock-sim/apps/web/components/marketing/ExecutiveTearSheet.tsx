@@ -46,7 +46,7 @@ export function ExecutiveTearSheet({ simulatedLoadMs = 500 }: ExecutiveTearSheet
           key={stat.label}
           className="mkt-card-lit flex flex-col items-end gap-grid-1 bg-mkt-bg-void px-grid-4 py-grid-4"
         >
-          <span className="w-full text-left text-micro uppercase tracking-wide text-mkt-text-muted">
+          <span className="w-full text-left text-micro uppercase tracking-tight text-mkt-text-muted">
             {stat.label}
           </span>
           {loading ? (

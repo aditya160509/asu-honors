@@ -18,7 +18,7 @@ export const DropdownMenuContent = React.forwardRef<
       sideOffset={sideOffset}
       className={cn(
         "z-50 min-w-[180px] p-1",
-        surfaceVariants({ variant: "glass" }),
+        surfaceVariants({ variant: "raised" }),
         className
       )}
       {...props}

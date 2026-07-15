@@ -8,6 +8,7 @@ import { drawCrosshair, drawCrosshairTooltip } from "@/lib/charts/core/Crosshair
 import { drawLineSeries, lineYDomain } from "@/lib/charts/series/LineSeries";
 import { formatDateAxis, formatPriceAxis } from "@/lib/charts/core/utils";
 import type { LinePoint } from "@/lib/charts/types";
+import { cssVar } from "@/lib/utils";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -40,7 +41,7 @@ export function PerformanceChart({ portfolioValues, indexValues, height = 250, l
           height: h,
           padding: PADDING,
           yDomain: combinedDomain,
-          color: "#5c5c62",
+          color: cssVar('--text-tertiary'),
           lineWidth: 1,
           dashed: [4, 4],
         });
@@ -53,9 +54,9 @@ export function PerformanceChart({ portfolioValues, indexValues, height = 250, l
         height: h,
         padding: PADDING,
         yDomain: combinedDomain,
-        color: "#22c55e",
+        color: cssVar('--positive'),
         lineWidth: 2,
-        fill: "#22c55e",
+        fill: cssVar('--positive'),
       });
 
       drawPriceAxis({ ctx, width, height: h, padding: PADDING, yDomain: combinedDomain, formatY: formatPriceAxis });

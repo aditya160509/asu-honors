@@ -271,7 +271,8 @@ def seed(session: Session) -> None:
         price = iv * np.exp(initial_gap)
         price = max(price, 0.01)
         market_cap = price * float(company.shares_outstanding)
-        vol = float(ind.base_volatility) / 100.0
+        industry = d["industries"][company.industry_id]
+        vol = float(industry.base_volatility) / 100.0
         liq_score = min(100.0, float(company.free_float_pct) * 100.0)
 
         r["fq"] = fq

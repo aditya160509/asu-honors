@@ -88,15 +88,15 @@ export function PortfolioHero({
             </div>
             <div className="flex gap-6">
               <div className="flex flex-col gap-0.5">
-                <span className="text-micro uppercase tracking-wide text-mer-ink-tertiary">Cash</span>
+                <span className="text-micro uppercase text-mer-ink-tertiary">Cash</span>
                 <span className="num text-body text-mer-ink-secondary">{formatPrice(portfolio?.cash_balance ?? 0)}</span>
               </div>
               <div className="flex flex-col gap-0.5">
-                <span className="text-micro uppercase tracking-wide text-mer-ink-tertiary">Positions</span>
+                <span className="text-micro uppercase text-mer-ink-tertiary">Positions</span>
                 <span className="num text-body text-mer-ink-secondary">{portfolio?.holdings.length ?? 0}</span>
               </div>
               <div className="flex flex-col gap-0.5">
-                <span className="text-micro uppercase tracking-wide text-mer-ink-tertiary">Unrealized P&amp;L</span>
+                <span className="text-micro uppercase text-mer-ink-tertiary">Unrealized P&amp;L</span>
                 <span className={cn("num text-body", unrealized >= 0 ? "text-positive" : "text-negative")}>
                   {formatPrice(unrealized)}
                 </span>
@@ -107,7 +107,7 @@ export function PortfolioHero({
       </div>
 
       <div className="flex items-center justify-between gap-3 border-t border-[color:var(--mer-stroke-hairline)] px-5 py-2.5">
-        <span className="text-micro uppercase tracking-wide text-mer-ink-tertiary">Cumulative Realized P&amp;L</span>
+        <span className="text-micro uppercase text-mer-ink-tertiary">Cumulative Realized P&amp;L</span>
         <RangeSelector options={RANGE_OPTIONS} value={range} onChange={setRange} />
       </div>
       <PerformanceChart portfolioValues={series} loading={transactionsLoading} height={260} />

@@ -3,6 +3,7 @@
 import * as React from "react";
 import * as THREE from "three";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import { cssVar } from "@/lib/utils";
 import { useReducedMotion } from "@/lib/marketing/useReducedMotion";
 
 const NUM_STREAMS = 220;
@@ -11,9 +12,6 @@ const TOTAL_PARTICLES = NUM_STREAMS * PARTICLES_PER_STREAM;
 const WORLD_HEIGHT = 20;
 const MAX_DELTA = 1 / 20; // clamp so a dropped/backgrounded frame never produces a visible jump — still linear, just bounded
 
-const RED = new THREE.Color("#ff0000");
-const GREEN = new THREE.Color("#00ff00");
-
 interface StreamField {
   positions: Float32Array;
   colors: Float32Array;
@@ -21,7 +19,7 @@ interface StreamField {
   depths: Float32Array; // 0 (far) .. 1 (near) — a cheap depth cue without a full perspective-camera rewrite
 }
 
-function buildField(): StreamField {
+function buildField(RED: THREE.Color, GREEN: THREE.Color): StreamField {
   const positions = new Float32Array(TOTAL_PARTICLES * 3);
   const colors = new Float32Array(TOTAL_PARTICLES * 3);
   const speeds = new Float32Array(TOTAL_PARTICLES);
@@ -55,7 +53,11 @@ function buildField(): StreamField {
 }
 
 function Streams() {
-  const field = React.useMemo(buildField, []);
+  const colors = React.useMemo(
+    () => ({ red: new THREE.Color(cssVar('--negative')), green: new THREE.Color(cssVar('--positive')) }),
+    []
+  );
+  const field = React.useMemo(() => buildField(colors.red, colors.green), [colors]);
   const nearRef = React.useRef<THREE.Points>(null);
   const farRef = React.useRef<THREE.Points>(null);
   const groupRef = React.useRef<THREE.Group>(null);

@@ -15,7 +15,6 @@ export interface DashboardPanelProps {
   live?: boolean;
   /** "accent" = the Ledger Line; "iris" = the AI-card exception (DESIGN_SPEC: reserved for AI content markers). */
   edge?: "none" | "accent" | "iris";
-  glass?: boolean;
   noBodyPadding?: boolean;
   className?: string;
   bodyClassName?: string;
@@ -44,7 +43,6 @@ export function DashboardPanel({
   actions,
   live,
   edge = "none",
-  glass = false,
   noBodyPadding,
   className,
   bodyClassName,
@@ -61,7 +59,7 @@ export function DashboardPanel({
         "mer-surface-lit relative flex flex-col overflow-hidden rounded-mer-md border",
         MER_HAIRLINE,
         "shadow-mer-rest transition-colors hover:border-[color:var(--mer-stroke-emphasis)]",
-        glass ? "mer-glass" : "bg-mer-surface-2",
+        "bg-mer-surface-2",
         className
       )}
     >
@@ -73,7 +71,7 @@ export function DashboardPanel({
 
       <header className={cn("flex items-center justify-between gap-3 border-b px-4 py-3", MER_HAIRLINE)}>
         <div className="min-w-0 flex flex-col gap-0.5">
-          <span className="flex items-center gap-1.5 text-micro font-medium uppercase tracking-wide text-mer-ink-tertiary">
+          <span className="flex items-center gap-1.5 text-micro font-medium uppercase text-mer-ink-tertiary">
             {Icon && <Icon size={11} className="shrink-0" />}
             {eyebrow}
             {live && <LiveDot />}

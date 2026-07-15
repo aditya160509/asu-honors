@@ -165,10 +165,7 @@ const config: Config = {
         base: "200ms",
         slow: "400ms",
       },
-      backdropBlur: {
-        glass: "var(--surface-glass-blur)",
-        "mer-glass": "var(--mer-glass-blur)",
-      },
+      backdropBlur: {},
     },
   },
   plugins: [],

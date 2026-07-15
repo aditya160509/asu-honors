@@ -91,3 +91,8 @@ export function debounce<Args extends unknown[]>(
 export function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
+
+export function cssVar(name: string): string {
+  if (typeof window === 'undefined') return '#000';
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}

@@ -53,7 +53,7 @@ export function TransactionTimeline({ transactions, loading, error, onRetry, has
         <div className="flex flex-col">
           {groupByDate(transactions).map(([date, items]) => (
             <div key={date} className={cn("border-b px-4 py-3", MER_HAIRLINE)}>
-              <span className="num text-micro uppercase tracking-wide text-mer-ink-tertiary">{date}</span>
+              <span className="num text-micro uppercase text-mer-ink-tertiary">{date}</span>
               <div className="mt-2 flex flex-col gap-2">
                 {items.map((t) => (
                   <div key={t.id} className="flex items-center gap-3">

@@ -13,7 +13,7 @@ import { MER_HAIRLINE } from "@/components/dashboard/primitives/tokens";
 import { MiniAreaSpark } from "@/components/dashboard/primitives/MiniAreaSpark";
 import { withWeights, type HoldingWithWeight } from "@/lib/portfolio/holdingsMath";
 import { usePriceHistory } from "@/lib/api/hooks/useCompany";
-import { cn, formatPct, formatPrice } from "@/lib/utils";
+import { cn, cssVar, formatPct, formatPrice } from "@/lib/utils";
 import type { HoldingResponse } from "@/lib/api/types";
 
 export interface HoldingsTableProps {
@@ -57,7 +57,7 @@ function HeaderCell({ label, sortKey, sort, onSort, align = "left" }: HeaderCell
       onClick={() => onSort(sortKey)}
       onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && onSort(sortKey)}
       className={cn(
-        "flex shrink-0 cursor-pointer select-none items-center gap-1 px-3 py-2 text-micro font-medium uppercase tracking-wide text-mer-ink-tertiary transition-colors hover:text-mer-ink-primary",
+        "flex shrink-0 cursor-pointer select-none items-center gap-1 px-3 py-2 text-micro font-medium uppercase text-mer-ink-tertiary transition-colors hover:text-mer-ink-primary",
         "focus-visible:outline focus-visible:outline-2 focus-visible:outline-[color:var(--mer-accent-500)] focus-visible:outline-offset-[-2px]",
         align === "right" && "justify-end text-right"
       )}
@@ -77,7 +77,7 @@ function HoldingSparkline({ ticker }: { ticker: string }) {
   }, [history.data]);
   if (data.length < 2) return <span className="text-micro text-mer-ink-tertiary">—</span>;
   const positive = data[data.length - 1].value >= data[0].value;
-  return <MiniAreaSpark data={data} height={24} color={positive ? "#22c55e" : "#ef4444"} />;
+  return <MiniAreaSpark data={data} height={24} color={positive ? cssVar('--positive') : cssVar('--negative')} />;
 }
 
 const COL_WIDTHS = {
@@ -191,7 +191,7 @@ export function HoldingsTable({ holdings, totalValue, loading, error, onRetry }:
                 <HeaderCell label="Name" sortKey="company_name" sort={sort} onSort={toggleSort} />
               </div>
               <div
-                className="flex items-center px-3 text-micro font-medium uppercase tracking-wide text-mer-ink-tertiary"
+                className="flex items-center px-3 text-micro font-medium uppercase text-mer-ink-tertiary"
                 style={{ width: COL_WIDTHS.spark }}
               >
                 30D

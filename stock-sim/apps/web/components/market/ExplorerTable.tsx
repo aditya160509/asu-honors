@@ -73,7 +73,7 @@ function CellContent({ col, row }: { col: ColumnDef; row: EnrichedCompany }) {
     case "marketCap":
       return <span className="num block text-right">{formatLarge(row.market_cap)}</span>;
     case "volatility":
-      return <span className="num block text-right text-text-secondary">{row.volatility == null ? "N/A" : `${Number(row.volatility).toFixed(2)}%`}</span>;
+      return <span className="num block text-right text-text-secondary">{row.volatility == null ? "N/A" : formatPct(Number(row.volatility))}</span>;
     default:
       return null;
   }
@@ -292,7 +292,7 @@ export function ExplorerTable({
           <button
             type="button"
             onClick={() => onSort("ticker")}
-            className="sticky left-0 z-30 flex items-center gap-1 bg-bg-secondary pl-8 pr-2 text-micro font-medium uppercase tracking-wide text-text-secondary hover:text-text-primary transition-colors"
+            className="sticky left-0 z-30 flex items-center gap-1 bg-bg-secondary pl-8 pr-2 text-micro font-medium uppercase text-text-secondary hover:text-text-primary transition-colors"
             style={{ width: PINNED_COLUMN_WIDTH, minWidth: PINNED_COLUMN_WIDTH, height: 32 }}
           >
             Company
@@ -310,7 +310,7 @@ export function ExplorerTable({
                 type="button"
                 onClick={() => onSort(col.key)}
                 className={cn(
-                  "flex items-center gap-1 px-3 text-micro font-medium uppercase tracking-wide text-text-secondary hover:text-text-primary transition-colors",
+                  "flex items-center gap-1 px-3 text-micro font-medium uppercase text-text-secondary hover:text-text-primary transition-colors",
                   col.align === "right" && "justify-end text-right"
                 )}
                 style={{ width: col.width, minWidth: col.width, height: 32 }}

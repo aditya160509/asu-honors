@@ -42,7 +42,7 @@ export function WorkspaceSwitcher() {
         <ChevronsUpDown size={13} className="shrink-0 text-mer-ink-tertiary" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-64">
-        <div className="px-2 py-1.5 text-micro uppercase tracking-wide text-text-secondary">Timelines</div>
+        <div className="px-2 py-1.5 text-micro uppercase text-text-secondary">Timelines</div>
         <DropdownMenuSeparator />
         {timelines.map((t) => (
           <DropdownMenuItem

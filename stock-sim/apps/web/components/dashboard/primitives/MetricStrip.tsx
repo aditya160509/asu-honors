@@ -62,7 +62,7 @@ export function MetricStrip({ items, loading }: MetricStripProps) {
 
         const content = (
           <div className="flex min-w-[120px] flex-1 flex-col gap-1 px-4 py-3">
-            <span className="text-micro uppercase tracking-wide text-mer-ink-tertiary">{item.label}</span>
+            <span className="text-micro uppercase text-mer-ink-tertiary">{item.label}</span>
             {loading ? (
               <Skeleton width={64} height={18} />
             ) : (
