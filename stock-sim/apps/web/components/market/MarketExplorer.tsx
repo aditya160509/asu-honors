@@ -28,6 +28,7 @@ import type { CompanyGridItem } from "@/lib/api/types";
 import type { ColumnKey, Density, EnrichedCompany, MarketFilterState } from "@/lib/market/types";
 
 const MAX_COMPARE = 4;
+const PAGE_SIZE = 50;
 const DENSITY_KEY = "market-explorer:density";
 const RAIL_KEY = "market-explorer:rail-collapsed";
 
@@ -122,6 +123,7 @@ export function MarketExplorer({ companies, loading, error, onRetry }: MarketExp
   const [activePreset, setActivePreset] = React.useState<string | null>(null);
   const [focusedIndex, setFocusedIndex] = React.useState(0);
   const [analyticsOpen, setAnalyticsOpen] = React.useState(false);
+  const [page, setPage] = React.useState(0);
 
   const savedScreens = useSavedScreens();
   const columnState = useColumnVisibility(COLUMN_DEFS);
@@ -155,13 +157,25 @@ export function MarketExplorer({ companies, loading, error, onRetry }: MarketExp
   const filtered = React.useMemo(() => applyFilters(enriched, filters, query), [enriched, filters, query]);
   const sorted = React.useMemo(() => sortRows(filtered, sort), [filtered, sort]);
 
+  // Reset to first page whenever filters, search, or sort change
   React.useEffect(() => {
-    setFocusedIndex((i) => Math.min(i, Math.max(sorted.length - 1, 0)));
-  }, [sorted.length]);
+    setPage(0);
+  }, [filtered.length, sort.key, sort.direction]);
+
+  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages - 1);
+  const pageRows = React.useMemo(
+    () => sorted.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE),
+    [sorted, safePage]
+  );
+
+  React.useEffect(() => {
+    setFocusedIndex((i) => Math.min(i, Math.max(pageRows.length - 1, 0)));
+  }, [pageRows.length]);
 
   const rowGetter = React.useCallback(
-    (index: number) => sorted[index] ?? null,
-    [sorted]
+    (index: number) => pageRows[index] ?? null,
+    [pageRows]
   );
 
   useScreenerKeyboard({
@@ -397,7 +411,7 @@ export function MarketExplorer({ companies, loading, error, onRetry }: MarketExp
             <HeatmapView companies={sorted} onActivateRow={setPreviewTicker} />
           ) : (
             <ExplorerTable
-              rows={sorted}
+              rows={pageRows}
               columns={visibleColumns}
               density={density}
               sort={sort}
@@ -412,6 +426,59 @@ export function MarketExplorer({ companies, loading, error, onRetry }: MarketExp
           )}
         </div>
       </div>
+
+      {/* Pagination bar */}
+      {sorted.length > PAGE_SIZE && (
+        <div className="flex items-center justify-between px-3 py-1.5">
+          <span className="text-micro text-text-tertiary">
+            {safePage * PAGE_SIZE + 1}–{Math.min((safePage + 1) * PAGE_SIZE, sorted.length)} of {sorted.length}
+          </span>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              disabled={safePage === 0}
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+              className="h-6 rounded px-2 text-micro font-medium text-text-secondary hover:bg-bg-hover disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            >
+              Prev
+            </button>
+            {Array.from({ length: totalPages }, (_, i) => i)
+              .filter((i) => i === 0 || i === totalPages - 1 || Math.abs(i - safePage) <= 2)
+              .reduce<(number | "ellipsis")[]>((acc, i, idx, arr) => {
+                if (idx > 0 && i - (arr[idx - 1] as number) > 1) acc.push("ellipsis");
+                acc.push(i);
+                return acc;
+              }, [])
+              .map((item, idx) =>
+                item === "ellipsis" ? (
+                  <span key={`e${idx}`} className="px-1 text-text-tertiary">…</span>
+                ) : (
+                  <button
+                    key={item}
+                    type="button"
+                    onClick={() => setPage(item)}
+                    className={cn(
+                      "h-6 min-w-[24px] rounded px-1.5 text-micro font-medium transition-colors",
+                      item === safePage
+                        ? "bg-accent/15 text-accent"
+                        : "text-text-secondary hover:bg-bg-hover"
+                    )}
+                  >
+                    {item + 1}
+                  </button>
+                )
+              )}
+            <button
+              type="button"
+              disabled={safePage >= totalPages - 1}
+              onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+              className="h-6 rounded px-2 text-micro font-medium text-text-secondary hover:bg-bg-hover disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Analytics toggle + collapsible panel */}
       <div className="flex items-center justify-end px-1 pt-1">
