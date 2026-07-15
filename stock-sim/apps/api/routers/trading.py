@@ -1,6 +1,7 @@
 """Portfolio, orders, watchlist — all require JWT auth."""
 
 import logging
+from datetime import date
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, Query, status
@@ -10,7 +11,7 @@ from apps.api.auth import get_current_user
 from apps.api.config import settings
 from apps.api.database import get_db
 from apps.api.dependencies import get_user_portfolio
-from apps.api.exceptions import ConflictError, NotFoundError
+from apps.api.exceptions import NotFoundError
 from apps.api.schemas import (
     HoldingResponse,
     OrderRequest,
@@ -21,6 +22,8 @@ from apps.api.schemas import (
     WatchlistAddRequest,
     WatchlistItem,
 )
+from apps.api.services import watchlist_service
+from apps.api.services.portfolio_service import compute_risk_metrics, get_portfolio_history
 from apps.api.services.trade_service import get_portfolio_analytics, place_order
 from db.models import Company, Holding, Portfolio, Transaction, User, Watchlist
 
@@ -58,7 +61,10 @@ def get_portfolio_analytics_endpoint(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> PortfolioAnalyticsResponse:
-    return get_portfolio_analytics(db, user, timeline_id)
+    analytics = get_portfolio_analytics(db, user, timeline_id)
+    # Risk metrics ride on the same reconstructed history series Performance uses.
+    metrics = compute_risk_metrics(get_portfolio_history(db, user, timeline_id, "MAX"))
+    return analytics.model_copy(update=metrics)
 
 
 @router.get("/portfolio", response_model=PortfolioResponse)
@@ -114,6 +120,10 @@ def get_transactions(
     timeline_id: int = Query(default=settings.default_timeline_id),
     limit: int = 50,
     offset: int = 0,
+    ticker: str | None = Query(default=None),
+    side: str | None = Query(default=None, pattern="^(buy|sell)$"),
+    date_from: date | None = Query(default=None),
+    date_to: date | None = Query(default=None),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[TransactionItem]:
@@ -121,9 +131,21 @@ def get_transactions(
     if portfolio is None:
         return []
 
+    query = db.query(Transaction).filter_by(portfolio_id=portfolio.id)
+    if ticker:
+        company = db.query(Company).filter_by(ticker=ticker.upper()).first()
+        if company is None:
+            return []
+        query = query.filter(Transaction.company_id == company.id)
+    if side:
+        query = query.filter(Transaction.side == side)
+    if date_from is not None:
+        query = query.filter(Transaction.sim_date >= date_from)
+    if date_to is not None:
+        query = query.filter(Transaction.sim_date <= date_to)
+
     rows = (
-        db.query(Transaction)
-        .filter_by(portfolio_id=portfolio.id)
+        query
         .order_by(Transaction.sim_date.desc(), Transaction.id.desc())
         .offset(offset)
         .limit(limit)
@@ -144,6 +166,7 @@ def get_transactions(
                 side=r.side,
                 quantity=int(r.quantity),
                 price=r.price,
+                fees=r.fees,
                 realized_pnl=r.realized_pnl,
             )
         )
@@ -155,7 +178,15 @@ def get_watchlist(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[WatchlistItem]:
-    rows = db.query(Watchlist).filter_by(user_id=user.id).all()
+    # Legacy flat endpoint — reads the user's default watchlist group so the
+    # Dashboard dock and the new named-lists page stay consistent.
+    group = watchlist_service.get_or_create_default_group(db, user)
+    rows = (
+        db.query(Watchlist)
+        .filter_by(group_id=group.id)
+        .order_by(Watchlist.sort_order.asc(), Watchlist.id.asc())
+        .all()
+    )
     wl_company_ids = {r.company_id for r in rows}
     wl_companies = {
         c.id: c for c in db.query(Company).filter(Company.id.in_(wl_company_ids)).all()
@@ -175,18 +206,13 @@ def add_watchlist(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> WatchlistItem:
-    company_id = body.company_id
-    company = db.query(Company).filter_by(id=company_id).first()
+    """Legacy flat endpoint — adds to the user's default watchlist group."""
+    company = db.query(Company).filter_by(id=body.company_id).first()
     if company is None:
         raise NotFoundError("Company not found")
 
-    existing = db.query(Watchlist).filter_by(user_id=user.id, company_id=company_id).first()
-    if existing is not None:
-        raise ConflictError("Company already in watchlist")
-
-    row = Watchlist(user_id=user.id, company_id=company_id)
-    db.add(row)
-    db.commit()
+    group = watchlist_service.get_or_create_default_group(db, user)
+    watchlist_service.add_item(db, user, group.id, body.company_id)
     return WatchlistItem(company_id=company.id, ticker=company.ticker, name=company.name)
 
 
@@ -196,8 +222,7 @@ def remove_watchlist(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> None:
-    row = db.query(Watchlist).filter_by(user_id=user.id, company_id=company_id).first()
-    if row is not None:
-        db.delete(row)
-        db.commit()
+    """Legacy flat endpoint — removes from the user's default watchlist group."""
+    group = watchlist_service.get_or_create_default_group(db, user)
+    watchlist_service.remove_item(db, user, group.id, company_id)
     return None

@@ -13,7 +13,17 @@ from db.models.reference import (
 )
 from db.models.simulation import SimulationState, Timeline
 from db.models.timeseries import EconomicCycleState, PriceDriverScore, PriceHistory
-from db.models.trading import Holding, Notification, Portfolio, Transaction, User, Watchlist
+from db.models.trading import (
+    Dividend,
+    Goal,
+    Holding,
+    Notification,
+    Portfolio,
+    Transaction,
+    User,
+    Watchlist,
+    WatchlistGroup,
+)
 
 __all__ = [
     "Base",
@@ -44,6 +54,9 @@ __all__ = [
     "Holding",
     "Transaction",
     "Watchlist",
+    "WatchlistGroup",
+    "Goal",
+    "Dividend",
     "Notification",
     "UserSession",
     "PasswordResetToken",

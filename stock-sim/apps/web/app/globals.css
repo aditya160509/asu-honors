@@ -413,6 +413,24 @@
   animation: flash 300ms ease-out;
 }
 
+/* Ledger Line draw-in — DESIGN_SPEC's 400ms ease-in-out signature hairline,
+   used by the portfolio tab row's active-tab marker. */
+@keyframes ledger-draw {
+  0% {
+    transform: scaleX(0);
+    opacity: 0;
+  }
+  100% {
+    transform: scaleX(1);
+    opacity: 1;
+  }
+}
+
+.mer-ledger-draw {
+  transform-origin: center;
+  animation: ledger-draw 400ms ease-in-out;
+}
+
 @keyframes skeleton-pulse {
   0%,
   100% {
@@ -498,7 +516,8 @@
   .skeleton-sweep,
   .cell-flash,
   .mkt-skeleton-sweep,
-  .mkt-tick-flash {
+  .mkt-tick-flash,
+  .mer-ledger-draw {
     animation: none !important;
   }
 }

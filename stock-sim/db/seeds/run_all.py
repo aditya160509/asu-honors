@@ -16,6 +16,7 @@ SEEDS = [
     "seed_events.py",
     "seed_demo.py",
     "seed_initial_prices.py",
+    "seed_dividends.py",
 ]
 
 

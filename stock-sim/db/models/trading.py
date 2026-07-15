@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Optional
 
-from sqlalchemy import CheckConstraint, Date, DateTime, ForeignKey, Numeric, String, UniqueConstraint
+from sqlalchemy import CheckConstraint, Date, DateTime, ForeignKey, Integer, Numeric, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from db.models.base import Base, TimestampMixin
@@ -81,15 +81,74 @@ class Transaction(Base, TimestampMixin):
     )
 
 
+class WatchlistGroup(Base, TimestampMixin):
+    """A named watchlist. Every user gets a 'Default' group on first use; the
+    legacy flat /watchlist endpoints operate on that default group."""
+
+    __tablename__ = "watchlist_groups"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    name: Mapped[str] = mapped_column(String(60), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "name", name="uq_watchlist_groups_user_name"),
+    )
+
+
 class Watchlist(Base, TimestampMixin):
     __tablename__ = "watchlists"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     company_id: Mapped[int] = mapped_column(ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    group_id: Mapped[int] = mapped_column(
+        ForeignKey("watchlist_groups.id", ondelete="CASCADE"), nullable=False
+    )
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     __table_args__ = (
-        UniqueConstraint("user_id", "company_id", name="uq_watchlists_user_company"),
+        UniqueConstraint("group_id", "company_id", name="uq_watchlists_group_company"),
+    )
+
+
+class Goal(Base, TimestampMixin):
+    """v1 goal type: reach a target portfolio value by a target date. Progress is
+    computed at read time; achieved_at is set once and never cleared so an
+    achievement survives later portfolio dips."""
+
+    __tablename__ = "goals"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    label: Mapped[str] = mapped_column(String(60), nullable=False)
+    target_value: Mapped[float] = mapped_column(Numeric, nullable=False)
+    target_date: Mapped[date] = mapped_column(Date, nullable=False)
+    achieved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        CheckConstraint("target_value > 0", name="ck_goals_target_value_positive"),
+    )
+
+
+class Dividend(Base, TimestampMixin):
+    """Company-level dividend schedule (reference data, not user-specific).
+    A user's receipts are derived at read time: shares held at ex_date x amount_per_share."""
+
+    __tablename__ = "dividends"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    timeline_id: Mapped[int] = mapped_column(ForeignKey("timelines.id", ondelete="CASCADE"), nullable=False)
+    declared_date: Mapped[date] = mapped_column(Date, nullable=False)
+    ex_date: Mapped[date] = mapped_column(Date, nullable=False)
+    payment_date: Mapped[date] = mapped_column(Date, nullable=False)
+    amount_per_share: Mapped[float] = mapped_column(Numeric, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("company_id", "timeline_id", "ex_date", name="uq_dividends_company_timeline_exdate"),
+        CheckConstraint("amount_per_share > 0", name="ck_dividends_amount_positive"),
     )
 
 

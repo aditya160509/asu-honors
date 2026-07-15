@@ -11,9 +11,9 @@ from sqlalchemy.orm import Session
 from db.models import Portfolio, Timeline, User
 
 USER_DEFS = [
-    {"email": "alice@example.com", "display_name": "Alice", "role": "admin", "starting_cash": 1_000_000},
-    {"email": "bob@example.com", "display_name": "Bob", "role": "user", "starting_cash": 500_000},
-    {"email": "charlie@example.com", "display_name": "Charlie", "role": "user", "starting_cash": 250_000},
+    {"email": "alice@example.com", "display_name": "Alice", "role": "admin", "starting_cash": 100_000},
+    {"email": "bob@example.com", "display_name": "Bob", "role": "user", "starting_cash": 100_000},
+    {"email": "charlie@example.com", "display_name": "Charlie", "role": "user", "starting_cash": 100_000},
 ]
 
 

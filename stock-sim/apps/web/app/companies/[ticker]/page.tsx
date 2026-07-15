@@ -111,6 +111,7 @@ export default function CompanyDetailPage() {
               currentPrice={currentPrice}
               cashBalance={portfolio.data ? Number(portfolio.data.cash_balance) : 0}
               sharesHeld={holding?.quantity ?? 0}
+              isPortfolioLoading={portfolio.isLoading}
               onOrderPlaced={() => {
                 company.refetch();
                 portfolio.refetch();

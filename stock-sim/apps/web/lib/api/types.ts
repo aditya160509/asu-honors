@@ -67,6 +67,7 @@ export interface UserResponse {
 // ---------------------------------------------------------------------------
 
 export interface CompanyGridItem {
+  id: number;
   ticker: string;
   name: string;
   industry_name: string;
@@ -204,6 +205,10 @@ export interface PortfolioAnalyticsResponse {
   win_rate: number | null;
   allocation_by_sector: SectorAllocation[];
   cash_allocation_pct: number;
+  beta: number | null;
+  sharpe_ratio: number | null;
+  volatility_pct: number | null;
+  max_drawdown_pct: number | null;
 }
 
 export interface TransactionItem {
@@ -213,6 +218,7 @@ export interface TransactionItem {
   side: string;
   quantity: number;
   price: number;
+  fees: number;
   realized_pnl: number | null;
 }
 
@@ -224,6 +230,103 @@ export interface WatchlistItem {
   company_id: number;
   ticker: string;
   name: string;
+}
+
+// ---------------------------------------------------------------------------
+// Portfolio Phase 2 — history, dividends, goals, named watchlists
+// ---------------------------------------------------------------------------
+
+export type PerformanceRange = "1D" | "5D" | "1M" | "6M" | "YTD" | "1Y" | "5Y" | "MAX";
+
+export interface PortfolioHistoryPoint {
+  sim_date: string;
+  total_value: number;
+  cash: number;
+  holdings_value: number;
+}
+
+export interface BenchmarkPoint {
+  sim_date: string;
+  value: number;
+}
+
+export interface PortfolioHistoryResponse {
+  range: string;
+  points: PortfolioHistoryPoint[];
+  benchmark: BenchmarkPoint[];
+}
+
+export interface DividendReceipt {
+  ticker: string;
+  company_name: string;
+  declared_date: string;
+  ex_date: string;
+  payment_date: string;
+  amount_per_share: number;
+  shares_held: number;
+  total_amount: number;
+}
+
+export interface UpcomingDividend {
+  ticker: string;
+  company_name: string;
+  declared_date: string;
+  ex_date: string;
+  payment_date: string;
+  amount_per_share: number;
+  shares_held: number;
+  estimated_total: number;
+}
+
+export interface PortfolioDividendsResponse {
+  received: DividendReceipt[];
+  upcoming: UpcomingDividend[];
+  total_received: number;
+  trailing_12m_received: number;
+}
+
+export interface GoalCreateRequest {
+  label: string;
+  target_value: number;
+  target_date: string;
+}
+
+export interface GoalUpdateRequest {
+  label?: string;
+  target_value?: number;
+  target_date?: string;
+}
+
+export interface GoalResponse {
+  id: number;
+  label: string;
+  target_value: number;
+  target_date: string;
+  achieved_at: string | null;
+  created_at: string;
+  current_value: number;
+  progress_pct: number;
+}
+
+export interface WatchlistEntry {
+  company_id: number;
+  ticker: string;
+  name: string;
+  sort_order: number;
+}
+
+export interface WatchlistGroupResponse {
+  id: number;
+  name: string;
+  sort_order: number;
+  items: WatchlistEntry[];
+}
+
+export interface TransactionFilters {
+  ticker?: string;
+  side?: "buy" | "sell";
+  date_from?: string;
+  date_to?: string;
 }
 
 export interface LeaderboardEntry {

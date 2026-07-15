@@ -16,11 +16,27 @@ export interface PerformanceChartProps {
   indexValues?: LinePoint[];
   height?: number;
   loading?: boolean;
+  /** Series color — defaults to the legacy green used by the Dashboard hero;
+   * the Portfolio Performance tab passes accent cobalt (value ≠ direction). */
+  color?: string;
+  /** Y-axis / tooltip value formatter — comparison mode passes a % formatter. */
+  formatY?: (v: number) => string;
+  seriesLabel?: string;
+  indexLabel?: string;
 }
 
 const PADDING = { top: 8, right: 56, bottom: 24, left: 8 };
 
-export function PerformanceChart({ portfolioValues, indexValues, height = 250, loading }: PerformanceChartProps) {
+export function PerformanceChart({
+  portfolioValues,
+  indexValues,
+  height = 250,
+  loading,
+  color = "#22c55e",
+  formatY = formatPriceAxis,
+  seriesLabel = "Portfolio",
+  indexLabel = "Index",
+}: PerformanceChartProps) {
   const [hover, setHover] = React.useState<{ x: number; y: number } | null>(null);
 
   const render = React.useCallback(
@@ -53,12 +69,12 @@ export function PerformanceChart({ portfolioValues, indexValues, height = 250, l
         height: h,
         padding: PADDING,
         yDomain: combinedDomain,
-        color: "#22c55e",
+        color,
         lineWidth: 2,
-        fill: "#22c55e",
+        fill: color,
       });
 
-      drawPriceAxis({ ctx, width, height: h, padding: PADDING, yDomain: combinedDomain, formatY: formatPriceAxis });
+      drawPriceAxis({ ctx, width, height: h, padding: PADDING, yDomain: combinedDomain, formatY });
 
       const labelCount = Math.min(6, portfolioValues.length);
       const step = Math.max(1, Math.floor(portfolioValues.length / labelCount));
@@ -76,14 +92,14 @@ export function PerformanceChart({ portfolioValues, indexValues, height = 250, l
         const idx = Math.round(((hover.x - PADDING.left) / plotW) * (portfolioValues.length - 1));
         const point = portfolioValues[Math.max(0, Math.min(portfolioValues.length - 1, idx))];
         if (point) {
-          const lines = [new Date(point.time).toISOString().slice(0, 10), `Portfolio ${point.value.toFixed(2)}`];
+          const lines = [new Date(point.time).toISOString().slice(0, 10), `${seriesLabel} ${formatY(point.value)}`];
           const indexPoint = indexValues?.[Math.max(0, Math.min((indexValues?.length ?? 1) - 1, idx))];
-          if (indexPoint) lines.push(`Index ${indexPoint.value.toFixed(2)}`);
+          if (indexPoint) lines.push(`${indexLabel} ${formatY(indexPoint.value)}`);
           drawCrosshairTooltip({ ctx, x: hover.x, y: hover.y, lines });
         }
       }
     },
-    [portfolioValues, indexValues, hover]
+    [portfolioValues, indexValues, hover, color, formatY, seriesLabel, indexLabel]
   );
 
   if (loading) return <Skeleton height={height} className="w-full" />;

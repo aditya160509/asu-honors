@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from apps.api.database import engine as db_engine
 from apps.api.exceptions import add_exception_handlers
 from apps.api.rate_limiter import InMemoryRateLimiter
-from apps.api.routers import auth, health, leaderboard, market, news, simulation, trading
+from apps.api.routers import auth, health, leaderboard, market, news, portfolio, simulation, trading
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -46,6 +46,7 @@ def create_app() -> FastAPI:
     application.include_router(auth.router)
     application.include_router(market.router)
     application.include_router(trading.router)
+    application.include_router(portfolio.router)
     application.include_router(simulation.router)
     application.include_router(news.router)
     application.include_router(leaderboard.router)

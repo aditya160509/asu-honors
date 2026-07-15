@@ -309,8 +309,11 @@ def test_get_transactions_no_portfolio(client, test_db, auth_headers):
 
 
 def test_get_watchlist_orphan_entry(client, test_db, test_user, auth_headers):
-    from db.models import Watchlist
-    test_db.add(Watchlist(user_id=test_user.id, company_id=999))
+    from db.models import Watchlist, WatchlistGroup
+    group = WatchlistGroup(user_id=test_user.id, name="Default", sort_order=0)
+    test_db.add(group)
+    test_db.flush()
+    test_db.add(Watchlist(user_id=test_user.id, company_id=999, group_id=group.id, sort_order=0))
     test_db.commit()
 
     resp = client.get("/api/v1/watchlist", headers=auth_headers)

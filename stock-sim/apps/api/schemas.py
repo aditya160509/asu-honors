@@ -92,6 +92,7 @@ class UserResponse(BaseModel):
 
 
 class CompanyGridItem(BaseModel):
+    id: int
     ticker: str
     name: str
     industry_name: str
@@ -242,6 +243,12 @@ class PortfolioAnalyticsResponse(BaseModel):
     win_rate: Optional[float] = None
     allocation_by_sector: list[SectorAllocation]
     cash_allocation_pct: float
+    # Risk metrics derived from the reconstructed daily portfolio-value series.
+    # None (not zero) whenever there is insufficient history to compute them.
+    beta: Optional[float] = None
+    sharpe_ratio: Optional[float] = None
+    volatility_pct: Optional[float] = None
+    max_drawdown_pct: Optional[float] = None
 
 
 class TransactionItem(BaseModel):
@@ -251,7 +258,111 @@ class TransactionItem(BaseModel):
     side: str
     quantity: int
     price: Decimal
+    fees: Decimal
     realized_pnl: Optional[Decimal] = None
+
+
+# --------------------------------------------------------------------------
+# Phase 2 — Portfolio history, dividends, goals, named watchlists
+# --------------------------------------------------------------------------
+
+
+class PortfolioHistoryPoint(BaseModel):
+    sim_date: date
+    total_value: Decimal
+    cash: Decimal
+    holdings_value: Decimal
+
+
+class BenchmarkPoint(BaseModel):
+    sim_date: date
+    value: Decimal
+
+
+class PortfolioHistoryResponse(BaseModel):
+    range: str
+    points: list[PortfolioHistoryPoint]
+    # Equal-weight market composite (avg close across all companies in the
+    # timeline) — the only benchmark the sim data model supports today.
+    benchmark: list[BenchmarkPoint]
+
+
+class DividendReceipt(BaseModel):
+    ticker: str
+    company_name: str
+    declared_date: date
+    ex_date: date
+    payment_date: date
+    amount_per_share: Decimal
+    shares_held: int
+    total_amount: Decimal
+
+
+class UpcomingDividend(BaseModel):
+    ticker: str
+    company_name: str
+    declared_date: date
+    ex_date: date
+    payment_date: date
+    amount_per_share: Decimal
+    shares_held: int
+    estimated_total: Decimal
+
+
+class PortfolioDividendsResponse(BaseModel):
+    received: list[DividendReceipt]
+    upcoming: list[UpcomingDividend]
+    total_received: Decimal
+    trailing_12m_received: Decimal
+
+
+class GoalCreateRequest(BaseModel):
+    label: str = Field(min_length=1, max_length=60)
+    target_value: Decimal = Field(gt=0)
+    target_date: date
+
+
+class GoalUpdateRequest(BaseModel):
+    label: Optional[str] = Field(default=None, min_length=1, max_length=60)
+    target_value: Optional[Decimal] = Field(default=None, gt=0)
+    target_date: Optional[date] = None
+
+
+class GoalResponse(BaseModel):
+    id: int
+    label: str
+    target_value: Decimal
+    target_date: date
+    achieved_at: Optional[datetime] = None
+    created_at: datetime
+    current_value: Decimal
+    progress_pct: float
+
+
+class WatchlistEntry(BaseModel):
+    company_id: int
+    ticker: str
+    name: str
+    sort_order: int
+
+
+class WatchlistGroupResponse(BaseModel):
+    id: int
+    name: str
+    sort_order: int
+    items: list[WatchlistEntry]
+
+
+class WatchlistGroupCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+
+
+class WatchlistGroupRenameRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+
+
+class WatchlistReorderRequest(BaseModel):
+    company_ids: list[int]
 
 
 class WatchlistAddRequest(BaseModel):

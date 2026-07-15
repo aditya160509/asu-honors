@@ -26,7 +26,7 @@ from apps.api.schemas import (
 from apps.api.services import auth_service
 from apps.api.services.email_service import EmailService, get_email_service
 from apps.api.config import settings
-from db.models import User
+from db.models import Portfolio, User
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +96,14 @@ async def register(
         starting_cash=DEFAULT_STARTING_CASH,
     )
     db.add(user)
+    db.flush()
+
+    db.add(Portfolio(
+        user_id=user.id,
+        timeline_id=settings.default_timeline_id,
+        cash_balance=DEFAULT_STARTING_CASH,
+        total_value=DEFAULT_STARTING_CASH,
+    ))
     db.commit()
     db.refresh(user)
 

@@ -15,12 +15,20 @@ export interface OrderFormProps {
   currentPrice: number | null;
   cashBalance: number;
   sharesHeld?: number;
+  isPortfolioLoading?: boolean;
   onOrderPlaced?: () => void;
 }
 
 const SELL_PRESETS = [0.25, 0.5, 0.75, 1] as const;
 
-export function OrderForm({ ticker, currentPrice, cashBalance, sharesHeld = 0, onOrderPlaced }: OrderFormProps) {
+export function OrderForm({
+  ticker,
+  currentPrice,
+  cashBalance,
+  sharesHeld = 0,
+  isPortfolioLoading = false,
+  onOrderPlaced,
+}: OrderFormProps) {
   const [side, setSide] = React.useState<OrderSide>("buy");
   const [quantity, setQuantity] = React.useState(0);
   const [showConfirm, setShowConfirm] = React.useState(false);
@@ -29,14 +37,19 @@ export function OrderForm({ ticker, currentPrice, cashBalance, sharesHeld = 0, o
 
   const priceUnavailable = currentPrice == null || currentPrice <= 0;
   const maxBuyQty = priceUnavailable ? 0 : Math.floor(cashBalance / currentPrice);
-  const maxQty = side === "buy" ? maxBuyQty : sharesHeld;
+  const maxQty = isPortfolioLoading ? Number.MAX_SAFE_INTEGER : side === "buy" ? maxBuyQty : sharesHeld;
 
   const estimatedTotal = currentPrice ? quantity * currentPrice : 0;
-  const insufficientFunds = side === "buy" && estimatedTotal > cashBalance;
-  const noSharesToSell = side === "sell" && sharesHeld <= 0;
+  const insufficientFunds = !isPortfolioLoading && side === "buy" && estimatedTotal > cashBalance;
+  const noSharesToSell = !isPortfolioLoading && side === "sell" && sharesHeld <= 0;
 
   const disabled =
-    priceUnavailable || quantity <= 0 || insufficientFunds || noSharesToSell || placeOrder.isPending;
+    priceUnavailable ||
+    quantity <= 0 ||
+    insufficientFunds ||
+    noSharesToSell ||
+    isPortfolioLoading ||
+    placeOrder.isPending;
 
   function clampQty(n: number) {
     return Math.max(0, Math.min(maxQty, n));
