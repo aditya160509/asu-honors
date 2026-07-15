@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { X } from "lucide-react";
 import { toast } from "sonner";
 import { Toolbar } from "@/components/market/Toolbar";
 import { SavedScreensBar } from "@/components/market/SavedScreensBar";
@@ -15,6 +16,7 @@ import { useColumnVisibility } from "@/lib/market/useColumnVisibility";
 import { useSavedScreens } from "@/lib/market/useSavedScreens";
 import { useWatchlistToggle } from "@/lib/market/useWatchlistToggle";
 import { exportCompaniesCsv } from "@/lib/market/exportCsv";
+import { cn } from "@/lib/utils";
 import type { CompanyGridItem } from "@/lib/api/types";
 import type { Density, EnrichedCompany, MarketFilterState } from "@/lib/market/types";
 
@@ -83,7 +85,7 @@ export function MarketExplorer({ companies, loading, error, onRetry }: MarketExp
   const [query, setQuery] = React.useState("");
   const [filters, setFilters] = React.useState<MarketFilterState>(emptyFilterState());
   const [sort, setSort] = React.useState<SortState>({ key: null, direction: null });
-  const [density, setDensity] = React.useState<Density>(() => readLocal(DENSITY_KEY, "comfortable" as Density));
+  const [density, setDensity] = React.useState<Density>(() => readLocal(DENSITY_KEY, "compact" as Density));
   const [railCollapsed, setRailCollapsed] = React.useState<boolean>(() => readLocal(RAIL_KEY, false));
   const [selectedTickers, setSelectedTickers] = React.useState<Set<string>>(new Set());
   const [previewTicker, setPreviewTicker] = React.useState<string | null>(null);
@@ -136,16 +138,55 @@ export function MarketExplorer({ companies, loading, error, onRetry }: MarketExp
     }
   }
 
-  function handleSaveScreen() {
-    const name = window.prompt("Name this screen");
-    if (name && name.trim()) {
-      savedScreens.saveScreen(name.trim(), filters, sort.key, sort.direction);
-    }
-  }
-
   function handleResetFilters() {
     setFilters(emptyFilterState());
     savedScreens.setActiveId("__all");
+  }
+
+  function removeFilter(type: string, value?: string) {
+    setFilters((prev) => {
+      if (type === "industry" && value) {
+        return { ...prev, industries: prev.industries.filter((i) => i !== value) };
+      }
+      if (type === "capCategory" && value) {
+        return { ...prev, marketCapCategory: prev.marketCapCategory.filter((c) => c !== value) };
+      }
+      if (type === "price") return { ...prev, price: null };
+      if (type === "marketCap") return { ...prev, marketCap: null };
+      if (type === "dayChangePct") return { ...prev, dayChangePct: null };
+      if (type === "volatility") return { ...prev, volatility: null };
+      if (type === "ivGapPct") return { ...prev, ivGapPct: null };
+      if (type === "iv") return { ...prev, iv: null };
+      return prev;
+    });
+  }
+
+  // Build active filter chips
+  const filterChips: { label: string; type: string; value?: string }[] = [];
+  for (const ind of filters.industries) {
+    filterChips.push({ label: ind, type: "industry", value: ind });
+  }
+  for (const cat of filters.marketCapCategory) {
+    filterChips.push({ label: `${cat} Cap`, type: "capCategory", value: cat });
+  }
+  if (filters.price) {
+    filterChips.push({ label: `Price $${filters.price.min.toFixed(0)}–$${filters.price.max.toFixed(0)}`, type: "price" });
+  }
+  if (filters.ivGapPct && (filters.ivGapPct.min > bounds.ivGapPct.min || filters.ivGapPct.max < bounds.ivGapPct.max)) {
+    filterChips.push({ label: `IV Gap ${filters.ivGapPct.min >= 0 ? "+" : ""}${filters.ivGapPct.min.toFixed(1)}% to ${filters.ivGapPct.max >= 0 ? "+" : ""}${filters.ivGapPct.max.toFixed(1)}%`, type: "ivGapPct" });
+  }
+  if (filters.volatility && (filters.volatility.min > bounds.volatility.min || filters.volatility.max < bounds.volatility.max)) {
+    filterChips.push({ label: `Vol ${filters.volatility.min.toFixed(3)}–${filters.volatility.max.toFixed(3)}`, type: "volatility" });
+  }
+  if (filters.dayChangePct && (filters.dayChangePct.min > bounds.dayChangePct.min || filters.dayChangePct.max < bounds.dayChangePct.max)) {
+    filterChips.push({ label: `Day Chg ${filters.dayChangePct.min >= 0 ? "+" : ""}${filters.dayChangePct.min.toFixed(1)}% to ${filters.dayChangePct.max >= 0 ? "+" : ""}${filters.dayChangePct.max.toFixed(1)}%`, type: "dayChangePct" });
+  }
+  if (filters.iv && (filters.iv.min > bounds.iv.min || filters.iv.max < bounds.iv.max)) {
+    filterChips.push({ label: `IV $${filters.iv.min.toFixed(0)}–$${filters.iv.max.toFixed(0)}`, type: "iv" });
+  }
+  if (filters.marketCap && (filters.marketCap.min > bounds.marketCap.min || filters.marketCap.max < bounds.marketCap.max)) {
+    const fmtCap = (n: number) => n >= 1e9 ? `$${(n / 1e9).toFixed(1)}B` : `$${(n / 1e6).toFixed(0)}M`;
+    filterChips.push({ label: `Mkt Cap ${fmtCap(filters.marketCap.min)}–${fmtCap(filters.marketCap.max)}`, type: "marketCap" });
   }
 
   const visibleColumns = columnState.orderedVisible;
@@ -154,6 +195,7 @@ export function MarketExplorer({ companies, loading, error, onRetry }: MarketExp
   const showError = Boolean(error) && !loading;
   const isTrulyEmpty = !loading && !error && enriched.length === 0;
   const isFilteredEmpty = !loading && !error && enriched.length > 0 && sorted.length === 0;
+  const hasActiveFilters = filterChips.length > 0;
 
   return (
     <>
@@ -174,6 +216,8 @@ export function MarketExplorer({ companies, loading, error, onRetry }: MarketExp
           onExport={() => exportCompaniesCsv(sorted, visibleColumns)}
           compareCount={selectedTickers.size}
           onOpenCompare={() => setCompareOpen(true)}
+          sort={sort}
+          onSort={toggleSort}
         />
         <SavedScreensBar
           screens={savedScreens.screens}
@@ -181,6 +225,32 @@ export function MarketExplorer({ companies, loading, error, onRetry }: MarketExp
           onSelect={handleSelectScreen}
           onRemove={savedScreens.removeScreen}
         />
+
+        {/* Active filter chips */}
+        {hasActiveFilters && (
+          <div className="flex items-center gap-1.5 overflow-x-auto border-b border-border/60 px-3 py-1.5 scrollbar-none">
+            <span className="text-micro text-text-tertiary shrink-0">Filters:</span>
+            {filterChips.map((chip, i) => (
+              <button
+                key={`${chip.type}-${chip.value ?? i}`}
+                onClick={() => removeFilter(chip.type, chip.value)}
+                className="flex shrink-0 items-center gap-1 rounded bg-accent/10 px-1.5 py-0.5 text-micro text-accent hover:bg-accent/20 transition-colors"
+              >
+                {chip.label}
+                <X size={10} />
+              </button>
+            ))}
+            {filterChips.length > 1 && (
+              <button
+                onClick={handleResetFilters}
+                className="shrink-0 text-micro text-text-tertiary hover:text-negative transition-colors"
+              >
+                Clear all
+              </button>
+            )}
+          </div>
+        )}
+
         <div className="flex flex-1 overflow-hidden">
           <FilterRail
             industries={industries}
@@ -189,7 +259,6 @@ export function MarketExplorer({ companies, loading, error, onRetry }: MarketExp
             onChange={setFilters}
             collapsed={railCollapsed}
             onToggleCollapsed={() => setRailCollapsed((v) => !v)}
-            onSave={handleSaveScreen}
           />
 
           {showSkeleton ? (

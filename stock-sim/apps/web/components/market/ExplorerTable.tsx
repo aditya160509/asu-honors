@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { ArrowDown, ArrowUp, Star, TriangleAlert } from "lucide-react";
+import { ArrowDown, ArrowUp, Minus, Star, TriangleAlert } from "lucide-react";
 import { cn, formatLarge, formatPct, formatPrice } from "@/lib/utils";
 import { DEFAULT_ROW_HEIGHT, PINNED_COLUMN_WIDTH } from "@/lib/market/columns";
 import type { ColumnDef, Density, EnrichedCompany } from "@/lib/market/types";
@@ -25,55 +25,107 @@ export interface ExplorerTableProps {
   changedTickers: Set<string>;
 }
 
-function ChangeBar({ value, cap = 6 }: { value: number; cap?: number }) {
-  const pct = Math.min(Math.abs(value) / cap, 1) * 100;
+function ChangeBar({ value, cap = 5 }: { value: number; cap?: number }) {
+  const normalized = Math.min(Math.abs(value) / cap, 1);
+  const pct = normalized * 50;
   const positive = value >= 0;
   return (
-    <div className="relative h-1 w-12 rounded-full bg-bg-tertiary overflow-hidden">
+    <div className="relative h-[3px] w-10 rounded-full bg-border/50 overflow-hidden">
       <div
-        className={cn("absolute inset-y-0 rounded-full", positive ? "left-1/2 bg-positive" : "right-1/2 bg-negative")}
-        style={{ width: `${pct / 2}%` }}
+        className={cn(
+          "absolute inset-y-0 rounded-full transition-all duration-300",
+          positive ? "left-1/2 bg-positive" : "right-1/2 bg-negative"
+        )}
+        style={{ width: `${pct}%` }}
       />
-      <div className="absolute inset-y-0 left-1/2 w-px bg-border-light" />
+      <div className="absolute inset-y-0 left-1/2 w-px bg-border" />
     </div>
   );
 }
 
-function CellContent({ col, row }: { col: ColumnDef; row: EnrichedCompany }) {
+function HeatBar({ value, min, max }: { value: number; min: number; max: number }) {
+  if (max === min) return null;
+  const normalized = (value - min) / (max - min);
+  const opacity = 0.06 + normalized * 0.18;
+  return (
+    <div
+      className="absolute inset-y-0 left-0 right-0 pointer-events-none bg-accent"
+      style={{ opacity }}
+    />
+  );
+}
+
+function MarketCapBadge({ category }: { category: string }) {
+  const colors: Record<string, string> = {
+    Mega: "bg-accent/15 text-accent",
+    Large: "bg-blue-500/10 text-blue-400",
+    Mid: "bg-purple-500/10 text-purple-400",
+    Small: "bg-amber-500/10 text-amber-400",
+    Micro: "bg-orange-500/10 text-orange-400",
+    Unknown: "bg-border/30 text-text-tertiary",
+  };
+  return (
+    <span className={cn("inline-flex items-center rounded px-1.5 py-0.5 text-micro font-medium", colors[category] ?? colors.Unknown)}>
+      {category}
+    </span>
+  );
+}
+
+function CellContent({ col, row, minMax }: { col: ColumnDef; row: EnrichedCompany; minMax?: { price?: { min: number; max: number }; mktCap?: { min: number; max: number } } }) {
   switch (col.key) {
     case "industry":
-      return <span className="truncate text-text-secondary">{row.industry_name}</span>;
+      return <span className="truncate text-text-secondary text-small">{row.industry_name}</span>;
     case "price":
-      return <span className="num block text-right">{formatPrice(row.current_price)}</span>;
+      return <span className="num block text-right font-medium text-small">{formatPrice(row.current_price)}</span>;
     case "prevClose":
-      return <span className="num block text-right text-text-secondary">{formatPrice(row.prev_close)}</span>;
+      return <span className="num block text-right text-text-secondary text-small">{row.prev_close != null ? formatPrice(row.prev_close) : "—"}</span>;
     case "dayChange": {
-      if (row.day_change_pct == null) return <span className="num block text-right text-text-tertiary">N/A</span>;
+      if (row.day_change_pct == null) return <span className="num block text-right text-text-tertiary">—</span>;
       const v = Number(row.day_change_pct);
       const positive = v >= 0;
+      const absV = Math.abs(v);
+      const intensity = Math.min(absV / 5, 1);
       return (
-        <div className="flex items-center justify-end gap-2">
+        <div className="flex items-center justify-end gap-1.5">
           <ChangeBar value={v} />
-          <span className={cn("num flex items-center gap-0.5", positive ? "text-positive" : "text-negative")}>
-            {positive ? <ArrowUp size={10} /> : <ArrowDown size={10} />}
+          <span
+            className={cn(
+              "num flex items-center gap-0.5 text-small font-medium tabular-nums",
+              positive ? "text-positive" : "text-negative"
+            )}
+            style={{ opacity: 0.5 + intensity * 0.5 }}
+          >
+            {absV < 0.01 ? <Minus size={9} /> : positive ? <ArrowUp size={9} /> : <ArrowDown size={9} />}
             {formatPct(v)}
           </span>
         </div>
       );
     }
     case "ivGap": {
-      if (row.ivGapPct == null) return <span className="num block text-right text-text-tertiary">N/A</span>;
+      if (row.ivGapPct == null) return <span className="num block text-right text-text-tertiary">—</span>;
       const v = row.ivGapPct;
+      const absV = Math.abs(v);
+      const intensity = Math.min(absV / 10, 1);
+      const cls = v < -3 ? "text-positive" : v > 3 ? "text-negative" : "text-text-secondary";
       return (
-        <span className={cn("num block text-right", v > 0 ? "text-negative" : v < 0 ? "text-positive" : "text-neutral")}>
+        <span
+          className={cn("num block text-right text-small tabular-nums", cls)}
+          style={{ opacity: 0.5 + intensity * 0.5 }}
+        >
           {formatPct(v)}
         </span>
       );
     }
+    case "iv": {
+      if (row.intrinsic_value == null) return <span className="num block text-right text-text-tertiary">—</span>;
+      return <span className="num block text-right text-text-secondary text-small tabular-nums">{formatPrice(row.intrinsic_value)}</span>;
+    }
     case "marketCap":
-      return <span className="num block text-right">{formatLarge(row.market_cap)}</span>;
+      return <span className="num block text-right text-small tabular-nums">{formatLarge(row.market_cap)}</span>;
+    case "marketCapCategory":
+      return <MarketCapBadge category={row.marketCapCategory} />;
     case "volatility":
-      return <span className="num block text-right text-text-secondary">{row.volatility == null ? "N/A" : formatPct(Number(row.volatility))}</span>;
+      return <span className="num block text-right text-small tabular-nums">{row.volatility == null ? "—" : formatPct(Number(row.volatility))}</span>;
     default:
       return null;
   }
@@ -114,24 +166,24 @@ const ExplorerRow = React.memo(function ExplorerRow({
       aria-selected={selected}
       data-row-ticker={row.ticker}
       className={cn(
-        "group absolute left-0 right-0 flex items-stretch border-b border-border/60 cursor-pointer transition-colors",
-        selected ? "bg-bg-tertiary" : "hover:bg-bg-hover",
-        focused && "ring-1 ring-inset ring-accent-dim"
+        "group absolute left-0 right-0 flex items-stretch border-b border-border/40 cursor-pointer transition-colors",
+        selected ? "bg-accent/8" : "hover:bg-bg-hover",
+        focused && !selected && "bg-bg-hover",
       )}
       style={{ height: rowHeight, top }}
       onClick={onActivate}
     >
       <div
         className={cn(
-          "sticky left-0 z-10 flex items-center gap-1.5 pl-1.5 pr-2",
-          selected ? "bg-bg-tertiary" : "bg-bg-primary group-hover:bg-bg-hover"
+          "sticky left-0 z-10 flex items-center gap-1 pl-1 pr-2",
+          selected ? "bg-accent/8" : "bg-bg-primary group-hover:bg-bg-hover"
         )}
         style={{ width: PINNED_COLUMN_WIDTH, minWidth: PINNED_COLUMN_WIDTH }}
       >
         <span
           className={cn(
-            "absolute inset-y-0 left-0 w-0.5",
-            selected ? "bg-accent" : "bg-transparent"
+            "absolute inset-y-0 left-0 w-[2px] transition-colors",
+            selected ? "bg-accent" : watched ? "bg-warning/50" : "bg-transparent"
           )}
         />
         <button
@@ -144,8 +196,8 @@ const ExplorerRow = React.memo(function ExplorerRow({
             onToggleSelect();
           }}
           className={cn(
-            "h-3.5 w-3.5 shrink-0 rounded-[3px] border transition-opacity",
-            selected ? "border-accent bg-accent opacity-100" : "border-border-light opacity-0 group-hover:opacity-100",
+            "h-3 w-3 shrink-0 rounded-sm border transition-all",
+            selected ? "border-accent bg-accent" : "border-border-light opacity-0 group-hover:opacity-60 hover:!opacity-100",
             "flex items-center justify-center"
           )}
         >
@@ -159,27 +211,32 @@ const ExplorerRow = React.memo(function ExplorerRow({
             onToggleWatch();
           }}
           className={cn(
-            "shrink-0 transition-opacity",
-            watched ? "text-warning opacity-100" : "text-text-tertiary opacity-0 group-hover:opacity-100 hover:text-warning"
+            "shrink-0 transition-all",
+            watched ? "text-warning opacity-100" : "text-text-tertiary opacity-0 group-hover:opacity-60 hover:!opacity-100 hover:text-warning"
           )}
         >
-          <Star size={12} fill={watched ? "currentColor" : "none"} />
+          <Star size={11} fill={watched ? "currentColor" : "none"} />
         </button>
         <div className="min-w-0 flex-1">
-          <div className={cn("num truncate text-body font-bold uppercase", changed && "cell-flash")}>{row.ticker}</div>
-          <div className="truncate text-micro text-text-tertiary leading-tight">{row.name}</div>
+          <div className={cn("num truncate font-bold uppercase tracking-tight text-small", changed && "cell-flash")}>
+            {row.ticker}
+          </div>
+          <div className="truncate text-micro text-text-tertiary leading-tight max-w-[140px]">{row.name}</div>
         </div>
         {scrolledX && (
-          <div className="pointer-events-none absolute inset-y-0 -right-3 w-3 bg-gradient-to-r from-black/25 to-transparent" />
+          <div className="pointer-events-none absolute inset-y-0 -right-3 w-3 bg-gradient-to-r from-black/20 to-transparent" />
         )}
       </div>
       {columns.map((col) => (
         <div
           key={col.key}
-          className={cn("flex items-center px-3 text-body", changed && (col.key === "price" || col.key === "dayChange") && "cell-flash")}
+          className={cn(
+            "relative flex items-center px-2.5",
+            changed && (col.key === "price" || col.key === "dayChange") && "cell-flash"
+          )}
           style={{ width: col.width, minWidth: col.width }}
         >
-          <div className="w-full">
+          <div className="relative z-10 w-full">
             <CellContent col={col} row={row} />
           </div>
         </div>
@@ -229,7 +286,7 @@ export function ExplorerTable({
   }
 
   const totalRows = rows.length;
-  const overscan = 6;
+  const overscan = 8;
   const visibleStart = Math.max(0, Math.floor(scrollTop / rowHeight) - overscan);
   const visibleCount = Math.ceil(containerHeight / rowHeight) + overscan * 2;
   const visibleEnd = Math.min(totalRows, visibleStart + visibleCount);
@@ -285,21 +342,20 @@ export function ExplorerTable({
       tabIndex={0}
       role="grid"
       aria-label="Market screener results"
-      className="relative h-full flex-1 overflow-auto outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent-dim"
+      className="relative h-full flex-1 overflow-auto outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent/30"
     >
       <div style={{ minWidth: totalWidth }}>
-        <div className="sticky top-0 z-20 flex border-b border-border bg-bg-secondary" role="row">
+        {/* Header */}
+        <div className="sticky top-0 z-20 flex border-b border-border bg-bg-secondary/95 backdrop-blur-sm" role="row">
           <button
             type="button"
             onClick={() => onSort("ticker")}
-            className="sticky left-0 z-30 flex items-center gap-1 bg-bg-secondary pl-8 pr-2 text-micro font-medium uppercase text-text-secondary hover:text-text-primary transition-colors"
-            style={{ width: PINNED_COLUMN_WIDTH, minWidth: PINNED_COLUMN_WIDTH, height: 32 }}
+            className="sticky left-0 z-30 flex items-center gap-1 bg-bg-secondary pl-7 pr-2 text-micro font-semibold uppercase tracking-wider text-text-secondary hover:text-text-primary transition-colors"
+            style={{ width: PINNED_COLUMN_WIDTH, minWidth: PINNED_COLUMN_WIDTH, height: 30 }}
           >
             Company
-            {sort.key === "ticker" && sort.direction === "asc" && <ArrowUp size={11} className="text-accent" />}
-            {sort.key === "ticker" && sort.direction === "desc" && <ArrowDown size={11} className="text-accent" />}
-            {scrolledX && (
-              <div className="pointer-events-none absolute inset-y-0 -right-3 w-3 bg-gradient-to-r from-black/25 to-transparent" />
+            {sort.key === "ticker" && (
+              <span className="text-accent">{sort.direction === "asc" ? <ArrowUp size={10} /> : <ArrowDown size={10} />}</span>
             )}
           </button>
           {columns.map((col) => {
@@ -310,19 +366,24 @@ export function ExplorerTable({
                 type="button"
                 onClick={() => onSort(col.key)}
                 className={cn(
-                  "flex items-center gap-1 px-3 text-micro font-medium uppercase text-text-secondary hover:text-text-primary transition-colors",
+                  "flex items-center gap-1 px-2.5 text-micro font-semibold uppercase tracking-wider transition-colors",
+                  isSorted ? "text-accent" : "text-text-secondary hover:text-text-primary",
                   col.align === "right" && "justify-end text-right"
                 )}
-                style={{ width: col.width, minWidth: col.width, height: 32 }}
+                style={{ width: col.width, minWidth: col.width, height: 30 }}
               >
                 <span>{col.header}</span>
-                {isSorted && sort.direction === "asc" && <ArrowUp size={11} className="text-accent" />}
-                {isSorted && sort.direction === "desc" && <ArrowDown size={11} className="text-accent" />}
+                {isSorted && (
+                  <span className="text-accent">
+                    {sort.direction === "asc" ? <ArrowUp size={10} /> : <ArrowDown size={10} />}
+                  </span>
+                )}
               </button>
             );
           })}
         </div>
 
+        {/* Virtualized rows */}
         <div style={{ height: topPadding }} />
         <div style={{ position: "relative", height: (visibleEnd - visibleStart) * rowHeight }}>
           {rows.slice(visibleStart, visibleEnd).map((row, i) => {
@@ -351,10 +412,11 @@ export function ExplorerTable({
         </div>
         <div style={{ height: bottomPadding }} />
 
-        {totalRows > 0 && totalRows < 8 && (
-          <div className="flex items-center gap-2 px-3 py-6 text-micro text-text-tertiary">
-            <TriangleAlert size={12} />
-            Narrow result set — loosen filters for a fuller screen.
+        {/* Footer hints */}
+        {totalRows > 0 && totalRows < 10 && (
+          <div className="flex items-center gap-2 px-3 py-4 text-micro text-text-tertiary">
+            <TriangleAlert size={11} />
+            Narrow result set — loosen filters for more results.
           </div>
         )}
       </div>

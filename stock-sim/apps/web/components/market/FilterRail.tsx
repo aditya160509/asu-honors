@@ -1,13 +1,13 @@
 "use client";
 
 import * as React from "react";
-import { ChevronDown, ChevronsLeft, ChevronsRight, RotateCcw, Save } from "lucide-react";
+import { ChevronDown, ChevronsLeft, ChevronsRight, RotateCcw } from "lucide-react";
 import { Chip } from "@/components/ui/chip";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { RangeSlider } from "@/components/market/RangeSlider";
-import { activeFilterGroupCount, emptyFilterState } from "@/lib/market/filters";
+import { activeFilterGroupCount, capCategoriesOf, emptyFilterState } from "@/lib/market/filters";
 import type { FilterBounds } from "@/lib/market/filters";
 import type { MarketFilterState } from "@/lib/market/types";
 
@@ -18,42 +18,43 @@ export interface FilterRailProps {
   onChange: (next: MarketFilterState) => void;
   collapsed: boolean;
   onToggleCollapsed: () => void;
-  onSave: () => void;
 }
 
 function FilterSection({
   title,
   count,
   children,
+  defaultOpen = true,
 }: {
   title: string;
   count: number;
   children: React.ReactNode;
+  defaultOpen?: boolean;
 }) {
-  const [open, setOpen] = React.useState(true);
+  const [open, setOpen] = React.useState(defaultOpen);
   return (
-    <div className="border-b border-border py-3 first:pt-0 last:border-b-0">
+    <div className="border-b border-border/60 py-2.5 first:pt-0 last:border-b-0">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         className="flex w-full items-center justify-between text-left group"
       >
-        <span className="flex items-center gap-2">
-          <span className="text-micro font-medium uppercase text-text-secondary group-hover:text-text-primary transition-colors">
+        <span className="flex items-center gap-1.5">
+          <span className="text-micro font-semibold uppercase tracking-wider text-text-secondary group-hover:text-text-primary transition-colors">
             {title}
           </span>
           {count > 0 && (
-            <Badge variant="accent" className="h-4 min-w-4 justify-center px-1">
+            <Badge variant="accent" className="h-3.5 min-w-3.5 justify-center px-1 text-[10px]">
               {count}
             </Badge>
           )}
         </span>
         <ChevronDown
-          size={13}
+          size={12}
           className={cn("text-text-tertiary transition-transform", open && "rotate-180")}
         />
       </button>
-      {open && <div className="mt-3">{children}</div>}
+      {open && <div className="mt-2">{children}</div>}
     </div>
   );
 }
@@ -65,18 +66,18 @@ export function FilterRail({
   onChange,
   collapsed,
   onToggleCollapsed,
-  onSave,
 }: FilterRailProps) {
   const activeCount = activeFilterGroupCount(filters, bounds);
+  const capCategories = capCategoriesOf();
 
   if (collapsed) {
     return (
-      <div className="flex w-11 shrink-0 flex-col items-center gap-3 border-r border-border pt-1">
-        <Button variant="ghost" size="icon" onClick={onToggleCollapsed} aria-label="Expand filters">
-          <ChevronsRight size={15} />
+      <div className="flex w-10 shrink-0 flex-col items-center gap-2 border-r border-border pt-1">
+        <Button variant="ghost" size="icon" onClick={onToggleCollapsed} aria-label="Expand filters" className="h-7 w-7">
+          <ChevronsRight size={14} />
         </Button>
         {activeCount > 0 && (
-          <Badge variant="accent" className="h-4 min-w-4 justify-center px-1">
+          <Badge variant="accent" className="h-4 min-w-4 justify-center px-1 text-[10px]">
             {activeCount}
           </Badge>
         )}
@@ -92,24 +93,62 @@ export function FilterRail({
     });
   }
 
+  function toggleCapCategory(cat: string) {
+    const has = filters.marketCapCategory.includes(cat);
+    onChange({
+      ...filters,
+      marketCapCategory: has ? filters.marketCapCategory.filter((c) => c !== cat) : [...filters.marketCapCategory, cat],
+    });
+  }
+
   return (
-    <div className="flex w-[280px] shrink-0 flex-col border-r border-border">
-      <div className="flex items-center justify-between px-3 pt-1 pb-2">
-        <span className="text-micro font-medium uppercase text-text-secondary">Filters</span>
-        <Button variant="ghost" size="icon" onClick={onToggleCollapsed} aria-label="Collapse filters">
-          <ChevronsLeft size={15} />
-        </Button>
+    <div className="flex w-[260px] shrink-0 flex-col border-r border-border">
+      <div className="flex items-center justify-between px-3 pt-1 pb-1.5">
+        <span className="text-micro font-semibold uppercase tracking-wider text-text-secondary">Filters</span>
+        <div className="flex items-center gap-1">
+          {activeCount > 0 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 gap-1 text-micro text-text-tertiary hover:text-negative"
+              onClick={() => onChange(emptyFilterState())}
+            >
+              <RotateCcw size={11} />
+              Clear
+            </Button>
+          )}
+          <Button variant="ghost" size="icon" onClick={onToggleCollapsed} aria-label="Collapse filters" className="h-6 w-6">
+            <ChevronsLeft size={14} />
+          </Button>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto px-3">
-        <FilterSection title="Industry" count={filters.industries.length}>
-          <div className="flex flex-wrap gap-1.5">
+        {/* Market Cap Category — always visible, most used filter */}
+        <FilterSection title="Market Cap" count={filters.marketCapCategory.length} defaultOpen={true}>
+          <div className="flex flex-wrap gap-1">
+            {capCategories.map((cat) => (
+              <Chip
+                key={cat}
+                variant={filters.marketCapCategory.includes(cat) ? "selected" : "default"}
+                onClick={() => toggleCapCategory(cat)}
+                className="h-5 px-2 text-micro"
+              >
+                {cat}
+              </Chip>
+            ))}
+          </div>
+        </FilterSection>
+
+        {/* Industry — second most used */}
+        <FilterSection title="Industry" count={filters.industries.length} defaultOpen={true}>
+          <div className="flex flex-wrap gap-1">
             {industries.map((name) => (
               <Chip
                 key={name}
                 variant={filters.industries.includes(name) ? "selected" : "default"}
                 onClick={() => toggleIndustry(name)}
-                className="h-6 px-2 text-micro"
+                className="h-5 px-2 text-micro"
               >
                 {name}
               </Chip>
@@ -117,25 +156,24 @@ export function FilterRail({
           </div>
         </FilterSection>
 
+        {/* Valuation filters */}
         <FilterSection
-          title="Market Cap"
-          count={
-            filters.marketCap && (filters.marketCap.min > bounds.marketCap.min || filters.marketCap.max < bounds.marketCap.max)
-              ? 1
-              : 0
-          }
+          title="IV Gap %"
+          count={filters.ivGapPct && (filters.ivGapPct.min > bounds.ivGapPct.min || filters.ivGapPct.max < bounds.ivGapPct.max) ? 1 : 0}
+          defaultOpen={false}
         >
           <RangeSlider
-            bounds={bounds.marketCap}
-            value={filters.marketCap ?? bounds.marketCap}
-            onChange={(v) => onChange({ ...filters, marketCap: v })}
-            formatValue={(n) => (n >= 1e9 ? `$${(n / 1e9).toFixed(1)}B` : n >= 1e6 ? `$${(n / 1e6).toFixed(0)}M` : `$${n.toFixed(0)}`)}
+            bounds={bounds.ivGapPct}
+            value={filters.ivGapPct ?? bounds.ivGapPct}
+            onChange={(v) => onChange({ ...filters, ivGapPct: v })}
+            formatValue={(n) => `${n >= 0 ? "+" : ""}${n.toFixed(1)}%`}
           />
         </FilterSection>
 
         <FilterSection
           title="Price"
           count={filters.price && (filters.price.min > bounds.price.min || filters.price.max < bounds.price.max) ? 1 : 0}
+          defaultOpen={false}
         >
           <RangeSlider
             bounds={bounds.price}
@@ -146,13 +184,22 @@ export function FilterRail({
         </FilterSection>
 
         <FilterSection
+          title="Market Cap"
+          count={filters.marketCap && (filters.marketCap.min > bounds.marketCap.min || filters.marketCap.max < bounds.marketCap.max) ? 1 : 0}
+          defaultOpen={false}
+        >
+          <RangeSlider
+            bounds={bounds.marketCap}
+            value={filters.marketCap ?? bounds.marketCap}
+            onChange={(v) => onChange({ ...filters, marketCap: v })}
+            formatValue={(n) => (n >= 1e9 ? `$${(n / 1e9).toFixed(1)}B` : n >= 1e6 ? `$${(n / 1e6).toFixed(0)}M` : `$${n.toFixed(0)}`)}
+          />
+        </FilterSection>
+
+        <FilterSection
           title="Day Change %"
-          count={
-            filters.dayChangePct &&
-            (filters.dayChangePct.min > bounds.dayChangePct.min || filters.dayChangePct.max < bounds.dayChangePct.max)
-              ? 1
-              : 0
-          }
+          count={filters.dayChangePct && (filters.dayChangePct.min > bounds.dayChangePct.min || filters.dayChangePct.max < bounds.dayChangePct.max) ? 1 : 0}
+          defaultOpen={false}
         >
           <RangeSlider
             bounds={bounds.dayChangePct}
@@ -164,51 +211,42 @@ export function FilterRail({
 
         <FilterSection
           title="Volatility"
-          count={
-            filters.volatility && (filters.volatility.min > bounds.volatility.min || filters.volatility.max < bounds.volatility.max)
-              ? 1
-              : 0
-          }
+          count={filters.volatility && (filters.volatility.min > bounds.volatility.min || filters.volatility.max < bounds.volatility.max) ? 1 : 0}
+          defaultOpen={false}
         >
           <RangeSlider
             bounds={bounds.volatility}
             value={filters.volatility ?? bounds.volatility}
             onChange={(v) => onChange({ ...filters, volatility: v })}
-            formatValue={(n) => n.toFixed(2)}
+            formatValue={(n) => n.toFixed(3)}
           />
         </FilterSection>
 
         <FilterSection
-          title="Valuation (IV Gap %)"
-          count={
-            filters.ivGapPct && (filters.ivGapPct.min > bounds.ivGapPct.min || filters.ivGapPct.max < bounds.ivGapPct.max)
-              ? 1
-              : 0
-          }
+          title="Intrinsic Value"
+          count={filters.iv && (filters.iv.min > bounds.iv.min || filters.iv.max < bounds.iv.max) ? 1 : 0}
+          defaultOpen={false}
         >
           <RangeSlider
-            bounds={bounds.ivGapPct}
-            value={filters.ivGapPct ?? bounds.ivGapPct}
-            onChange={(v) => onChange({ ...filters, ivGapPct: v })}
-            formatValue={(n) => `${n >= 0 ? "+" : ""}${n.toFixed(1)}%`}
+            bounds={bounds.iv}
+            value={filters.iv ?? bounds.iv}
+            onChange={(v) => onChange({ ...filters, iv: v })}
+            formatValue={(n) => `$${n.toFixed(2)}`}
           />
         </FilterSection>
       </div>
 
-      <div className="flex items-center gap-2 border-t border-border px-3 py-2.5">
+      {/* Reset button at bottom */}
+      <div className="border-t border-border px-3 py-2">
         <Button
           variant="outline"
           size="sm"
-          className="flex-1 gap-1.5"
+          className="w-full gap-1.5"
           onClick={() => onChange(emptyFilterState())}
           disabled={activeCount === 0}
         >
-          <RotateCcw size={13} />
-          Reset
-        </Button>
-        <Button variant="secondary" size="sm" className="flex-1 gap-1.5" onClick={onSave} disabled={activeCount === 0}>
-          <Save size={13} />
-          Save
+          <RotateCcw size={12} />
+          Reset All Filters
         </Button>
       </div>
     </div>

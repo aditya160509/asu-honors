@@ -12,18 +12,24 @@ export default function MarketPage() {
 
   return (
     <TerminalShell>
-      <div className="mb-3">
+      <div className="mb-2">
         <div className="flex items-start justify-between gap-4">
           <div className="flex flex-col gap-0.5">
-            <span className="text-micro font-medium uppercase text-text-tertiary">Market Explorer</span>
-            <h1 className="text-h2 font-semibold text-text-primary">Screener</h1>
+            <span className="text-micro font-semibold uppercase tracking-wider text-text-tertiary">Market Explorer</span>
+            <h1 className="text-h2 font-bold text-text-primary tracking-tight">Screener</h1>
             <p className="text-small text-text-secondary">
-              {data ? `${data.companies.length} companies across the simulated market — live pricing.` : "Live simulated pricing."}
+              {data ? (
+                <span>
+                  <span className="num font-medium text-text-primary">{data.companies.length}</span> companies —{" "}
+                  <span className="text-text-tertiary">live simulated pricing</span>
+                </span>
+              ) : (
+                "Live simulated pricing"
+              )}
             </p>
           </div>
           {cycle && <CycleIndicator phase={cycle.cycle_phase} tooltip={`Sim date: ${cycle.sim_date}`} />}
         </div>
-        <div className="mt-2 h-px w-full bg-gradient-to-r from-transparent via-accent to-transparent opacity-70" />
       </div>
       <MarketExplorer
         companies={data?.companies ?? []}
