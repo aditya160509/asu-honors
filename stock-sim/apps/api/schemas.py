@@ -101,6 +101,9 @@ class CompanyGridItem(BaseModel):
     intrinsic_value: Optional[Decimal] = None
     market_cap: Optional[Decimal] = None
     volatility: Optional[Decimal] = None
+    avg_volume_20d: Optional[int] = None
+    high_52w: Optional[Decimal] = None
+    low_52w: Optional[Decimal] = None
 
 
 class MarketGridResponse(BaseModel):

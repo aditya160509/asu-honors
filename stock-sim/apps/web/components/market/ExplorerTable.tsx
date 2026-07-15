@@ -1,14 +1,16 @@
 "use client";
 
 import * as React from "react";
-import { ArrowDown, ArrowUp, Minus, Star, TriangleAlert } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronRight, Minus, Star, TriangleAlert } from "lucide-react";
 import { cn, formatLarge, formatPct, formatPrice } from "@/lib/utils";
 import { DEFAULT_ROW_HEIGHT, PINNED_COLUMN_WIDTH } from "@/lib/market/columns";
-import type { ColumnDef, Density, EnrichedCompany } from "@/lib/market/types";
+import { RowExpandedContent } from "@/components/market/RowExpandedContent";
+import type { ColumnDef, Density, EnrichedCompany, SortEntry } from "@/lib/market/types";
 
 export interface SortState {
   key: string | null;
   direction: "asc" | "desc" | null;
+  secondary?: SortEntry | null;
 }
 
 export interface ExplorerTableProps {
@@ -16,13 +18,14 @@ export interface ExplorerTableProps {
   columns: ColumnDef[];
   density: Density;
   sort: SortState;
-  onSort: (key: string) => void;
+  onSort: (key: string, shiftKey?: boolean) => void;
   selectedTickers: Set<string>;
   onToggleSelect: (ticker: string) => void;
   watchedTickers: Set<string>;
   onToggleWatch: (ticker: string) => void;
   onActivateRow: (ticker: string) => void;
   changedTickers: Set<string>;
+  onColumnResize?: (key: string, width: number) => void;
 }
 
 function ChangeBar({ value, cap = 5 }: { value: number; cap?: number }) {
@@ -126,6 +129,26 @@ function CellContent({ col, row, minMax }: { col: ColumnDef; row: EnrichedCompan
       return <MarketCapBadge category={row.marketCapCategory} />;
     case "volatility":
       return <span className="num block text-right text-small tabular-nums">{row.volatility == null ? "—" : formatPct(Number(row.volatility))}</span>;
+    case "volume":
+      return <span className="num block text-right text-small tabular-nums">{row.avg_volume_20d == null ? "—" : `Avg ${formatLarge(row.avg_volume_20d)}`}</span>;
+    case "high52w":
+      return <span className="num block text-right text-small tabular-nums">{row.high_52w == null ? "—" : formatPrice(row.high_52w)}</span>;
+    case "low52w":
+      return <span className="num block text-right text-small tabular-nums">{row.low_52w == null ? "—" : formatPrice(row.low_52w)}</span>;
+    case "pctOffHigh": {
+      if (row.pctOffHigh == null) return <span className="num block text-right text-text-tertiary">—</span>;
+      const v = Number(row.pctOffHigh);
+      const absV = Math.abs(v);
+      const intensity = Math.min(absV / 10, 1);
+      return (
+        <span
+          className="num block text-right text-negative text-small tabular-nums"
+          style={{ opacity: 0.5 + intensity * 0.5 }}
+        >
+          {formatPct(v)}
+        </span>
+      );
+    }
     default:
       return null;
   }
@@ -140,9 +163,12 @@ interface RowProps {
   selected: boolean;
   watched: boolean;
   changed: boolean;
+  rank: number;
+  isExpanded: boolean;
   onActivate: () => void;
   onToggleSelect: () => void;
   onToggleWatch: () => void;
+  onExpand: () => void;
   scrolledX: boolean;
 }
 
@@ -155,9 +181,12 @@ const ExplorerRow = React.memo(function ExplorerRow({
   selected,
   watched,
   changed,
+  rank,
+  isExpanded,
   onActivate,
   onToggleSelect,
   onToggleWatch,
+  onExpand,
   scrolledX,
 }: RowProps) {
   return (
@@ -166,16 +195,17 @@ const ExplorerRow = React.memo(function ExplorerRow({
       aria-selected={selected}
       data-row-ticker={row.ticker}
       className={cn(
-        "group absolute left-0 right-0 flex items-stretch border-b border-border/40 cursor-pointer transition-colors",
-        selected ? "bg-accent/8" : "hover:bg-bg-hover",
-        focused && !selected && "bg-bg-hover",
+        "group absolute left-0 right-0 flex items-stretch border-b border-border/40 cursor-pointer",
+        "transition-[background-color,border-color] duration-150",
+        "hover:border-l-2 hover:border-l-accent/60",
+        selected ? "bg-accent/8 border-l-2 border-l-accent" : focused ? "bg-bg-hover border-l-2 border-l-accent/30" : "bg-transparent",
       )}
       style={{ height: rowHeight, top }}
       onClick={onActivate}
     >
       <div
         className={cn(
-          "sticky left-0 z-10 flex items-center gap-1 pl-1 pr-2",
+          "sticky left-0 z-10 flex items-center gap-0.5 pl-0.5 pr-1.5",
           selected ? "bg-accent/8" : "bg-bg-primary group-hover:bg-bg-hover"
         )}
         style={{ width: PINNED_COLUMN_WIDTH, minWidth: PINNED_COLUMN_WIDTH }}
@@ -186,6 +216,22 @@ const ExplorerRow = React.memo(function ExplorerRow({
             selected ? "bg-accent" : watched ? "bg-warning/50" : "bg-transparent"
           )}
         />
+        <button
+          type="button"
+          aria-label={isExpanded ? `Collapse ${row.ticker} details` : `Expand ${row.ticker} details`}
+          onClick={(e) => {
+            e.stopPropagation();
+            onExpand();
+          }}
+          className={cn(
+            "flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-sm transition-all",
+            isExpanded
+              ? "text-accent opacity-100"
+              : "text-text-tertiary opacity-0 group-hover:opacity-60 hover:!opacity-100"
+          )}
+        >
+          <ChevronRight size={10} className={cn("transition-transform duration-150", isExpanded && "rotate-90")} />
+        </button>
         <button
           type="button"
           role="checkbox"
@@ -218,8 +264,13 @@ const ExplorerRow = React.memo(function ExplorerRow({
           <Star size={11} fill={watched ? "currentColor" : "none"} />
         </button>
         <div className="min-w-0 flex-1">
-          <div className={cn("num truncate font-bold uppercase tracking-tight text-small", changed && "cell-flash")}>
-            {row.ticker}
+          <div className="flex items-baseline gap-1">
+            <span className="text-micro text-text-tertiary tabular-nums w-4 shrink-0 text-right">
+              {rank}
+            </span>
+            <span className={cn("num truncate font-bold uppercase tracking-tight text-small", changed && "cell-flash")}>
+              {row.ticker}
+            </span>
           </div>
           <div className="truncate text-micro text-text-tertiary leading-tight max-w-[140px]">{row.name}</div>
         </div>
@@ -257,13 +308,57 @@ export function ExplorerTable({
   onToggleWatch,
   onActivateRow,
   changedTickers,
+  onColumnResize,
 }: ExplorerTableProps) {
   const rowHeight = DEFAULT_ROW_HEIGHT[density];
+  const EXPANDED_HEIGHT = 120;
   const containerRef = React.useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = React.useState(0);
   const [scrolledX, setScrolledX] = React.useState(false);
   const [containerHeight, setContainerHeight] = React.useState(600);
   const [focusedIndex, setFocusedIndex] = React.useState(0);
+  const [expandedTicker, setExpandedTicker] = React.useState<string | null>(null);
+  const [columnWidths, setColumnWidths] = React.useState<Record<string, number>>(() => {
+    const initial: Record<string, number> = {};
+    for (const col of columns) initial[col.key] = col.width;
+    return initial;
+  });
+  const resizingRef = React.useRef<{ key: string; startX: number; startWidth: number } | null>(null);
+
+  function handleColumnResizeStart(key: string, e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    const startWidth = columnWidths[key] ?? columns.find((c) => c.key === key)?.width ?? 80;
+    resizingRef.current = { key, startX: e.clientX, startWidth };
+
+    function onMouseMove(ev: MouseEvent) {
+      if (!resizingRef.current) return;
+      const delta = ev.clientX - resizingRef.current.startX;
+      const newWidth = Math.max(50, resizingRef.current.startWidth + delta);
+      setColumnWidths((prev) => ({ ...prev, [resizingRef.current!.key]: newWidth }));
+    }
+
+    function onMouseUp() {
+      if (resizingRef.current) {
+        onColumnResize?.(resizingRef.current.key, columnWidths[resizingRef.current.key] ?? 80);
+      }
+      resizingRef.current = null;
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    }
+
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  }
+
+  const resolvedColumns = React.useMemo(
+    () => columns.map((c) => ({ ...c, width: columnWidths[c.key] ?? c.width })),
+    [columns, columnWidths]
+  );
 
   React.useEffect(() => {
     setFocusedIndex((i) => Math.min(i, Math.max(rows.length - 1, 0)));
@@ -285,20 +380,42 @@ export function ExplorerTable({
     setScrolledX(e.currentTarget.scrollLeft > 0);
   }
 
+  const expandedIdx = expandedTicker ? rows.findIndex((r) => r.ticker === expandedTicker) : -1;
+
+  function getRowTop(idx: number): number {
+    let top = idx * rowHeight;
+    if (expandedIdx >= 0 && idx > expandedIdx) {
+      top += EXPANDED_HEIGHT;
+    }
+    return top;
+  }
+
   const totalRows = rows.length;
   const overscan = 8;
   const visibleStart = Math.max(0, Math.floor(scrollTop / rowHeight) - overscan);
   const visibleCount = Math.ceil(containerHeight / rowHeight) + overscan * 2;
   const visibleEnd = Math.min(totalRows, visibleStart + visibleCount);
-  const topPadding = visibleStart * rowHeight;
-  const bottomPadding = (totalRows - visibleEnd) * rowHeight;
+
+  let topPadding = visibleStart * rowHeight;
+  if (expandedIdx >= 0 && expandedIdx < visibleStart) {
+    topPadding += EXPANDED_HEIGHT;
+  }
+  let bottomPadding = (totalRows - visibleEnd) * rowHeight;
+  if (expandedIdx >= 0 && expandedIdx >= visibleEnd) {
+    bottomPadding += EXPANDED_HEIGHT;
+  }
 
   function scrollToIndex(index: number) {
     const el = containerRef.current;
     if (!el) return;
-    const top = index * rowHeight;
+    const top = getRowTop(index);
+    const bottom = top + rowHeight + (index === expandedIdx ? EXPANDED_HEIGHT : 0);
     if (top < el.scrollTop) el.scrollTop = top;
-    else if (top + rowHeight > el.scrollTop + containerHeight) el.scrollTop = top + rowHeight - containerHeight;
+    else if (bottom > el.scrollTop + containerHeight) el.scrollTop = bottom - containerHeight;
+  }
+
+  function toggleExpand(ticker: string) {
+    setExpandedTicker((prev) => (prev === ticker ? null : ticker));
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
@@ -329,10 +446,20 @@ export function ExplorerTable({
       e.preventDefault();
       const row = rows[focusedIndex];
       if (row) onToggleWatch(row.ticker);
+    } else if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+      e.preventDefault();
+      const row = rows[focusedIndex];
+      if (row) toggleExpand(row.ticker);
     }
   }
 
-  const totalWidth = PINNED_COLUMN_WIDTH + columns.reduce((sum, c) => sum + c.width, 0);
+  const totalWidth = PINNED_COLUMN_WIDTH + resolvedColumns.reduce((sum, c) => sum + c.width, 0);
+
+  function sortPriority(key: string): number | null {
+    if (sort.key === key) return 1;
+    if (sort.secondary?.key === key) return 2;
+    return null;
+  }
 
   return (
     <div
@@ -358,55 +485,86 @@ export function ExplorerTable({
               <span className="text-accent">{sort.direction === "asc" ? <ArrowUp size={10} /> : <ArrowDown size={10} />}</span>
             )}
           </button>
-          {columns.map((col) => {
-            const isSorted = sort.key === col.key;
+          {resolvedColumns.map((col, colIdx) => {
+            const priority = sortPriority(col.key);
+            const isSorted = priority !== null;
             return (
-              <button
-                key={col.key}
-                type="button"
-                onClick={() => onSort(col.key)}
-                className={cn(
-                  "flex items-center gap-1 px-2.5 text-micro font-semibold uppercase tracking-wider transition-colors",
-                  isSorted ? "text-accent" : "text-text-secondary hover:text-text-primary",
-                  col.align === "right" && "justify-end text-right"
+              <div key={col.key} className="relative flex" style={{ width: col.width, minWidth: col.width }}>
+                <button
+                  type="button"
+                  onClick={(e) => onSort(col.key, e.shiftKey)}
+                  className={cn(
+                    "flex flex-1 items-center gap-1 px-2.5 text-micro font-semibold uppercase tracking-wider transition-colors",
+                    isSorted ? "text-accent" : "text-text-secondary hover:text-text-primary",
+                    col.align === "right" && "justify-end text-right"
+                  )}
+                  style={{ height: 30 }}
+                >
+                  <span>{col.header}</span>
+                  {isSorted && (
+                    <>
+                      <span className="inline-flex h-3.5 min-w-[14px] items-center justify-center rounded-[3px] bg-accent/20 px-0.5 text-[8px] font-bold text-accent tabular-nums">
+                        {priority}
+                      </span>
+                      <span className="text-accent">
+                        {priority === 1
+                          ? (sort.direction === "asc" ? <ArrowUp size={10} /> : <ArrowDown size={10} />)
+                          : (sort.secondary?.direction === "asc" ? <ArrowUp size={10} /> : <ArrowDown size={10} />)}
+                      </span>
+                    </>
+                  )}
+                </button>
+                {colIdx < resolvedColumns.length - 1 && (
+                  <div
+                    role="separator"
+                    aria-label={`Resize ${col.header} column`}
+                    className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize group/resize hover:bg-accent/30 transition-colors z-10"
+                    onMouseDown={(e) => handleColumnResizeStart(col.key, e)}
+                  >
+                    <div className="absolute right-0 top-1 bottom-1 w-px bg-border/0 group-hover/resize:bg-accent/50 transition-colors" />
+                  </div>
                 )}
-                style={{ width: col.width, minWidth: col.width, height: 30 }}
-              >
-                <span>{col.header}</span>
-                {isSorted && (
-                  <span className="text-accent">
-                    {sort.direction === "asc" ? <ArrowUp size={10} /> : <ArrowDown size={10} />}
-                  </span>
-                )}
-              </button>
+              </div>
             );
           })}
         </div>
 
         {/* Virtualized rows */}
         <div style={{ height: topPadding }} />
-        <div style={{ position: "relative", height: (visibleEnd - visibleStart) * rowHeight }}>
+        <div style={{ position: "relative", height: (visibleEnd - visibleStart) * rowHeight + (expandedIdx >= visibleStart && expandedIdx < visibleEnd ? EXPANDED_HEIGHT : 0) }}>
           {rows.slice(visibleStart, visibleEnd).map((row, i) => {
             const idx = visibleStart + i;
             return (
-              <ExplorerRow
-                key={row.ticker}
-                row={row}
-                columns={columns}
-                rowHeight={rowHeight}
-                top={i * rowHeight}
-                focused={idx === focusedIndex}
-                selected={selectedTickers.has(row.ticker)}
-                watched={watchedTickers.has(row.ticker)}
-                changed={changedTickers.has(row.ticker)}
-                onActivate={() => {
-                  setFocusedIndex(idx);
-                  onActivateRow(row.ticker);
-                }}
-                onToggleSelect={() => onToggleSelect(row.ticker)}
-                onToggleWatch={() => onToggleWatch(row.ticker)}
-                scrolledX={scrolledX}
-              />
+              <React.Fragment key={row.ticker}>
+                <ExplorerRow
+                  row={row}
+                  columns={resolvedColumns}
+                  rowHeight={rowHeight}
+                  top={getRowTop(idx)}
+                  focused={idx === focusedIndex}
+                  selected={selectedTickers.has(row.ticker)}
+                  watched={watchedTickers.has(row.ticker)}
+                  changed={changedTickers.has(row.ticker)}
+                  rank={idx + 1}
+                  isExpanded={idx === expandedIdx}
+                  onActivate={() => {
+                    setFocusedIndex(idx);
+                    onActivateRow(row.ticker);
+                  }}
+                  onToggleSelect={() => onToggleSelect(row.ticker)}
+                  onToggleWatch={() => onToggleWatch(row.ticker)}
+                  onExpand={() => toggleExpand(row.ticker)}
+                  scrolledX={scrolledX}
+                />
+                {idx === expandedIdx && (
+                  <div
+                    className="absolute left-0 right-0 overflow-hidden"
+                    style={{ top: getRowTop(idx) + rowHeight, height: EXPANDED_HEIGHT }}
+                  >
+                    <RowExpandedContent row={row} />
+                  </div>
+                )}
+              </React.Fragment>
             );
           })}
         </div>

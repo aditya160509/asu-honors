@@ -5,20 +5,27 @@ import { X } from "lucide-react";
 import { toast } from "sonner";
 import { Toolbar } from "@/components/market/Toolbar";
 import { SavedScreensBar } from "@/components/market/SavedScreensBar";
+import { StatsBar } from "@/components/market/StatsBar";
+import { ColumnPresets, COLUMN_PRESETS } from "@/components/market/ColumnPresets";
+import { HeatmapView } from "@/components/market/HeatmapView";
 import { FilterRail } from "@/components/market/FilterRail";
 import { ExplorerTable, type SortState } from "@/components/market/ExplorerTable";
 import { ExplorerSkeleton, ExplorerErrorState, ExplorerEmptyFiltered, ExplorerEmptyUniverse } from "@/components/market/ExplorerStates";
 import { PreviewDrawer } from "@/components/market/PreviewDrawer";
 import { CompareDrawer } from "@/components/market/CompareDrawer";
+import { SectorBreakdown } from "@/components/market/SectorBreakdown";
+import { ComparisonOverlay } from "@/components/market/ComparisonOverlay";
+import { DistributionHistogram } from "@/components/market/DistributionHistogram";
 import { COLUMN_DEFS } from "@/lib/market/columns";
 import { applyFilters, boundsFor, emptyFilterState, enrichCompanies, industriesOf } from "@/lib/market/filters";
 import { useColumnVisibility } from "@/lib/market/useColumnVisibility";
 import { useSavedScreens } from "@/lib/market/useSavedScreens";
 import { useWatchlistToggle } from "@/lib/market/useWatchlistToggle";
+import { useScreenerKeyboard } from "@/lib/market/useScreenerKeyboard";
 import { exportCompaniesCsv } from "@/lib/market/exportCsv";
 import { cn } from "@/lib/utils";
 import type { CompanyGridItem } from "@/lib/api/types";
-import type { Density, EnrichedCompany, MarketFilterState } from "@/lib/market/types";
+import type { ColumnKey, Density, EnrichedCompany, MarketFilterState } from "@/lib/market/types";
 
 const MAX_COMPARE = 4;
 const DENSITY_KEY = "market-explorer:density";
@@ -35,21 +42,42 @@ function readLocal<T>(key: string, fallback: T): T {
 }
 
 function sortRows(rows: EnrichedCompany[], sort: SortState): EnrichedCompany[] {
-  if (!sort.key || !sort.direction) return rows;
-  const dir = sort.direction === "asc" ? 1 : -1;
-  const col = COLUMN_DEFS.find((c) => c.key === sort.key);
-  const accessor = (row: EnrichedCompany): number | string | null => {
-    if (sort.key === "ticker") return row.ticker;
-    return col ? col.sortAccessor(row) : null;
-  };
+  const comparators: { accessor: (row: EnrichedCompany) => number | string | null; dir: number }[] = [];
+
+  if (sort.key && sort.direction) {
+    const col = COLUMN_DEFS.find((c) => c.key === sort.key);
+    comparators.push({
+      accessor: (row) => (sort.key === "ticker" ? row.ticker : col ? col.sortAccessor(row) : null),
+      dir: sort.direction === "asc" ? 1 : -1,
+    });
+  }
+
+  if (sort.secondary?.key && sort.secondary?.direction) {
+    const col = COLUMN_DEFS.find((c) => c.key === sort.secondary!.key);
+    comparators.push({
+      accessor: (row) => (sort.secondary!.key === "ticker" ? row.ticker : col ? col.sortAccessor(row) : null),
+      dir: sort.secondary!.direction === "asc" ? 1 : -1,
+    });
+  }
+
+  if (comparators.length === 0) return rows;
+
   return [...rows].sort((a, b) => {
-    const av = accessor(a);
-    const bv = accessor(b);
-    if (av == null && bv == null) return 0;
-    if (av == null) return 1;
-    if (bv == null) return -1;
-    if (typeof av === "string" && typeof bv === "string") return av.localeCompare(bv) * dir;
-    return (Number(av) - Number(bv)) * dir;
+    for (const { accessor, dir } of comparators) {
+      const av = accessor(a);
+      const bv = accessor(b);
+      if (av == null && bv == null) continue;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      if (typeof av === "string" && typeof bv === "string") {
+        const cmp = av.localeCompare(bv) * dir;
+        if (cmp !== 0) return cmp;
+      } else {
+        const cmp = (Number(av) - Number(bv)) * dir;
+        if (cmp !== 0) return cmp;
+      }
+    }
+    return 0;
   });
 }
 
@@ -90,10 +118,32 @@ export function MarketExplorer({ companies, loading, error, onRetry }: MarketExp
   const [selectedTickers, setSelectedTickers] = React.useState<Set<string>>(new Set());
   const [previewTicker, setPreviewTicker] = React.useState<string | null>(null);
   const [compareOpen, setCompareOpen] = React.useState(false);
+  const [viewMode, setViewMode] = React.useState<"table" | "heatmap">("table");
+  const [activePreset, setActivePreset] = React.useState<string | null>(null);
+  const [focusedIndex, setFocusedIndex] = React.useState(0);
+  const [analyticsOpen, setAnalyticsOpen] = React.useState(false);
 
   const savedScreens = useSavedScreens();
   const columnState = useColumnVisibility(COLUMN_DEFS);
   const watchlist = useWatchlistToggle();
+
+  const searchInputRef = React.useRef<HTMLInputElement | null>(null);
+
+  function handlePresetChange(columns: ColumnKey[]) {
+    const preset = COLUMN_PRESETS.find((p) => {
+      const sortedA = [...p.columns].sort();
+      const sortedB = [...columns].sort();
+      return sortedA.length === sortedB.length && sortedA.every((k, i) => k === sortedB[i]);
+    });
+    setActivePreset(preset?.key ?? null);
+
+    for (const key of columnState.order) {
+      const shouldShow = columns.includes(key);
+      const isCurrentlyHidden = columnState.hidden.includes(key);
+      if (shouldShow && isCurrentlyHidden) columnState.toggle(key);
+      if (!shouldShow && !isCurrentlyHidden) columnState.toggle(key);
+    }
+  }
 
   React.useEffect(() => {
     localStorage.setItem(DENSITY_KEY, JSON.stringify(density));
@@ -105,11 +155,54 @@ export function MarketExplorer({ companies, loading, error, onRetry }: MarketExp
   const filtered = React.useMemo(() => applyFilters(enriched, filters, query), [enriched, filters, query]);
   const sorted = React.useMemo(() => sortRows(filtered, sort), [filtered, sort]);
 
-  function toggleSort(key: string) {
+  React.useEffect(() => {
+    setFocusedIndex((i) => Math.min(i, Math.max(sorted.length - 1, 0)));
+  }, [sorted.length]);
+
+  const rowGetter = React.useCallback(
+    (index: number) => sorted[index] ?? null,
+    [sorted]
+  );
+
+  useScreenerKeyboard({
+    focusedIndex,
+    setFocusedIndex,
+    totalRows: sorted.length,
+    onActivateRow: setPreviewTicker,
+    onToggleSelect: toggleSelect,
+    onToggleWatch: watchlist.toggle,
+    searchInputRef,
+    rowGetter,
+    onEsc: () => {
+      if (previewTicker) setPreviewTicker(null);
+    },
+    onSelectPreset: (index) => {
+      const preset = COLUMN_PRESETS[index];
+      if (preset) {
+        setActivePreset(preset.key);
+        columnState.reset();
+        for (const key of COLUMN_DEFS.map((c) => c.key)) {
+          if (!preset.columns.includes(key)) {
+            columnState.toggle(key);
+          }
+        }
+      }
+    },
+  });
+
+  function toggleSort(key: string, shiftKey?: boolean) {
     setSort((prev) => {
-      if (prev.key !== key) return { key, direction: "asc" };
+      if (shiftKey) {
+        if (prev.key === key) return prev;
+        if (prev.secondary?.key === key) {
+          const nextDir = prev.secondary.direction === "asc" ? "desc" : null;
+          return { ...prev, secondary: nextDir ? { key, direction: nextDir } : null };
+        }
+        return { ...prev, secondary: { key, direction: "asc" } };
+      }
+      if (prev.key !== key) return { key, direction: "asc", secondary: null };
       const next: SortState["direction"] = prev.direction === "asc" ? "desc" : prev.direction === "desc" ? null : "asc";
-      return { key: next ? key : null, direction: next };
+      return { key: next ? key : null, direction: next, secondary: null };
     });
   }
 
@@ -198,8 +291,8 @@ export function MarketExplorer({ companies, loading, error, onRetry }: MarketExp
   const hasActiveFilters = filterChips.length > 0;
 
   return (
-    <>
-      <div className="flex h-[calc(100vh-176px)] min-h-[520px] flex-col overflow-hidden rounded-md border border-border bg-bg-secondary">
+    <div className="flex flex-1 flex-col overflow-hidden">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-border bg-bg-secondary">
         <Toolbar
           query={query}
           onQueryChange={setQuery}
@@ -218,7 +311,38 @@ export function MarketExplorer({ companies, loading, error, onRetry }: MarketExp
           onOpenCompare={() => setCompareOpen(true)}
           sort={sort}
           onSort={toggleSort}
+          searchInputRef={searchInputRef}
         />
+        <div className="flex items-center justify-between border-b border-border/60 px-3 py-1.5">
+          <ColumnPresets onPresetChange={handlePresetChange} activePreset={activePreset} />
+          <div className="flex items-center rounded-md border border-border p-0.5" role="radiogroup" aria-label="View mode">
+            <button
+              type="button"
+              role="radio"
+              aria-checked={viewMode === "table"}
+              onClick={() => setViewMode("table")}
+              className={cn(
+                "h-7 rounded px-3 text-xs font-medium transition-all",
+                viewMode === "table" ? "bg-bg-hover text-text-primary shadow-sm" : "text-text-tertiary hover:text-text-secondary"
+              )}
+            >
+              TABLE
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={viewMode === "heatmap"}
+              onClick={() => setViewMode("heatmap")}
+              className={cn(
+                "h-7 rounded px-3 text-xs font-medium transition-all",
+                viewMode === "heatmap" ? "bg-bg-hover text-text-primary shadow-sm" : "text-text-tertiary hover:text-text-secondary"
+              )}
+            >
+              HEATMAP
+            </button>
+          </div>
+        </div>
+        <StatsBar companies={sorted} />
         <SavedScreensBar
           screens={savedScreens.screens}
           activeId={savedScreens.activeId}
@@ -269,6 +393,8 @@ export function MarketExplorer({ companies, loading, error, onRetry }: MarketExp
             <ExplorerEmptyUniverse />
           ) : isFilteredEmpty ? (
             <ExplorerEmptyFiltered onReset={handleResetFilters} />
+          ) : viewMode === "heatmap" ? (
+            <HeatmapView companies={sorted} onActivateRow={setPreviewTicker} />
           ) : (
             <ExplorerTable
               rows={sorted}
@@ -287,6 +413,38 @@ export function MarketExplorer({ companies, loading, error, onRetry }: MarketExp
         </div>
       </div>
 
+      {/* Analytics toggle + collapsible panel */}
+      <div className="flex items-center justify-end px-1 pt-1">
+        <button
+          type="button"
+          onClick={() => setAnalyticsOpen((v) => !v)}
+          className="text-micro font-medium text-text-tertiary hover:text-text-secondary transition-colors"
+        >
+          {analyticsOpen ? "Hide Analytics" : "Show Analytics"}
+        </button>
+      </div>
+
+      {analyticsOpen && (
+        <div className="mt-1 space-y-3 rounded-md border border-border bg-bg-secondary p-3 pb-6">
+          {selectedTickers.size > 0 && (
+            <ComparisonOverlay
+              companies={enriched}
+              selectedTickers={Array.from(selectedTickers)}
+              onRemoveTicker={toggleSelect}
+            />
+          )}
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+            <SectorBreakdown companies={sorted} />
+            <DistributionHistogram companies={sorted} metric="price" />
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <DistributionHistogram companies={sorted} metric="dayChange" height={150} />
+            <DistributionHistogram companies={sorted} metric="ivGap" height={150} />
+            <DistributionHistogram companies={sorted} metric="volatility" height={150} />
+          </div>
+        </div>
+      )}
+
       <PreviewDrawer
         ticker={previewTicker}
         onClose={() => setPreviewTicker(null)}
@@ -301,6 +459,6 @@ export function MarketExplorer({ companies, loading, error, onRetry }: MarketExp
         companies={enriched}
         onRemove={toggleSelect}
       />
-    </>
+    </div>
   );
 }

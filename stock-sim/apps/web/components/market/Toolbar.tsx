@@ -26,7 +26,8 @@ export interface ToolbarProps {
   compareCount: number;
   onOpenCompare: () => void;
   sort: SortState;
-  onSort: (key: string) => void;
+  onSort: (key: string, shiftKey?: boolean) => void;
+  searchInputRef?: React.RefObject<HTMLInputElement | null>;
 }
 
 export function Toolbar({
@@ -47,6 +48,7 @@ export function Toolbar({
   onOpenCompare,
   sort,
   onSort,
+  searchInputRef,
 }: ToolbarProps) {
   const [sortOpen, setSortOpen] = React.useState(false);
   const sortRef = React.useRef<HTMLDivElement>(null);
@@ -64,6 +66,7 @@ export function Toolbar({
   return (
     <div className="flex flex-wrap items-center gap-2 px-3 py-2">
       <SearchInput
+        ref={searchInputRef}
         value={query}
         onValueChange={onQueryChange}
         placeholder="Search ticker or name…"

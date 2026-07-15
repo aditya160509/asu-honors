@@ -13,6 +13,7 @@ export interface MarketFilterState {
   volatility: RangeValue | null;
   ivGapPct: RangeValue | null;
   iv: RangeValue | null;
+  volume: RangeValue | null;
   marketCapCategory: string[];
 }
 
@@ -25,7 +26,11 @@ export type ColumnKey =
   | "iv"
   | "marketCap"
   | "marketCapCategory"
-  | "volatility";
+  | "volatility"
+  | "volume"
+  | "high52w"
+  | "low52w"
+  | "pctOffHigh";
 
 export interface ColumnDef {
   key: ColumnKey;
@@ -40,6 +45,12 @@ export interface ColumnDef {
 export interface EnrichedCompany extends CompanyGridItem {
   ivGapPct: number | null;
   marketCapCategory: string;
+  pctOffHigh: number | null;
+}
+
+export interface SortEntry {
+  key: string;
+  direction: "asc" | "desc";
 }
 
 export type Density = "comfortable" | "compact";

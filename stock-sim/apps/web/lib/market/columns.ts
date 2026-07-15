@@ -73,6 +73,38 @@ export const COLUMN_DEFS: ColumnDef[] = [
     sortAccessor: (r) => (r.volatility == null ? null : Number(r.volatility)),
     group: "fundamental",
   },
+  {
+    key: "volume",
+    header: "Avg Vol",
+    width: 80,
+    align: "right",
+    sortAccessor: (r) => (r.avg_volume_20d == null ? null : Number(r.avg_volume_20d)),
+    group: "fundamental",
+  },
+  {
+    key: "high52w",
+    header: "52W High",
+    width: 80,
+    align: "right",
+    sortAccessor: (r) => (r.high_52w == null ? null : Number(r.high_52w)),
+    group: "price",
+  },
+  {
+    key: "low52w",
+    header: "52W Low",
+    width: 80,
+    align: "right",
+    sortAccessor: (r) => (r.low_52w == null ? null : Number(r.low_52w)),
+    group: "price",
+  },
+  {
+    key: "pctOffHigh",
+    header: "% Off High",
+    width: 80,
+    align: "right",
+    sortAccessor: (r) => r.pctOffHigh,
+    group: "price",
+  },
 ];
 
 export const DEFAULT_ROW_HEIGHT: Record<"comfortable" | "compact", number> = {

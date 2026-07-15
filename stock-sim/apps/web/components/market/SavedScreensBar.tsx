@@ -33,7 +33,6 @@ export function SavedScreensBar({ screens, activeId, onSelect, onRemove }: Saved
             )}
             onClick={() => onSelect(screen.id)}
           >
-            {screen.icon && <span className="text-[10px] opacity-70">{screen.icon}</span>}
             <span className="whitespace-nowrap">{screen.name}</span>
             {!screen.builtin && (
               <button
