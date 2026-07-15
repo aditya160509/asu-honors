@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { ChartSurface } from "@/lib/charts/core/ChartSurface";
-import { formatLarge } from "@/lib/utils";
+import { cssVar, formatLarge } from "@/lib/utils";
 
 export interface AllocationSlice {
   label: string;
@@ -26,7 +26,7 @@ function groupSlices(data: AllocationSlice[]): AllocationSlice[] {
   const top = sorted.slice(0, MAX_SEGMENTS - 1);
   const rest = sorted.slice(MAX_SEGMENTS - 1);
   const otherValue = rest.reduce((sum, s) => sum + s.value, 0);
-  return [...top, { label: "Other", value: otherValue, color: "#6b7280" }];
+  return [...top, { label: "Other", value: otherValue, color: cssVar('--neutral') }];
 }
 
 export function AllocationChart({ data, height = 220, loading }: AllocationChartProps) {
@@ -41,7 +41,7 @@ export function AllocationChart({ data, height = 220, loading }: AllocationChart
 
       if (total === 0) {
         ctx.save();
-        ctx.strokeStyle = "#2a2a2e";
+        ctx.strokeStyle = cssVar('--border');
         ctx.lineWidth = OUTER_RADIUS - INNER_RADIUS;
         ctx.beginPath();
         ctx.arc(cx, cy, (OUTER_RADIUS + INNER_RADIUS) / 2, 0, Math.PI * 2);
@@ -73,12 +73,12 @@ export function AllocationChart({ data, height = 220, loading }: AllocationChart
       });
 
       ctx.save();
-      ctx.fillStyle = "#98989e";
+      ctx.fillStyle = cssVar('--text-secondary');
       ctx.font = "11px sans-serif";
       ctx.textAlign = "center";
       ctx.textBaseline = "bottom";
       ctx.fillText(hoverIndex != null ? slices[hoverIndex].label : "Total", cx, cy - 2);
-      ctx.fillStyle = "#e8e8ea";
+      ctx.fillStyle = cssVar('--text-primary');
       ctx.font = "bold 15px monospace";
       ctx.textBaseline = "top";
       ctx.fillText(

@@ -33,7 +33,7 @@ export function ColumnManager({ columns, order, hidden, onToggle, onMove, onRese
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-64">
-        <div className="px-2 py-1 text-micro uppercase tracking-wide text-text-tertiary">Visible columns</div>
+        <div className="px-2 py-1 text-micro uppercase text-text-tertiary">Visible columns</div>
         {ordered.map((col, i) => {
           const isHidden = hidden.includes(col.key);
           return (

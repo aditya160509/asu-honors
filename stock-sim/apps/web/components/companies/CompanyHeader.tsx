@@ -1,14 +1,13 @@
 "use client";
 
 import * as React from "react";
-import gsap from "gsap";
 import { Star } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { MiniAreaSpark } from "@/components/dashboard/primitives/MiniAreaSpark";
 import { DeltaBadge } from "@/components/dashboard/primitives/DeltaBadge";
 import { useWatchlist, useAddToWatchlist, useRemoveFromWatchlist } from "@/lib/api/hooks/useWatchlist";
-import { formatPrice, formatPct, cn } from "@/lib/utils";
+import { cssVar, formatPrice, formatPct, cn } from "@/lib/utils";
 import type { CompanyDetail, PriceHistoryItem } from "@/lib/api/types";
 
 export interface CompanyHeaderProps {
@@ -20,15 +19,9 @@ export interface CompanyHeaderProps {
 /** Hero header for the Company Details terminal — ticker/name/industry, live price + day change,
  * IV gap, a 30-day trend spark, and a real watchlist toggle (existing /watchlist endpoints). */
 export function CompanyHeader({ company, dayChangePct, history }: CompanyHeaderProps) {
-  const ledgerRef = React.useRef<HTMLDivElement>(null);
   const watchlist = useWatchlist();
   const addToWatchlist = useAddToWatchlist();
   const removeFromWatchlist = useRemoveFromWatchlist();
-
-  React.useEffect(() => {
-    if (!ledgerRef.current) return;
-    gsap.fromTo(ledgerRef.current, { scaleX: 0 }, { scaleX: 1, duration: 0.4, ease: "power2.inOut" });
-  }, []);
 
   const isWatched = watchlist.data?.some((w) => w.company_id === company.id) ?? false;
   const watchlistPending = addToWatchlist.isPending || removeFromWatchlist.isPending;
@@ -83,7 +76,7 @@ export function CompanyHeader({ company, dayChangePct, history }: CompanyHeaderP
 
         {sparkData.length >= 2 && (
           <div className="hidden w-28 sm:block">
-            <MiniAreaSpark data={sparkData} height={36} color={sparkPositive ? "#22c55e" : "#ef4444"} />
+            <MiniAreaSpark data={sparkData} height={36} color={sparkPositive ? cssVar('--positive') : cssVar('--negative')} />
           </div>
         )}
 
@@ -100,10 +93,7 @@ export function CompanyHeader({ company, dayChangePct, history }: CompanyHeaderP
         </div>
       </div>
 
-      <div
-        ref={ledgerRef}
-        className="h-px w-full origin-left bg-gradient-to-r from-transparent via-mer-accent-500 to-transparent opacity-70"
-      />
+      <div className="h-px w-full bg-gradient-to-r from-transparent via-mer-accent-500 to-transparent opacity-70" />
     </div>
   );
 }

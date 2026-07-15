@@ -58,6 +58,44 @@ def _prev_closes_by_company(
     return {r.company_id: float(r.close) for r in rows}
 
 
+def _price_52w_stats(
+    db: Session, timeline_id: int, sim_date: date,
+) -> dict[int, dict]:
+    """Batch-compute avg_volume_20d, high_52w, low_52w for all companies.
+
+    52 weeks ≈ 252 trading days; 20-day average volume uses the most recent 20
+    sim dates up to and including *sim_date*.
+    """
+    from datetime import timedelta
+
+    cutoff_20d = sim_date - timedelta(days=30)   # generous window → filtered by actual rows
+    cutoff_52w = sim_date - timedelta(days=370)  # generous window → filtered by actual rows
+
+    rows = (
+        db.query(
+            PriceHistory.company_id,
+            func.avg(PriceHistory.volume).filter(PriceHistory.sim_date > cutoff_20d).label("avg_vol"),
+            func.max(PriceHistory.close).label("high_52w"),
+            func.min(PriceHistory.close).label("low_52w"),
+        )
+        .filter(
+            PriceHistory.timeline_id == timeline_id,
+            PriceHistory.sim_date <= sim_date,
+            PriceHistory.sim_date > cutoff_52w,
+        )
+        .group_by(PriceHistory.company_id)
+        .all()
+    )
+    return {
+        r.company_id: {
+            "avg_volume_20d": int(round(float(r.avg_vol))) if r.avg_vol is not None else None,
+            "high_52w": float(r.high_52w) if r.high_52w is not None else None,
+            "low_52w": float(r.low_52w) if r.low_52w is not None else None,
+        }
+        for r in rows
+    }
+
+
 def get_market_grid(db: Session, timeline_id: int) -> MarketGridResponse:
     """Build the market grid: all companies with latest prices and day change."""
     companies = db.query(Company).order_by(Company.ticker).all()
@@ -72,6 +110,7 @@ def get_market_grid(db: Session, timeline_id: int) -> MarketGridResponse:
     sim_date = sim_state.current_sim_date if sim_state else date.today()
     cycle_phase = latest_cycle.cycle_phase if latest_cycle else "expansion"
     prev_closes = _prev_closes_by_company(db, timeline_id, sim_date)
+    price_stats = _price_52w_stats(db, timeline_id, sim_date)
 
     items: list[CompanyGridItem] = []
     for company in companies:
@@ -83,6 +122,7 @@ def get_market_grid(db: Session, timeline_id: int) -> MarketGridResponse:
             prev_close = prev_closes.get(company.id)
             if prev_close is not None:
                 day_change_pct = (float(current_price) - prev_close) / prev_close * 100.0
+        stats = price_stats.get(company.id, {})
         items.append(
             CompanyGridItem(
                 id=company.id,
@@ -95,6 +135,9 @@ def get_market_grid(db: Session, timeline_id: int) -> MarketGridResponse:
                 intrinsic_value=company.intrinsic_value,
                 market_cap=company.market_cap,
                 volatility=company.volatility,
+                avg_volume_20d=stats.get("avg_volume_20d"),
+                high_52w=stats.get("high_52w"),
+                low_52w=stats.get("low_52w"),
             )
         )
 

@@ -18,7 +18,7 @@ export const TooltipContent = React.forwardRef<
     sideOffset={sideOffset}
     className={cn(
       "z-50 px-3 py-2 text-micro text-text-primary max-w-[240px]",
-      surfaceVariants({ variant: "glass" }),
+      surfaceVariants({ variant: "raised" }),
       className
     )}
     {...props}

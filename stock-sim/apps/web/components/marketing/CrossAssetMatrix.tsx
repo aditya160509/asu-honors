@@ -29,7 +29,7 @@ function buildCells(): Cell[] {
   return cells;
 }
 
-const FLASH_COLOR = { positive: "#00ff00", negative: "#ff0000" };
+const FLASH_COLOR = { positive: "var(--positive)", negative: "var(--negative)" };
 
 /**
  * Dense correlation grid. 1px sub-pixel borders react to cursor proximity via

@@ -8,7 +8,6 @@ import { StatusBar } from "@/components/layout/StatusBar";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { logActivity } from "@/lib/activity/useActivityLog";
 import { getPageLabel } from "@/lib/nav/routeLabels";
-import { fadeIn } from "@/lib/motion";
 
 /**
  * Shared shell for all TERMINAL-surface authenticated routes: Sidebar +
@@ -44,12 +43,10 @@ export function TerminalShell({ children }: { children: React.ReactNode }) {
 
 function RouteFadeContent({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const contentRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
     if (pathname) logActivity({ kind: "nav", label: `Visited ${getPageLabel(pathname)}` });
-    if (contentRef.current) fadeIn(contentRef.current);
   }, [pathname]);
 
-  return <div ref={contentRef}>{children}</div>;
+  return <div>{children}</div>;
 }

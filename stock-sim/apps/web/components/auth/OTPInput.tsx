@@ -94,8 +94,8 @@ export function OTPInput({ value, onChange, onComplete, disabled, hasError, auto
           onPaste={handlePaste}
           onFocus={(e) => e.target.select()}
           className={cn(
-            "h-12 w-12 rounded-xl border border-white/10 bg-white/5 text-center font-mono text-lg text-mkt-text-hero",
-            "focus:border-mkt-signature focus:outline-none focus:ring-1 focus:ring-mkt-signature",
+            "h-12 w-12 rounded-md border border-border bg-bg-tertiary text-center font-mono text-lg text-text-primary",
+            "focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent",
             "disabled:opacity-40 transition-colors duration-200",
             hasError && "border-warning"
           )}

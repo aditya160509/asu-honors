@@ -77,6 +77,9 @@ export interface CompanyGridItem {
   intrinsic_value: number | null;
   market_cap: number | null;
   volatility: number | null;
+  avg_volume_20d: number | null;
+  high_52w: number | null;
+  low_52w: number | null;
 }
 
 export interface MarketGridResponse {

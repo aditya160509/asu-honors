@@ -16,7 +16,7 @@ export function DialogContent({ className, children, ...props }: React.Component
       <DialogPrimitive.Content
         className={cn(
           "fixed left-1/2 top-1/2 z-50 w-full max-w-[480px] -translate-x-1/2 -translate-y-1/2 p-5",
-          surfaceVariants({ variant: "glass" }),
+          surfaceVariants({ variant: "raised" }),
           className
         )}
         {...props}

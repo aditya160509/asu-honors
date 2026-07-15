@@ -4,7 +4,7 @@ import { Wallet } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { useAnimatedCounter } from "@/lib/motion";
-import { formatPrice } from "@/lib/utils";
+import { cssVar, formatPrice } from "@/lib/utils";
 import { usePortfolio, useTransactions } from "@/lib/api/hooks/usePortfolio";
 import { cumulativeRealizedPnl } from "@/lib/dashboard/portfolioPerformance";
 import { DashboardPanel } from "@/components/dashboard/primitives/DashboardPanel";
@@ -48,13 +48,13 @@ export function PortfolioSummarySection() {
             </div>
             <div className="flex gap-6">
               <div className="flex flex-col gap-0.5">
-                <span className="text-micro uppercase tracking-wide text-mer-ink-tertiary">Cash</span>
+                <span className="text-micro uppercase text-mer-ink-tertiary">Cash</span>
                 <span className="num text-body text-mer-ink-secondary">
                   {formatPrice(portfolio.data?.cash_balance ?? 0)}
                 </span>
               </div>
               <div className="flex flex-col gap-0.5">
-                <span className="text-micro uppercase tracking-wide text-mer-ink-tertiary">Positions</span>
+                <span className="text-micro uppercase text-mer-ink-tertiary">Positions</span>
                 <span className="num text-body text-mer-ink-secondary">{portfolio.data?.holdings.length ?? 0}</span>
               </div>
             </div>
@@ -63,7 +63,7 @@ export function PortfolioSummarySection() {
       </div>
       {spark.length >= 2 && (
         <div className="border-t border-[color:var(--mer-stroke-hairline)]">
-          <MiniAreaSpark data={spark} height={64} color="#3e6fe0" />
+          <MiniAreaSpark data={spark} height={64} color={cssVar('--accent')} />
         </div>
       )}
     </DashboardPanel>

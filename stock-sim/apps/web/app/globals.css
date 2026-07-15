@@ -74,12 +74,9 @@
 
     /* Surface system — layered depth for panels, cards, and floating UI */
     --surface-flat: var(--bg-secondary);
-    --surface-raised: linear-gradient(180deg, var(--bg-tertiary) 0%, var(--bg-secondary) 100%);
-    --surface-glass-bg: rgba(18, 18, 20, 0.72);
-    --surface-glass-border: rgba(255, 255, 255, 0.08);
-    --surface-glass-blur: 16px;
+    --surface-raised: var(--bg-tertiary);
 
-    /* Larger radius, reserved for elevated/glass surfaces (modals, drawers) */
+    /* Larger radius, reserved for elevated surfaces (modals, drawers) */
     --radius-xl: 12px;
 
     /* Motion tokens — single source of truth for CSS transitions + GSAP */
@@ -101,10 +98,6 @@
     --mer-surface-2: #161a21;
     --mer-surface-3: #1d222b;
     --mer-surface-4: #242a35;
-    --mer-glass-bg: rgba(16, 19, 24, 0.72);
-    --mer-glass-border: rgba(255, 255, 255, 0.1);
-    --mer-glass-blur: 20px;
-
     --mer-ink-primary: #e8eaee;
     --mer-ink-secondary: #9ba3b0;
     --mer-ink-tertiary: #5c6470;
@@ -230,25 +223,10 @@
     border-color: var(--border-light);
   }
 
-  .surface-glass {
-    background: var(--surface-glass-bg);
-    border: 1px solid var(--surface-glass-border);
-    border-radius: var(--radius-xl);
-    box-shadow: var(--shadow-lg);
-    backdrop-filter: blur(var(--surface-glass-blur));
-    -webkit-backdrop-filter: blur(var(--surface-glass-blur));
-  }
-
-  /* Meridian glass — Global Layout overlays only (dropdowns, panels, mobile
-     drawer). Persistent chrome (Sidebar/Header/StatusBar) never uses this —
-     it stays matte + "lit" (see .mer-surface-lit below). */
-  .mer-glass {
-    background: var(--mer-glass-bg);
-    border: 1px solid var(--mer-glass-border);
-    border-radius: var(--mer-radius-lg);
-    box-shadow: var(--mer-shadow-overlay);
-    backdrop-filter: blur(var(--mer-glass-blur)) saturate(140%);
-    -webkit-backdrop-filter: blur(var(--mer-glass-blur)) saturate(140%);
+  .surface-flat {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
   }
 
   /* Ambient mesh canvas — fixed, non-scrolling, near-imperceptible.
@@ -520,4 +498,17 @@
   .mer-ledger-draw {
     animation: none !important;
   }
+}
+
+/* Screener utilities */
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
 }

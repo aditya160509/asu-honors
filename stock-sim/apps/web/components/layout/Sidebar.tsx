@@ -3,7 +3,6 @@
 import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import gsap from "gsap";
 import {
   BarChart3,
   ChevronDown,
@@ -39,7 +38,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { openCommandPalette } from "@/lib/hooks/useCommandPalette";
 import { useMediaQuery } from "@/lib/hooks/useMediaQuery";
-import { revealStagger, useLift, DURATION_BASE, EASE_OUT_EXPO } from "@/lib/motion";
+
 import { cn } from "@/lib/utils";
 import type { UserResponse } from "@/lib/api/types";
 
@@ -159,24 +158,11 @@ export function Sidebar() {
 }
 
 function SidebarRail({ collapsed, onToggleCollapse }: { collapsed: boolean; onToggleCollapse: () => void }) {
-  const ref = React.useRef<HTMLElement>(null);
-  const initialWidth = React.useRef(collapsed ? COLLAPSED_WIDTH : EXPANDED_WIDTH);
-  const mounted = React.useRef(false);
-
-  React.useEffect(() => {
-    if (!ref.current) return;
-    const target = collapsed ? COLLAPSED_WIDTH : EXPANDED_WIDTH;
-    if (!mounted.current) {
-      mounted.current = true;
-      return;
-    }
-    gsap.to(ref.current, { width: target, duration: DURATION_BASE, ease: EASE_OUT_EXPO });
-  }, [collapsed]);
+  const width = collapsed ? COLLAPSED_WIDTH : EXPANDED_WIDTH;
 
   return (
     <aside
-      ref={ref}
-      style={{ width: initialWidth.current }}
+      style={{ width }}
       className="mer-surface-lit shrink-0 h-screen sticky top-0 bg-mer-surface-1 border-r border-mer-hairline flex flex-col overflow-hidden z-20"
     >
       <SidebarBody collapsed={collapsed} onToggleCollapse={onToggleCollapse} />
@@ -197,13 +183,6 @@ function SidebarBody({
   const { user, logout } = useAuth();
   const { data: watchlist, isLoading: watchlistLoading } = useWatchlist();
   const { data: cycle } = useCycleState();
-  const navListRef = React.useRef<HTMLElement>(null);
-
-  React.useEffect(() => {
-    if (!navListRef.current) return;
-    const items = navListRef.current.querySelectorAll("[data-nav-item]");
-    if (items.length) revealStagger(items, 30);
-  }, []);
 
   return (
     <div className="flex h-full flex-col">
@@ -290,11 +269,11 @@ function SidebarBody({
       </div>
 
       {/* Nav groups */}
-      <nav ref={navListRef} className="flex-1 overflow-y-auto px-3 py-4 flex flex-col gap-5">
+      <nav className="flex-1 overflow-y-auto px-3 py-4 flex flex-col gap-5">
         {NAV_GROUPS.map((group) => (
           <div key={group.eyebrow} className="flex flex-col gap-1">
             {!collapsed && (
-              <div className="px-2 pb-1 text-micro font-medium uppercase tracking-wide text-mer-ink-tertiary">
+              <div className="px-2 pb-1 text-micro font-medium uppercase text-mer-ink-tertiary">
                 {group.eyebrow}
               </div>
             )}
@@ -314,7 +293,7 @@ function SidebarBody({
 
         <div className="flex flex-col gap-1">
           {!collapsed && (
-            <div className="px-2 pb-1 text-micro font-medium uppercase tracking-wide text-mer-ink-tertiary">
+            <div className="px-2 pb-1 text-micro font-medium uppercase text-mer-ink-tertiary">
               Watchlist
             </div>
           )}
@@ -373,14 +352,10 @@ function NavLink({
   collapsed: boolean;
   onNavigate?: () => void;
 }) {
-  const ref = React.useRef<HTMLAnchorElement>(null);
-  useLift(ref, 2);
   const Icon = item.icon;
   return (
     <Link
-      ref={ref}
       href={item.href}
-      data-nav-item
       onClick={onNavigate}
       className={cn(
         "relative flex items-center gap-2.5 h-9 rounded-mer-sm px-2.5 text-small transition-colors",

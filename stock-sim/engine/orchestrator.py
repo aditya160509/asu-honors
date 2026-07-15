@@ -943,7 +943,7 @@ def _generate_fake_quarterly_financials(
 
     shares = float(company.shares_outstanding)
     shares_dil = shares * rng.uniform(1.0, 1.05)
-    eps = ni / shares_dil if shares_dil > 0 else 0
+    eps = ni / (shares_dil / 1_000_000) if shares_dil > 0 else 0
 
     inc = IncomeStatement(
         company_id=company.id, fiscal_period=fiscal_period,

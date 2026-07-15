@@ -18,7 +18,7 @@ export function AuthBanner({ tone, children, className }: AuthBannerProps) {
       role="status"
       aria-live="polite"
       className={cn(
-        "flex items-start gap-2.5 rounded-2xl border px-4 py-3 text-small",
+        "flex items-start gap-2.5 rounded-lg border px-4 py-3 text-small",
         tone === "warn"
           ? "border-warning/50 bg-warning/5 text-warning"
           : "border-mkt-signature/50 bg-mkt-signature/5 text-mkt-signature",

@@ -216,7 +216,7 @@ export function AiHero() {
                 data-grid-cell
                 className="mkt-card-lit flex flex-col gap-grid-1 bg-mkt-bg-void px-grid-4 py-grid-4 opacity-0"
               >
-                <span className="text-micro uppercase tracking-wide text-mkt-text-muted">{cell.label}</span>
+                <span className="text-micro uppercase tracking-tight text-mkt-text-muted">{cell.label}</span>
                 <span
                   ref={(el) => {
                     if (el) cellValueRefs.current.set(cell.label, el);

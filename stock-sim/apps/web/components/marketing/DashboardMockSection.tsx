@@ -81,7 +81,7 @@ export function DashboardMockSection() {
       <div className="mx-auto max-w-6xl">
         <h2 className="sr-only">Product preview: institutional dashboard modules (illustrative)</h2>
         <div className="mb-grid-6 flex flex-col gap-grid-2">
-          <span aria-hidden="true" className="block text-micro uppercase tracking-wide text-mkt-text-muted">
+          <span aria-hidden="true" className="block text-micro uppercase tracking-tight text-mkt-text-muted">
             Act II — The Synthesis
           </span>
           <div ref={ledgerRef} className="h-px w-16 origin-left bg-gradient-to-r from-transparent via-mkt-action to-transparent" aria-hidden="true" />

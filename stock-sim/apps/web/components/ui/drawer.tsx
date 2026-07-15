@@ -6,22 +6,12 @@ import { X } from "lucide-react";
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
-/**
- * Slide-in side panel built on the already-installed Radix Dialog primitive
- * (no new dependency). Glass surface is hand-composed with arbitrary values
- * rather than the shared `surfaceVariants` helper because the flush screen
- * edge needs zero border-radius on that side — mixing in a shared glass
- * class (which sets a radius on all corners) would fight a `rounded-none`
- * override at equal CSS specificity. Uses the Meridian `--mer-glass-*`
- * tokens (DESIGN_SPEC.md) — this component has no other consumers yet, so
- * it's a safe, direct touchpoint for the new Global Layout token set.
- */
 export const Drawer = DialogPrimitive.Root;
 export const DrawerTrigger = DialogPrimitive.Trigger;
 export const DrawerClose = DialogPrimitive.Close;
 
 const drawerContentVariants = cva(
-  "fixed z-50 flex flex-col border-[color:var(--mer-glass-border)] bg-[color:var(--mer-glass-bg)] p-5 shadow-mer-overlay backdrop-blur-mer-glass data-[state=open]:animate-in data-[state=closed]:animate-out",
+  "fixed z-50 flex flex-col border-mer-hairline bg-mer-surface-2 p-5 shadow-mer-overlay data-[state=open]:animate-in data-[state=closed]:animate-out",
   {
     variants: {
       side: {

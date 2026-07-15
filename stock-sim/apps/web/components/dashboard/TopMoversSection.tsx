@@ -23,7 +23,7 @@ export function TopMoversSection() {
     >
       <div className="grid grid-cols-1 divide-y divide-[color:var(--mer-stroke-hairline)] sm:grid-cols-2 sm:divide-x sm:divide-y-0">
         <div className="flex flex-col gap-0.5 p-2">
-          <span className="px-2 pb-1 text-micro font-medium uppercase tracking-wide text-positive">Gainers</span>
+          <span className="px-2 pb-1 text-micro font-medium uppercase text-positive">Gainers</span>
           {isLoading ? (
             Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} width="100%" height={40} />)
           ) : gainers.length === 0 ? (
@@ -41,7 +41,7 @@ export function TopMoversSection() {
           )}
         </div>
         <div className="flex flex-col gap-0.5 p-2">
-          <span className="px-2 pb-1 text-micro font-medium uppercase tracking-wide text-negative">Losers</span>
+          <span className="px-2 pb-1 text-micro font-medium uppercase text-negative">Losers</span>
           {isLoading ? (
             Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} width="100%" height={40} />)
           ) : losers.length === 0 ? (

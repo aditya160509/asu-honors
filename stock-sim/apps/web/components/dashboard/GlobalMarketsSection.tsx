@@ -42,7 +42,7 @@ export function GlobalMarketsSection() {
             <KpiCounter label="GDP Growth" value={cycle?.gdp_growth ?? 0} format="pct" tone="auto" loading={isLoading} />
             <KpiCounter label="Interest Rate" value={cycle?.interest_rate ?? 0} format="pct" loading={isLoading} />
             <div className="flex flex-col gap-1.5">
-              <span className="text-micro font-medium uppercase tracking-wide text-mer-ink-tertiary">Sentiment</span>
+              <span className="text-micro font-medium uppercase text-mer-ink-tertiary">Sentiment</span>
               {cycle && (
                 <div className="flex flex-col gap-1">
                   <span

@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { cssVar } from "@/lib/utils";
 import { ChartSurface } from "@/lib/charts/core/ChartSurface";
 import type { CompanyGridItem } from "@/lib/api/types";
 
@@ -42,7 +43,7 @@ export function HeroMarketPulse({ companies, height = 480 }: HeroMarketPulseProp
     ({ ctx, width, height: h }: { ctx: CanvasRenderingContext2D; width: number; height: number }) => {
       if (cursor) {
         const gradient = ctx.createRadialGradient(cursor.x, cursor.y, 0, cursor.x, cursor.y, width * 0.5);
-        gradient.addColorStop(0, "#d4ff3f0d");
+        gradient.addColorStop(0, cssVar('--mkt-signature') + '0d');
         gradient.addColorStop(1, "transparent");
         ctx.fillStyle = gradient;
         ctx.fillRect(0, 0, width, h);
@@ -73,7 +74,7 @@ export function HeroMarketPulse({ companies, height = 480 }: HeroMarketPulseProp
         });
 
         const isHovered = hoveredLine === line.name;
-        ctx.strokeStyle = isHovered ? "#d4ff3f" : "#7a7a82";
+        ctx.strokeStyle = isHovered ? cssVar('--mkt-signature') : cssVar('--mkt-text-muted');
         ctx.globalAlpha = isHovered ? 1 : hoveredLine ? 0.25 : 0.5;
         ctx.lineWidth = isHovered ? 2 : 1;
         ctx.stroke();

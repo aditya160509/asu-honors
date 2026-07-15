@@ -26,7 +26,7 @@ export function AllocationTreemap({ allocation }: AllocationTreemapProps) {
               className="flex min-w-[104px] flex-col justify-between gap-3 rounded-mer-xs p-2.5"
               style={{ backgroundColor: allocationColor(i), flexGrow: Math.max(s.pct, 4), flexBasis: 104 }}
             >
-              <span className="truncate text-micro font-medium uppercase tracking-wide text-white/90">{s.sector}</span>
+              <span className="truncate text-micro font-medium uppercase text-white/90">{s.sector}</span>
               <span className="num text-small font-semibold text-white">{formatPct(s.pct)}</span>
             </div>
           </TooltipTrigger>

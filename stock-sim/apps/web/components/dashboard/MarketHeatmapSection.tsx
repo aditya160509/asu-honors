@@ -46,7 +46,7 @@ export function MarketHeatmapSection() {
                     className="flex min-w-[104px] flex-col justify-between gap-3 rounded-mer-xs p-2.5"
                     style={{ backgroundColor: heatColor(s.avgChangePct), flexGrow: Math.max(share * 100, 4), flexBasis: 104 }}
                   >
-                    <span className="truncate text-micro font-medium uppercase tracking-wide text-mer-ink-primary">
+                    <span className="truncate text-micro font-medium uppercase text-mer-ink-primary">
                       {s.industry}
                     </span>
                     <span className="num text-small font-semibold text-mer-ink-primary">{formatPct(s.avgChangePct)}</span>

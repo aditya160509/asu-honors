@@ -5,16 +5,13 @@ import { cn } from "@/lib/utils";
 /**
  * Shared elevation system for every panel/card/floating surface.
  * flat    — dense in-grid surfaces (default, matches prior `.card-flat`)
- * raised  — page-level panels/cards: subtle gradient wash + shadow-md
- * glass   — floating/overlay UI (modals, dropdowns, command palette, toasts):
- *           translucent + backdrop-blur + shadow-lg
+ * raised  — page-level panels/cards: subtle shadow + border
  */
 export const surfaceVariants = cva("", {
   variants: {
     variant: {
       flat: "card-flat",
       raised: "surface-raised",
-      glass: "surface-glass",
     },
   },
   defaultVariants: { variant: "flat" },

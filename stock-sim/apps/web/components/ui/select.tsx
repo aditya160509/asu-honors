@@ -32,7 +32,7 @@ SelectTrigger.displayName = "SelectTrigger";
 export function SelectContent({ className, children, ...props }: React.ComponentPropsWithoutRef<typeof SelectPrimitive.Content>) {
   return (
     <SelectPrimitive.Portal>
-      <SelectPrimitive.Content className={cn("z-50", surfaceVariants({ variant: "glass" }), className)} {...props}>
+      <SelectPrimitive.Content className={cn("z-50", surfaceVariants({ variant: "raised" }), className)} {...props}>
         <SelectPrimitive.Viewport className="p-1">{children}</SelectPrimitive.Viewport>
       </SelectPrimitive.Content>
     </SelectPrimitive.Portal>

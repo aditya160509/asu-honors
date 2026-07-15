@@ -110,6 +110,12 @@ async def register(
     # Mandatory-after-registration email verification: send the first OTP now.
     code = await run_in_threadpool(auth_service.create_otp, db, user, "register")
     await email_service.send_otp_code(user.email, code, "register")
+
+    # In dev mode with skip_email_verification, auto-verify so login works immediately.
+    if settings.skip_email_verification:
+        user.email_verified_at = datetime.now(timezone.utc)
+        db.commit()
+
     return user
 
 

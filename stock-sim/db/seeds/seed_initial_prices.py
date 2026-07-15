@@ -72,6 +72,7 @@ from engine.valuation import (
 )
 
 FIRST_SIM_DATE = date(2026, 1, 2)
+PREV_SIM_DATE = date(2025, 12, 31)
 FISCAL_PERIOD = "2026Q4"
 TAX_RATE = 0.25
 
@@ -271,7 +272,8 @@ def seed(session: Session) -> None:
         price = iv * np.exp(initial_gap)
         price = max(price, 0.01)
         market_cap = price * float(company.shares_outstanding)
-        vol = float(ind.base_volatility) / 100.0
+        industry = d["industries"][company.industry_id]
+        vol = float(industry.base_volatility) / 100.0
         liq_score = min(100.0, float(company.free_float_pct) * 100.0)
 
         r["fq"] = fq
@@ -323,6 +325,18 @@ def seed(session: Session) -> None:
             company_id=company.id, timeline_id=timeline.id, sim_date=FIRST_SIM_DATE
         ).first()
         if existing_ph is None:
+            prev_price = round(r["price"] * rng.uniform(0.97, 1.03), 4)
+            session.add(PriceHistory(
+                timeline_id=timeline.id, company_id=company.id,
+                sim_date=PREV_SIM_DATE,
+                open=round(prev_price * rng.uniform(0.995, 1.005), 4),
+                high=round(prev_price * rng.uniform(1.00, 1.015), 4),
+                low=round(prev_price * rng.uniform(0.985, 1.00), 4),
+                close=prev_price,
+                volume=max(1000, int(r["market_cap"] * 0.001 * rng.uniform(0.5, 1.5))),
+                intrinsic_value=round(r["intrinsic_value"], 4),
+                order_imbalance=0.0,
+            ))
             session.add(PriceHistory(
                 timeline_id=timeline.id, company_id=company.id,
                 sim_date=FIRST_SIM_DATE,
