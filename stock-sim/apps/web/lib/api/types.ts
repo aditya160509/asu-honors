@@ -13,6 +13,39 @@ export interface TokenResponse {
 export interface LoginRequest {
   email: string;
   password: string;
+  remember?: boolean;
+}
+
+export interface MessageResponse {
+  message: string;
+}
+
+export interface ForgotPasswordRequest {
+  email: string;
+}
+
+export interface ResetPasswordRequest {
+  token: string;
+  new_password: string;
+}
+
+export type OtpPurpose = "login" | "register" | "password_reset";
+
+export interface OtpRequestBody {
+  purpose: OtpPurpose;
+  email?: string;
+}
+
+export interface OtpVerifyBody {
+  purpose: OtpPurpose;
+  code: string;
+  email?: string;
+}
+
+export interface OtpVerifyResponse {
+  verified: boolean;
+  reason?: "invalid" | "expired" | "locked";
+  attempts_remaining?: number;
 }
 
 export interface UserCreateRequest {

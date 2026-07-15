@@ -1,20 +1,31 @@
-// Thin fetch wrapper: injects Bearer token, handles 401, typed JSON.
+// Thin fetch wrapper: injects Bearer token, silent-refreshes expired sessions, typed JSON.
 import { toast } from "sonner";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL || "/api/v1";
 
+/** Auth endpoints that must never trigger a silent refresh (avoids recursion/loops). */
+const NO_REFRESH_PATHS = ["/auth/login", "/auth/register", "/auth/refresh", "/auth/logout"];
+
 export class ApiError extends Error {
   status: number;
-  constructor(message: string, status: number) {
+  retryAfterSeconds: number | null;
+  constructor(message: string, status: number, retryAfterSeconds: number | null = null) {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.retryAfterSeconds = retryAfterSeconds;
   }
 }
 
 function getToken(): string | null {
   if (typeof window === "undefined") return null;
   return localStorage.getItem("token");
+}
+
+function setToken(token: string | null): void {
+  if (typeof window === "undefined") return;
+  if (token) localStorage.setItem("token", token);
+  else localStorage.removeItem("token");
 }
 
 function buildQuery(params?: Record<string, unknown>): string {
@@ -28,9 +39,48 @@ function buildQuery(params?: Record<string, unknown>): string {
   return `?${usp.toString()}`;
 }
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
+// Single-flight refresh: parallel 401s share one /auth/refresh call instead of
+// racing the token-rotation logic against itself.
+let refreshPromise: Promise<boolean> | null = null;
+
+async function tryRefresh(): Promise<boolean> {
+  if (!refreshPromise) {
+    refreshPromise = (async () => {
+      try {
+        const res = await fetch(`${BASE}/auth/refresh`, { method: "POST" });
+        if (!res.ok) return false;
+        const body = (await res.json()) as { access_token?: string };
+        if (!body.access_token) return false;
+        setToken(body.access_token);
+        return true;
+      } catch {
+        return false;
+      } finally {
+        // Allow the next expiry (15 min later) to trigger a fresh single-flight.
+        setTimeout(() => {
+          refreshPromise = null;
+        }, 0);
+      }
+    })();
+  }
+  return refreshPromise;
+}
+
+function redirectToExpiredLogin(): void {
+  if (typeof window === "undefined") return;
+  setToken(null);
+  const path = window.location.pathname;
+  const isAuthPage = ["/login", "/register", "/forgot-password", "/reset-password", "/verify-email"].some(
+    (p) => path.startsWith(p)
+  );
+  if (!isAuthPage) {
+    window.location.href = "/login?expired=1";
+  }
+}
+
+async function rawRequest(path: string, options?: RequestInit): Promise<Response> {
   const token = getToken();
-  const res = await fetch(`${BASE}${path}`, {
+  return fetch(`${BASE}${path}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",
@@ -38,20 +88,43 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
       ...options?.headers,
     },
   });
+}
+
+async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  let res = await rawRequest(path, options);
+
+  if (res.status === 401 && !NO_REFRESH_PATHS.some((p) => path.startsWith(p))) {
+    // Access token likely expired — try one silent refresh, then retry once.
+    const refreshed = await tryRefresh();
+    if (refreshed) {
+      res = await rawRequest(path, options);
+    } else {
+      redirectToExpiredLogin();
+      throw new ApiError("Session expired", 401);
+    }
+  }
 
   if (res.status === 401) {
-    if (typeof window !== "undefined") {
-      localStorage.removeItem("token");
-      if (window.location.pathname !== "/login") {
-        window.location.href = "/login";
-      }
+    if (!NO_REFRESH_PATHS.some((p) => path.startsWith(p))) {
+      redirectToExpiredLogin();
     }
-    throw new ApiError("Unauthorized", 401);
+    const body = await res.json().catch(() => ({}));
+    const detail = typeof body?.detail === "string" ? body.detail : "Unauthorized";
+    throw new ApiError(detail, 401);
   }
 
   if (res.status === 429) {
-    if (typeof window !== "undefined") toast.error("Too many requests. Slow down.");
-    throw new ApiError("Too many requests. Slow down.", 429);
+    const retryAfterHeader = res.headers.get("Retry-After");
+    const retryAfter = retryAfterHeader ? parseInt(retryAfterHeader, 10) : null;
+    const isAuthPath = path.startsWith("/auth/");
+    if (typeof window !== "undefined" && !isAuthPath) {
+      toast.error("Too many requests. Slow down.");
+    }
+    throw new ApiError(
+      "Too many requests. Slow down.",
+      429,
+      Number.isFinite(retryAfter as number) ? retryAfter : null
+    );
   }
 
   if (res.status === 204) {

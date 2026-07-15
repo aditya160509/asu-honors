@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { useMe } from "@/lib/api/hooks/useAuth";
+import { post } from "@/lib/api/client";
 import { logActivity } from "@/lib/activity/useActivityLog";
 import type { UserResponse } from "@/lib/api/types";
 
@@ -34,9 +35,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = React.useCallback(() => {
     logActivity({ kind: "auth", label: "Signed out" });
-    localStorage.removeItem("token");
-    setHasToken(false);
-    window.location.href = "/login";
+    // Revoke the server-side session and clear the refresh/indicator cookies,
+    // then drop local state regardless of the API call's outcome.
+    void post("/auth/logout")
+      .catch(() => undefined)
+      .finally(() => {
+        localStorage.removeItem("token");
+        setHasToken(false);
+        window.location.href = "/login";
+      });
   }, []);
 
   const value = React.useMemo(
