@@ -25,6 +25,7 @@ class User(Base, TimestampMixin):
     display_name: Mapped[str] = mapped_column(String(120), nullable=False)
     role: Mapped[str] = mapped_column(String(20), default="user", nullable=False)
     starting_cash: Mapped[float] = mapped_column(Numeric, nullable=False)
+    email_verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
     __table_args__ = (
         CheckConstraint("role in ('user', 'admin')", name="ck_users_role"),

@@ -1,4 +1,5 @@
-"""Simple in-memory rate limiter middleware with periodic stale-IP cleanup."""
+"""Simple in-memory rate limiter middleware with periodic stale-IP cleanup,
+plus a scoped per-endpoint limiter for sensitive auth flows."""
 import time
 from collections import defaultdict
 
@@ -41,3 +42,41 @@ class InMemoryRateLimiter(BaseHTTPMiddleware):
             }
 
         return await call_next(request)
+
+
+class ScopedRateLimiter:
+    """Keyed sliding-window limiter for individual sensitive endpoints
+    (forgot-password, OTP request, login). Keys are caller-chosen, e.g.
+    "forgot:email:<addr>" or "otp:ip:<ip>", so one limiter instance can
+    enforce independent per-email and per-IP caps.
+
+    Raises 429 with a Retry-After header when a cap is exceeded.
+    """
+
+    def __init__(self) -> None:
+        self._hits: dict[str, list[float]] = defaultdict(list)
+
+    def check(self, key: str, max_requests: int, window_seconds: int) -> None:
+        now = time.time()
+        window_start = now - window_seconds
+        hits = [t for t in self._hits[key] if t > window_start]
+        if len(hits) >= max_requests:
+            retry_after = max(1, int(hits[0] + window_seconds - now))
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Rate limit exceeded",
+                headers={"Retry-After": str(retry_after)},
+            )
+        hits.append(now)
+        self._hits[key] = hits
+
+        # Opportunistic cleanup so the map doesn't grow unbounded.
+        if len(self._hits) > 10_000:
+            cutoff = now - 3600
+            self._hits = defaultdict(
+                list,
+                {k: v for k, v in self._hits.items() if v and v[-1] > cutoff},
+            )
+
+
+auth_rate_limiter = ScopedRateLimiter()

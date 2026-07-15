@@ -19,6 +19,46 @@ class TokenResponse(BaseModel):
 class LoginRequest(BaseModel):
     email: str
     password: str
+    remember: bool = False
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def password_length(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters")
+        if len(v.encode("utf-8")) > 72:
+            raise ValueError("Password must not exceed 72 bytes")
+        return v
+
+
+class OtpRequestBody(BaseModel):
+    purpose: str
+    # For pre-authentication purposes (register verification) the caller identifies
+    # the account by email; authenticated purposes ignore this and use the token.
+    email: Optional[str] = None
+
+
+class OtpVerifyBody(BaseModel):
+    purpose: str
+    code: str
+    email: Optional[str] = None
+
+
+class OtpVerifyResponse(BaseModel):
+    verified: bool
+
+
+class MessageResponse(BaseModel):
+    message: str
 
 
 class UserCreateRequest(BaseModel):

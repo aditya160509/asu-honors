@@ -1,3 +1,4 @@
+from db.models.auth import OtpCode, PasswordResetToken, UserSession
 from db.models.base import Base
 from db.models.events import EventInstance, MarketEvent, NewsFeed, NewsTemplate
 from db.models.factor_scores import CompanyFactorScore, FinancialQualitySubscore, MoatSubscore
@@ -44,4 +45,7 @@ __all__ = [
     "Transaction",
     "Watchlist",
     "Notification",
+    "UserSession",
+    "PasswordResetToken",
+    "OtpCode",
 ]
