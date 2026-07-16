@@ -1,11 +1,13 @@
 "use client";
 
+import * as React from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { TerminalShell } from "@/components/layout/TerminalShell";
 import { CompanyHeader, CompanyHeaderSkeleton } from "@/components/companies/CompanyHeader";
 import { ExecutiveTearSheet } from "@/components/companies/ExecutiveTearSheet";
-import { PriceChart } from "@/components/charts/PriceChart";
+import { PriceChart, type IndicatorKey } from "@/components/charts/PriceChart";
+import { ChartControls, sliceByTimeframe, type TimeframeKey } from "@/components/companies/ChartControls";
 import { DriverChart } from "@/components/charts/DriverChart";
 import { ValuationCard } from "@/components/companies/ValuationCard";
 import { FinancialTabs } from "@/components/companies/FinancialTabs";
@@ -22,6 +24,14 @@ import { ApiError } from "@/lib/api/client";
 export default function CompanyDetailPage() {
   const params = useParams<{ ticker: string }>();
   const ticker = (params.ticker ?? "").toUpperCase();
+
+  const [timeframe, setTimeframe] = React.useState<TimeframeKey>("ALL");
+  const [indicators, setIndicators] = React.useState<IndicatorKey[]>([]);
+  const [showVolumeProfile, setShowVolumeProfile] = React.useState(false);
+
+  function toggleIndicator(key: IndicatorKey) {
+    setIndicators((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
+  }
 
   const company = useCompany(ticker);
   const history = usePriceHistory(ticker);
@@ -80,12 +90,22 @@ export default function CompanyDetailPage() {
             />
 
             <DashboardPanel eyebrow="Market Data" title="Price">
+              <ChartControls
+                timeframe={timeframe}
+                onTimeframeChange={setTimeframe}
+                indicators={indicators}
+                onToggleIndicator={toggleIndicator}
+                showVolumeProfile={showVolumeProfile}
+                onToggleVolumeProfile={() => setShowVolumeProfile((v) => !v)}
+              />
               <PriceChart
-                data={history.data ?? []}
+                data={sliceByTimeframe(history.data ?? [], timeframe)}
                 loading={history.isLoading}
                 error={history.isError}
                 onRetry={() => history.refetch()}
                 ticker={ticker}
+                indicators={indicators}
+                showVolumeProfile={showVolumeProfile}
               />
             </DashboardPanel>
 

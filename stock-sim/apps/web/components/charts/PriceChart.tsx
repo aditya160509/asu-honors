@@ -7,13 +7,25 @@ import { drawPriceAxis, drawTimeAxis } from "@/lib/charts/core/Axis";
 import { drawCrosshair, drawCrosshairTooltip } from "@/lib/charts/core/Crosshair";
 import { drawCandlestickSeries, candlestickYDomain } from "@/lib/charts/series/CandlestickSeries";
 import { drawVolumeSeries } from "@/lib/charts/series/VolumeSeries";
+import { drawLineSeries } from "@/lib/charts/series/LineSeries";
+import { computeVolumeProfile, drawVolumeProfile } from "@/lib/charts/series/VolumeProfile";
+import { computeSMA } from "@/lib/charts/indicators/sma";
+import { computeEMA } from "@/lib/charts/indicators/ema";
 import { defaultRange, panRange, zoomRange } from "@/lib/charts/core/Viewport";
 import { formatDateAxis, formatPriceAxis } from "@/lib/charts/core/utils";
-import type { OHLC, VisibleRange } from "@/lib/charts/types";
+import type { LinePoint, OHLC, VisibleRange } from "@/lib/charts/types";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ui/error-state";
 import type { PriceHistoryItem } from "@/lib/api/types";
+
+export type IndicatorKey = "sma20" | "sma50" | "ema12";
+
+const INDICATOR_CONFIG: Record<IndicatorKey, { label: string; color: string; compute: (closes: number[]) => (number | null)[] }> = {
+  sma20: { label: "SMA 20", color: "#f59e0b", compute: (closes) => computeSMA(closes, 20) },
+  sma50: { label: "SMA 50", color: "#3b82f6", compute: (closes) => computeSMA(closes, 50) },
+  ema12: { label: "EMA 12", color: "#14b8a6", compute: (closes) => computeEMA(closes, 12) },
+};
 
 export interface PriceChartProps {
   data: PriceHistoryItem[];
@@ -22,6 +34,10 @@ export interface PriceChartProps {
   error?: boolean;
   onRetry?: () => void;
   ticker: string;
+  /** Optional SMA/EMA overlays — none by default. */
+  indicators?: IndicatorKey[];
+  /** Optional volume-by-price histogram (VPVR) with Point-of-Control line — off by default. */
+  showVolumeProfile?: boolean;
 }
 
 const PADDING = { top: 8, right: 56, bottom: 24, left: 8 };
@@ -38,27 +54,68 @@ function toOHLC(items: PriceHistoryItem[]): OHLC[] {
   }));
 }
 
-export function PriceChart({ data, height = 400, loading, error, onRetry, ticker }: PriceChartProps) {
+export function PriceChart({
+  data,
+  height = 400,
+  loading,
+  error,
+  onRetry,
+  ticker,
+  indicators = [],
+  showVolumeProfile = false,
+}: PriceChartProps) {
   const ohlc = React.useMemo(() => toOHLC(data), [data]);
   const [range, setRange] = React.useState<VisibleRange>(() => defaultRange(ohlc.length));
   const [hover, setHover] = React.useState<{ x: number; y: number } | null>(null);
   const isPanning = React.useRef(false);
   const panStartX = React.useRef(0);
   const panStartRange = React.useRef<VisibleRange>({ from: 0, to: 0 });
+  const widthRef = React.useRef(0);
 
   React.useEffect(() => {
     setRange(defaultRange(ohlc.length));
   }, [ohlc.length]);
 
+  // Computed once per data/indicator-selection change, not per render frame —
+  // `time` stays a true index into `ohlc` even after null-filtering, so
+  // visibility filtering below stays correct.
+  const indicatorSeries = React.useMemo(() => {
+    const closes = ohlc.map((c) => c.close);
+    return indicators.map((key) => {
+      const config = INDICATOR_CONFIG[key];
+      const values = config.compute(closes);
+      const points: LinePoint[] = [];
+      values.forEach((v, i) => {
+        if (v != null) points.push({ time: i, value: v });
+      });
+      return { key, color: config.color, points };
+    });
+  }, [ohlc, indicators]);
+
   const render = React.useCallback(
     ({ ctx, width, height: h, dpr }: { ctx: CanvasRenderingContext2D; width: number; height: number; dpr: number }) => {
+      widthRef.current = width;
       if (ohlc.length === 0) return;
       const priceAreaHeight = h - PADDING.bottom - PADDING.top - VOLUME_HEIGHT;
       const pricePadding = { ...PADDING, bottom: PADDING.bottom + VOLUME_HEIGHT };
       const yDomain = candlestickYDomain(ohlc, range);
 
       drawGrid({ ctx, width, height: h, dpr, padding: pricePadding });
+
+      if (showVolumeProfile) {
+        const buckets = computeVolumeProfile(ohlc, range);
+        drawVolumeProfile({ ctx, buckets, width, padding: pricePadding, yDomain, priceAreaHeight });
+      }
+
       drawCandlestickSeries({ ctx, data: ohlc, visibleRange: range, width, height: h, dpr, padding: pricePadding, yDomain });
+
+      indicatorSeries.forEach(({ color, points }) => {
+        const visiblePoints = points.filter((p) => p.time >= range.from && p.time < range.to);
+        if (visiblePoints.length > 1) {
+          drawLineSeries({ ctx, data: visiblePoints, width, height: h, padding: pricePadding, yDomain, color, lineWidth: 1.25 });
+        }
+      });
+
       drawVolumeSeries({
         ctx,
         data: ohlc,
@@ -104,11 +161,11 @@ export function PriceChart({ data, height = 400, loading, error, onRetry, ticker
         }
       }
     },
-    [ohlc, range, hover, data]
+    [ohlc, range, hover, data, indicatorSeries, showVolumeProfile]
   );
 
   function handleWheel(deltaY: number, x: number) {
-    const plotW = 1000;
+    const plotW = Math.max(1, widthRef.current - PADDING.left - PADDING.right);
     const frac = Math.max(0, Math.min(1, (x - PADDING.left) / plotW));
     setRange((prev) => zoomRange(prev, ohlc.length, deltaY > 0 ? 1.1 : 1 / 1.1, frac));
   }
@@ -123,7 +180,8 @@ export function PriceChart({ data, height = 400, loading, error, onRetry, ticker
     setHover({ x, y });
     if (isPanning.current) {
       const span = panStartRange.current.to - panStartRange.current.from;
-      const deltaCandles = Math.round(((panStartX.current - x) / 1000) * span);
+      const plotW = Math.max(1, widthRef.current - PADDING.left - PADDING.right);
+      const deltaCandles = Math.round(((panStartX.current - x) / plotW) * span);
       setRange(panRange(panStartRange.current, ohlc.length, deltaCandles));
     }
   }
@@ -150,3 +208,5 @@ export function PriceChart({ data, height = 400, loading, error, onRetry, ticker
     </ChartSurface>
   );
 }
+
+export { INDICATOR_CONFIG };
