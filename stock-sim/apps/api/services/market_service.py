@@ -96,6 +96,46 @@ def _price_52w_stats(
     }
 
 
+def _last_two_closes_by_company(
+    db: Session, timeline_id: int,
+) -> dict[int, tuple[float, float]]:
+    """Get the two most recent close prices for each company: (latest, previous).
+
+    Returns a dict mapping company_id -> (latest_close, prev_close).
+    If only one row exists, prev_close is None.
+    """
+    from sqlalchemy import func, literal_column
+
+    # Get the two most recent rows per company using a window function
+    subq = (
+        db.query(
+            PriceHistory.company_id,
+            PriceHistory.close,
+            PriceHistory.sim_date,
+            func.row_number().over(
+                partition_by=PriceHistory.company_id,
+                order_by=PriceHistory.sim_date.desc(),
+            ).label("rn"),
+        )
+        .filter(PriceHistory.timeline_id == timeline_id)
+        .subquery()
+    )
+    rows = db.query(subq).filter(subq.c.rn <= 2).all()
+
+    result: dict[int, dict[int, float]] = {}
+    for r in rows:
+        cid = r.company_id
+        if cid not in result:
+            result[cid] = {}
+        result[cid][r.rn] = float(r.close)
+
+    return {
+        cid: (dates[1], dates.get(2))
+        for cid, dates in result.items()
+        if 1 in dates
+    }
+
+
 def get_market_grid(db: Session, timeline_id: int) -> MarketGridResponse:
     """Build the market grid: all companies with latest prices and day change."""
     companies = db.query(Company).order_by(Company.ticker).all()
@@ -109,19 +149,18 @@ def get_market_grid(db: Session, timeline_id: int) -> MarketGridResponse:
     )
     sim_date = sim_state.current_sim_date if sim_state else date.today()
     cycle_phase = latest_cycle.cycle_phase if latest_cycle else "expansion"
-    prev_closes = _prev_closes_by_company(db, timeline_id, sim_date)
+    last_two = _last_two_closes_by_company(db, timeline_id)
     price_stats = _price_52w_stats(db, timeline_id, sim_date)
 
     items: list[CompanyGridItem] = []
     for company in companies:
         industry = industries.get(company.industry_id)
-        current_price = company.current_price
-        prev_close = None
+        closes = last_two.get(company.id)
+        current_price = closes[0] if closes else (float(company.current_price) if company.current_price else 0)
+        prev_close = closes[1] if closes and closes[1] is not None else None
         day_change_pct = None
-        if current_price is not None:
-            prev_close = prev_closes.get(company.id)
-            if prev_close is not None:
-                day_change_pct = (float(current_price) - prev_close) / prev_close * 100.0
+        if prev_close is not None and prev_close > 0:
+            day_change_pct = (current_price - prev_close) / prev_close * 100.0
         stats = price_stats.get(company.id, {})
         items.append(
             CompanyGridItem(
@@ -129,7 +168,7 @@ def get_market_grid(db: Session, timeline_id: int) -> MarketGridResponse:
                 ticker=company.ticker,
                 name=company.name,
                 industry_name=industry.name if industry else "",
-                current_price=current_price if current_price is not None else 0,
+                current_price=current_price,
                 prev_close=prev_close,
                 day_change_pct=day_change_pct,
                 intrinsic_value=company.intrinsic_value,

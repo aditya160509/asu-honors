@@ -65,4 +65,4 @@ def institutional_buying(net_flow_signal: float) -> float:
 
 def composite_price_pressure(drivers: dict[str, float], weights: dict[str, float] = DEFAULT_DRIVER_WEIGHTS) -> float:
     """Section 6.H — weighted sum of the 7 price drivers (VO/ES/NS/EO/G/TM/IB)."""
-    return sum(weights[key] * value for key, value in drivers.items())
+    return sum(weights.get(key, 0) * value for key, value in drivers.items())

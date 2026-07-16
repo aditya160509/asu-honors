@@ -701,6 +701,7 @@ def _execute_events(
     fired_events = select_and_fire_events(
         session, timeline_id, sim_date, state.rng, company_ids_list, industry_ids_list,
     )
+    session.flush()
     for ev in fired_events:
         event_instances = session.query(EventInstance).filter_by(
             event_id=ev.id, timeline_id=timeline_id, sim_date=sim_date,

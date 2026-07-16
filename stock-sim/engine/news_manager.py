@@ -1,6 +1,7 @@
 """Section 6.N — Event lifecycle management and news generation."""
 
 import random
+import re
 from datetime import date, timedelta
 from typing import Optional
 
@@ -166,6 +167,10 @@ def generate_news(
         headline = headline.replace(key, val)
         body = body.replace(key, val)
 
+    # Strip any remaining unreplaced {placeholder} tokens
+    headline = re.sub(r"\{[a-z_]+\}", "N/A", headline)
+    body = re.sub(r"\{[a-z_]+\}", "N/A", body)
+
     company_id = event_instance.scope_ref if event_instance.scope_type == "company" else None
     industry_id = event_instance.scope_ref if event_instance.scope_type == "industry" else None
     if company_id is None and industry_id is None:
@@ -187,9 +192,12 @@ def generate_news(
 
 
 def _parse_range(range_str: str) -> tuple[float, float]:
-    """Parse '(-0.3, 0.3)' -> (-0.3, 0.3)."""
+    """Parse severity range strings like '(10, 50)', '(10..50)', or '10..50'."""
     cleaned = range_str.strip().strip("()").strip("[]")
-    parts = cleaned.split(",")
+    if ".." in cleaned:
+        parts = cleaned.split("..")
+    else:
+        parts = cleaned.split(",")
     if len(parts) < 2:
         return (0.0, 0.0)
     return float(parts[0].strip()), float(parts[1].strip())

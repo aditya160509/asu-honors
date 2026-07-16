@@ -9,7 +9,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useGridSort } from "@/lib/grid/useGridSort";
 import type { GridColumn, SortState } from "@/lib/grid/types";
 import { DashboardPanel } from "@/components/dashboard/primitives/DashboardPanel";
-import { MER_HAIRLINE } from "@/components/dashboard/primitives/tokens";
 import { MiniAreaSpark } from "@/components/dashboard/primitives/MiniAreaSpark";
 import { withWeights, type HoldingWithWeight } from "@/lib/portfolio/holdingsMath";
 import { usePriceHistory } from "@/lib/api/hooks/useCompany";
@@ -24,10 +23,6 @@ export interface HoldingsTableProps {
   onRetry?: () => void;
 }
 
-/** A note-for-note reuse of `useGridSort`'s asc/desc/none algorithm — this array exists purely to
- * supply sortable keys, not to render (this table draws its own header/rows so it can stay on
- * Meridian tokens without touching `lib/grid/*`'s legacy-token presentation, which is shared with
- * the Leaderboard table and out of scope here). */
 const SORT_KEYS: GridColumn<HoldingWithWeight>[] = [
   { key: "ticker", header: "", width: 0, sortable: true },
   { key: "company_name", header: "", width: 0, sortable: true },
@@ -39,6 +34,44 @@ const SORT_KEYS: GridColumn<HoldingWithWeight>[] = [
   { key: "unrealized_pnl", header: "", width: 0, sortable: true },
   { key: "unrealized_pnl_pct", header: "", width: 0, sortable: true },
 ];
+
+const HEADER_STYLE: React.CSSProperties = {
+  position: "sticky",
+  top: 0,
+  zIndex: 10,
+  display: "flex",
+  borderBottom: "1px solid var(--mer-stroke-hairline)",
+  backgroundColor: "var(--mer-surface-2)",
+  backdropFilter: "blur(12px)",
+  WebkitBackdropFilter: "blur(12px)",
+};
+
+const STICKY_TICKER_STYLE: React.CSSProperties = {
+  position: "sticky",
+  left: 0,
+  zIndex: 20,
+  backgroundColor: "var(--mer-surface-2)",
+};
+
+const ROW_ALT_STYLE: React.CSSProperties = {
+  backgroundColor: "rgba(255, 255, 255, 0.015)",
+};
+
+const ROW_HOVER_STYLE = "group flex cursor-pointer items-center border-b transition-all duration-150 hover:bg-[rgba(255,255,255,0.04)] hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]";
+
+const PNILL_POSITIVE: React.CSSProperties = {
+  backgroundColor: "rgba(34, 197, 94, 0.08)",
+  color: "var(--positive)",
+  borderRadius: "4px",
+  padding: "1px 6px",
+};
+
+const PNILL_NEGATIVE: React.CSSProperties = {
+  backgroundColor: "rgba(239, 68, 68, 0.08)",
+  color: "var(--negative)",
+  borderRadius: "4px",
+  padding: "1px 6px",
+};
 
 interface HeaderCellProps {
   label: string;
@@ -57,14 +90,15 @@ function HeaderCell({ label, sortKey, sort, onSort, align = "left" }: HeaderCell
       onClick={() => onSort(sortKey)}
       onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && onSort(sortKey)}
       className={cn(
-        "flex shrink-0 cursor-pointer select-none items-center gap-1 px-3 py-2 text-micro font-medium uppercase text-mer-ink-tertiary transition-colors hover:text-mer-ink-primary",
+        "flex shrink-0 cursor-pointer select-none items-center gap-1 px-3 py-2.5 text-micro font-medium uppercase transition-colors",
         "focus-visible:outline focus-visible:outline-2 focus-visible:outline-[color:var(--mer-accent-500)] focus-visible:outline-offset-[-2px]",
-        align === "right" && "justify-end text-right"
+        align === "right" && "justify-end text-right",
+        isSorted ? "text-mer-accent-500" : "text-mer-ink-tertiary hover:text-mer-ink-secondary"
       )}
     >
       <span>{label}</span>
-      {isSorted && sort.direction === "asc" && <ArrowUp size={11} className="text-mer-accent-500" />}
-      {isSorted && sort.direction === "desc" && <ArrowDown size={11} className="text-mer-accent-500" />}
+      {isSorted && sort.direction === "asc" && <ArrowUp size={11} />}
+      {isSorted && sort.direction === "desc" && <ArrowDown size={11} />}
     </div>
   );
 }
@@ -95,15 +129,17 @@ const COL_WIDTHS = {
 
 function DensityToggle({ density, onChange }: { density: "comfortable" | "compact"; onChange: (d: "comfortable" | "compact") => void }) {
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex items-center gap-1 rounded-md" style={{ backgroundColor: "var(--mer-surface-3)", padding: "2px" }}>
       <button
         type="button"
         onClick={() => onChange("comfortable")}
         aria-pressed={density === "comfortable"}
         aria-label="Comfortable row density"
         className={cn(
-          "flex h-6 w-6 items-center justify-center rounded-mer-xs transition-colors",
-          density === "comfortable" ? "bg-mer-surface-4 text-mer-ink-primary" : "text-mer-ink-tertiary hover:text-mer-ink-primary"
+          "flex h-6 w-6 items-center justify-center rounded-sm transition-all duration-150",
+          density === "comfortable"
+            ? "bg-mer-accent-500 text-white shadow-[0_0_8px_rgba(62,111,224,0.3)]"
+            : "text-mer-ink-tertiary hover:text-mer-ink-primary"
         )}
       >
         <Rows3 size={13} />
@@ -114,8 +150,10 @@ function DensityToggle({ density, onChange }: { density: "comfortable" | "compac
         aria-pressed={density === "compact"}
         aria-label="Compact row density"
         className={cn(
-          "flex h-6 w-6 items-center justify-center rounded-mer-xs transition-colors",
-          density === "compact" ? "bg-mer-surface-4 text-mer-ink-primary" : "text-mer-ink-tertiary hover:text-mer-ink-primary"
+          "flex h-6 w-6 items-center justify-center rounded-sm transition-all duration-150",
+          density === "compact"
+            ? "bg-mer-accent-500 text-white shadow-[0_0_8px_rgba(62,111,224,0.3)]"
+            : "text-mer-ink-tertiary hover:text-mer-ink-primary"
         )}
       >
         <LayoutGrid size={13} />
@@ -124,17 +162,10 @@ function DensityToggle({ density, onChange }: { density: "comfortable" | "compac
   );
 }
 
-/**
- * Institutional dense holdings grid — built fresh rather than extending `lib/grid/VirtualGrid`
- * (which is shared with the Leaderboard table and still on legacy tokens), so this can be fully
- * Meridian-styled without touching shared infrastructure outside Portfolio's scope. Not virtualized:
- * a simulated portfolio realistically holds a handful to a few dozen positions, well within what a
- * plain scrollable table handles without a windowing layer.
- */
 export function HoldingsTable({ holdings, totalValue, loading, error, onRetry }: HoldingsTableProps) {
   const router = useRouter();
   const [density, setDensity] = React.useState<"comfortable" | "compact">("comfortable");
-  const rowHeight = density === "comfortable" ? 40 : 28;
+  const rowHeight = density === "comfortable" ? 48 : 32;
 
   const weighted = React.useMemo(() => withWeights(holdings, totalValue), [holdings, totalValue]);
   const { sortedData, sort, toggleSort } = useGridSort(weighted, SORT_KEYS);
@@ -157,6 +188,22 @@ export function HoldingsTable({ holdings, totalValue, loading, error, onRetry }:
     }
     prevValuesRef.current = new Map(holdings.map((h) => [h.ticker, Number(h.market_value)]));
   }, [holdings]);
+
+  const summaryPnl = React.useMemo(() => {
+    let totalPnl = 0;
+    let totalPnlPct = 0;
+    let count = 0;
+    for (const h of holdings) {
+      totalPnl += Number(h.unrealized_pnl);
+      totalPnlPct += Number(h.unrealized_pnl_pct);
+      count++;
+    }
+    return {
+      totalValue: totalValue,
+      totalPnl,
+      avgPnlPct: count > 0 ? totalPnlPct / count : 0,
+    };
+  }, [holdings, totalValue]);
 
   return (
     <DashboardPanel
@@ -183,8 +230,8 @@ export function HoldingsTable({ holdings, totalValue, loading, error, onRetry }:
       ) : (
         <div className="overflow-x-auto">
           <div className="min-w-max">
-            <div className={cn("sticky top-0 z-10 flex border-b bg-mer-surface-3", MER_HAIRLINE)}>
-              <div className={cn("sticky left-0 z-20 bg-mer-surface-3")} style={{ width: COL_WIDTHS.ticker }}>
+            <div style={HEADER_STYLE}>
+              <div style={{ ...STICKY_TICKER_STYLE, width: COL_WIDTHS.ticker }}>
                 <HeaderCell label="Ticker" sortKey="ticker" sort={sort} onSort={toggleSort} />
               </div>
               <div style={{ width: COL_WIDTHS.name }}>
@@ -220,7 +267,7 @@ export function HoldingsTable({ holdings, totalValue, loading, error, onRetry }:
             </div>
 
             <div>
-              {sortedData.map((h) => {
+              {sortedData.map((h, idx) => {
                 const changed = changedTickers.has(h.ticker);
                 const pnlPositive = Number(h.unrealized_pnl) >= 0;
                 return (
@@ -231,17 +278,28 @@ export function HoldingsTable({ holdings, totalValue, loading, error, onRetry }:
                     onClick={() => router.push(`/companies/${h.ticker}`)}
                     onKeyDown={(e) => e.key === "Enter" && router.push(`/companies/${h.ticker}`)}
                     className={cn(
-                      "group flex cursor-pointer items-center border-b transition-colors hover:bg-mer-surface-3",
-                      "focus-visible:outline focus-visible:outline-2 focus-visible:outline-[color:var(--mer-accent-500)] focus-visible:outline-offset-[-2px]",
-                      MER_HAIRLINE
+                      ROW_HOVER_STYLE,
+                      "focus-visible:outline focus-visible:outline-2 focus-visible:outline-[color:var(--mer-accent-500)] focus-visible:outline-offset-[-2px]"
                     )}
-                    style={{ height: rowHeight }}
+                    style={{
+                      height: rowHeight,
+                      ...(idx % 2 === 1 ? ROW_ALT_STYLE : {}),
+                      borderBottom: "1px solid var(--mer-stroke-hairline)",
+                    }}
                   >
                     <div
-                      className="sticky left-0 z-[5] flex h-full items-center bg-mer-surface-2 px-3 group-hover:bg-mer-surface-3"
-                      style={{ width: COL_WIDTHS.ticker }}
+                      className="sticky left-0 z-[5] flex h-full items-center px-3 group-hover:bg-[var(--mer-surface-3)]"
+                      style={{
+                        width: COL_WIDTHS.ticker,
+                        backgroundColor: "var(--mer-surface-2)",
+                      }}
                     >
-                      <span className="num text-small font-bold uppercase text-mer-ink-primary">{h.ticker}</span>
+                      <span
+                        className="num text-small font-bold uppercase text-mer-ink-primary"
+                        style={{ fontFamily: "var(--font-mono)" }}
+                      >
+                        {h.ticker}
+                      </span>
                     </div>
                     <div className="flex items-center px-3 text-small text-mer-ink-secondary" style={{ width: COL_WIDTHS.name }}>
                       <span className="truncate">{h.company_name}</span>
@@ -249,40 +307,53 @@ export function HoldingsTable({ holdings, totalValue, loading, error, onRetry }:
                     <div className="flex items-center px-3" style={{ width: COL_WIDTHS.spark }}>
                       <HoldingSparkline ticker={h.ticker} />
                     </div>
-                    <div className="num flex items-center justify-end px-3 text-small text-mer-ink-primary" style={{ width: COL_WIDTHS.qty }}>
+                    <div
+                      className="num flex items-center justify-end px-3 text-small text-mer-ink-primary"
+                      style={{ width: COL_WIDTHS.qty, fontFamily: "var(--font-mono)" }}
+                    >
                       {h.quantity.toLocaleString()}
                     </div>
-                    <div className="num flex items-center justify-end px-3 text-small text-mer-ink-secondary" style={{ width: COL_WIDTHS.avgCost }}>
+                    <div
+                      className="num flex items-center justify-end px-3 text-small text-mer-ink-secondary"
+                      style={{ width: COL_WIDTHS.avgCost, fontFamily: "var(--font-mono)" }}
+                    >
                       {formatPrice(h.avg_cost_basis)}
                     </div>
                     <div
                       className={cn("num flex items-center justify-end px-3 text-small text-mer-ink-primary", changed && "cell-flash")}
-                      style={{ width: COL_WIDTHS.price }}
+                      style={{ width: COL_WIDTHS.price, fontFamily: "var(--font-mono)" }}
                     >
                       {formatPrice(h.current_price)}
                     </div>
                     <div
                       className={cn("num flex items-center justify-end px-3 text-small font-medium text-mer-ink-primary", changed && "cell-flash")}
-                      style={{ width: COL_WIDTHS.value }}
+                      style={{ width: COL_WIDTHS.value, fontFamily: "var(--font-mono)" }}
                     >
                       {formatPrice(h.market_value)}
                     </div>
-                    <div className="num flex items-center justify-end px-3 text-small text-mer-ink-secondary" style={{ width: COL_WIDTHS.weight }}>
+                    <div
+                      className="num flex items-center justify-end px-3 text-small text-mer-ink-secondary"
+                      style={{ width: COL_WIDTHS.weight, fontFamily: "var(--font-mono)" }}
+                    >
                       {formatPct(h.weight)}
                     </div>
                     <div
-                      className={cn(
-                        "num flex items-center justify-end px-3 text-small font-medium",
-                        pnlPositive ? "text-positive" : "text-negative",
-                        changed && "cell-flash"
-                      )}
-                      style={{ width: COL_WIDTHS.pnl }}
+                      className={cn("num flex items-center justify-end px-3 text-small font-medium", changed && "cell-flash")}
+                      style={{
+                        width: COL_WIDTHS.pnl,
+                        fontFamily: "var(--font-mono)",
+                        ...(pnlPositive ? PNILL_POSITIVE : PNILL_NEGATIVE),
+                      }}
                     >
                       {formatPrice(h.unrealized_pnl)}
                     </div>
                     <div
-                      className={cn("num flex items-center justify-end px-3 text-small font-medium", pnlPositive ? "text-positive" : "text-negative")}
-                      style={{ width: COL_WIDTHS.pnlPct }}
+                      className="num flex items-center justify-end px-3 text-small font-medium"
+                      style={{
+                        width: COL_WIDTHS.pnlPct,
+                        fontFamily: "var(--font-mono)",
+                        color: pnlPositive ? "var(--positive)" : "var(--negative)",
+                      }}
                     >
                       {formatPct(h.unrealized_pnl_pct)}
                     </div>
@@ -290,6 +361,58 @@ export function HoldingsTable({ holdings, totalValue, loading, error, onRetry }:
                 );
               })}
             </div>
+
+            {sortedData.length > 0 && (
+              <div
+                className="flex items-center border-t"
+                style={{
+                  height: rowHeight,
+                  borderTop: "1px solid var(--mer-stroke-emphasis)",
+                  backgroundColor: "rgba(255, 255, 255, 0.025)",
+                }}
+              >
+                <div
+                  className="sticky left-0 z-[5] flex h-full items-center px-3"
+                  style={{ width: COL_WIDTHS.ticker, backgroundColor: "var(--mer-surface-3)" }}
+                >
+                  <span className="text-micro font-semibold uppercase text-mer-ink-secondary" style={{ letterSpacing: "0.06em" }}>
+                    Total
+                  </span>
+                </div>
+                <div style={{ width: COL_WIDTHS.name }} />
+                <div style={{ width: COL_WIDTHS.spark }} />
+                <div style={{ width: COL_WIDTHS.qty }} />
+                <div style={{ width: COL_WIDTHS.avgCost }} />
+                <div style={{ width: COL_WIDTHS.price }} />
+                <div
+                  className="num flex items-center justify-end px-3 text-small font-semibold text-mer-ink-primary"
+                  style={{ width: COL_WIDTHS.value, fontFamily: "var(--font-mono)" }}
+                >
+                  {formatPrice(summaryPnl.totalValue)}
+                </div>
+                <div style={{ width: COL_WIDTHS.weight }} />
+                <div
+                  className="num flex items-center justify-end px-3 text-small font-semibold"
+                  style={{
+                    width: COL_WIDTHS.pnl,
+                    fontFamily: "var(--font-mono)",
+                    ...(summaryPnl.totalPnl >= 0 ? PNILL_POSITIVE : PNILL_NEGATIVE),
+                  }}
+                >
+                  {formatPrice(summaryPnl.totalPnl)}
+                </div>
+                <div
+                  className="num flex items-center justify-end px-3 text-small font-semibold"
+                  style={{
+                    width: COL_WIDTHS.pnlPct,
+                    fontFamily: "var(--font-mono)",
+                    color: summaryPnl.avgPnlPct >= 0 ? "var(--positive)" : "var(--negative)",
+                  }}
+                >
+                  {formatPct(summaryPnl.avgPnlPct)}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
