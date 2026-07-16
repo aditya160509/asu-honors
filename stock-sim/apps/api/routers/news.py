@@ -49,6 +49,7 @@ def get_news(
                 body=r.body,
                 sentiment=r.sentiment,
                 severity=float(r.severity) if r.severity is not None else 0.0,
+                news_type=r.news_type,
                 company_name=companies.get(r.company_id) if r.company_id else None,
                 industry_name=industries.get(r.industry_id) if r.industry_id else None,
             )

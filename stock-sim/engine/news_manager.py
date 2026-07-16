@@ -176,6 +176,8 @@ def generate_news(
     if company_id is None and industry_id is None:
         return None
 
+    news_type = event.news_type if event else "both"
+
     news = NewsFeed(
         timeline_id=timeline_id,
         sim_date=sim_date,
@@ -185,6 +187,7 @@ def generate_news(
         body=body,
         sentiment=sentiment,
         severity=severity,
+        news_type=news_type,
         source_event_instance_id=event_instance.id,
     )
     session.add(news)

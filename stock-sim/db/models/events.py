@@ -25,9 +25,11 @@ class MarketEvent(Base, TimestampMixin):
     duration_days: Mapped[int] = mapped_column(nullable=False)
     decay_rate: Mapped[float] = mapped_column(Numeric, nullable=False)
     probability_weight: Mapped[float] = mapped_column(Numeric, nullable=False)
+    news_type: Mapped[str] = mapped_column(String(20), nullable=False, default="both")
 
     __table_args__ = (
         CheckConstraint("scope in ('company', 'industry', 'market')", name="ck_market_events_scope"),
+        CheckConstraint("news_type in ('structural', 'price', 'both')", name="ck_market_events_news_type"),
     )
 
 
@@ -73,6 +75,7 @@ class NewsFeed(Base, TimestampMixin):
     body: Mapped[str] = mapped_column(String, nullable=False)
     sentiment: Mapped[str] = mapped_column(String(20), nullable=False)
     severity: Mapped[float] = mapped_column(Numeric, nullable=False)
+    news_type: Mapped[str] = mapped_column(String(20), nullable=False, default="both")
     source_event_instance_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("event_instances.id", ondelete="SET NULL")
     )
@@ -81,5 +84,9 @@ class NewsFeed(Base, TimestampMixin):
         CheckConstraint(
             "company_id is not null or industry_id is not null",
             name="ck_news_feed_target_exists"
+        ),
+        CheckConstraint(
+            "news_type in ('structural', 'price', 'both')",
+            name="ck_news_feed_news_type"
         ),
     )
