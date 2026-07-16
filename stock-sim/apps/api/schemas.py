@@ -4,7 +4,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 # --------------------------------------------------------------------------
 # 2.1 Auth Schemas
@@ -181,7 +181,9 @@ class CycleStateResponse(BaseModel):
 class OrderRequest(BaseModel):
     ticker: str
     side: str
+    order_type: str = "market"
     quantity: int
+    limit_price: Optional[Decimal] = None
     timeline_id: int = 1
 
     @field_validator("side")
@@ -191,6 +193,13 @@ class OrderRequest(BaseModel):
             raise ValueError("side must be 'buy' or 'sell'")
         return v
 
+    @field_validator("order_type")
+    @classmethod
+    def order_type_valid(cls, v: str) -> str:
+        if v not in ("market", "limit"):
+            raise ValueError("order_type must be 'market' or 'limit'")
+        return v
+
     @field_validator("quantity")
     @classmethod
     def quantity_positive(cls, v: int) -> int:
@@ -198,16 +207,28 @@ class OrderRequest(BaseModel):
             raise ValueError("quantity must be positive")
         return v
 
+    @model_validator(mode="after")
+    def limit_requires_price(self) -> "OrderRequest":
+        if self.order_type == "limit" and self.limit_price is None:
+            raise ValueError("limit_price is required for limit orders")
+        return self
+
 
 class OrderResponse(BaseModel):
     id: int
     portfolio_id: int
     company_id: int
+    ticker: str
     sim_date: date
     side: str
+    order_type: str = "market"
+    status: str = "filled"
     quantity: int
-    price: Decimal
-    fees: Decimal
+    filled_quantity: int = 0
+    limit_price: Optional[Decimal] = None
+    # Avg fill price / fees — populated once filled, null while an order is still open.
+    price: Optional[Decimal] = None
+    fees: Optional[Decimal] = None
     realized_pnl: Optional[Decimal] = None
 
 

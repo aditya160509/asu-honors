@@ -24,7 +24,7 @@ from apps.api.schemas import (
 )
 from apps.api.services import watchlist_service
 from apps.api.services.portfolio_service import compute_risk_metrics, get_portfolio_history
-from apps.api.services.trade_service import get_portfolio_analytics, place_order
+from apps.api.services.trade_service import cancel_order, get_portfolio_analytics, list_orders, place_order
 from db.models import Company, Holding, Portfolio, Transaction, User, Watchlist
 
 logger = logging.getLogger(__name__)
@@ -111,6 +111,29 @@ def create_order(
     user: User = Depends(get_current_user),
 ) -> OrderResponse:
     result = place_order(db, user, request)
+    db.commit()
+    return result
+
+
+@router.get("/orders", response_model=list[OrderResponse])
+def get_orders(
+    timeline_id: int = Query(default=settings.default_timeline_id),
+    status_filter: str | None = Query(default=None, alias="status", pattern="^(open|filled|cancelled)$"),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[OrderResponse]:
+    """Open orders / filled orders / order history are all this endpoint with a
+    different `status` filter — not four separate endpoints."""
+    return list_orders(db, user, timeline_id, status_filter)
+
+
+@router.delete("/orders/{order_id}", response_model=OrderResponse)
+def delete_order(
+    order_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> OrderResponse:
+    result = cancel_order(db, user, order_id)
     db.commit()
     return result
 

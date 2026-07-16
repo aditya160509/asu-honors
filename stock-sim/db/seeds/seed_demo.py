@@ -1,6 +1,7 @@
 """Seed demo users, portfolios, and sample transactions."""
 
 import os
+from datetime import datetime, timezone
 
 import bcrypt
 from sqlalchemy import create_engine
@@ -28,6 +29,11 @@ def seed(session: Session) -> None:
                 display_name=ud["display_name"],
                 role=ud["role"],
                 starting_cash=ud["starting_cash"],
+                # Seeded demo users bypass POST /auth/register (where
+                # skip_email_verification normally auto-verifies), so they'd
+                # otherwise be permanently unable to log in in a dev
+                # environment with no real email service configured.
+                email_verified_at=datetime.now(timezone.utc),
             ))
     session.flush()
 

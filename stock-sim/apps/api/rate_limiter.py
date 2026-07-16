@@ -4,6 +4,7 @@ import time
 from collections import defaultdict
 
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse
 from fastapi import Request, HTTPException, status
 
 MAX_IP_AGE_SECONDS = 300
@@ -26,9 +27,17 @@ class InMemoryRateLimiter(BaseHTTPMiddleware):
         self.requests[client_ip] = [t for t in self.requests[client_ip] if t > window_start]
 
         if len(self.requests[client_ip]) >= self.max_requests:
-            raise HTTPException(
+            # NOTE: must return a Response here, not `raise HTTPException` — a
+            # BaseHTTPMiddleware's dispatch() runs outside the normal exception-
+            # handler middleware, so a raised HTTPException never gets converted
+            # to a 429; it surfaces as an unhandled 500 instead. Same
+            # {detail, error_code} shape as apps/api/exceptions.py so the
+            # frontend's ApiError parsing (which already branches on 429) works.
+            retry_after = int(self.window_seconds - (now - self.requests[client_ip][0]))
+            return JSONResponse(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="Rate limit exceeded"
+                content={"detail": "Rate limit exceeded", "error_code": "TOO_MANY_REQUESTS"},
+                headers={"Retry-After": str(max(1, retry_after))},
             )
 
         self.requests[client_ip].append(now)

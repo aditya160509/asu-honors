@@ -61,12 +61,45 @@ class Holding(Base, TimestampMixin):
     )
 
 
+class Order(Base, TimestampMixin):
+    """Full order lifecycle wrapper (Phase 3 — Trading Desk). Market orders, and
+    limit orders whose limit price already crosses the current price, transition
+    straight to 'filled' and get a linked Transaction. Limit orders that don't
+    cross yet stay 'open' — no Transaction, no cash/holding mutation — until a
+    later `check_and_fill_limit_orders` pass fills them or the user cancels."""
+
+    __tablename__ = "orders"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    portfolio_id: Mapped[int] = mapped_column(ForeignKey("portfolios.id", ondelete="CASCADE"), nullable=False)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    sim_date: Mapped[date] = mapped_column(Date, nullable=False)
+    side: Mapped[str] = mapped_column(String(10), nullable=False)
+    order_type: Mapped[str] = mapped_column(String(10), nullable=False, default="market")
+    quantity: Mapped[float] = mapped_column(Numeric, nullable=False)
+    limit_price: Mapped[Optional[float]] = mapped_column(Numeric)
+    status: Mapped[str] = mapped_column(String(12), nullable=False, default="open")
+    filled_quantity: Mapped[float] = mapped_column(Numeric, nullable=False, default=0)
+    avg_fill_price: Mapped[Optional[float]] = mapped_column(Numeric)
+    fees: Mapped[Optional[float]] = mapped_column(Numeric)
+    filled_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    cancelled_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        CheckConstraint("side in ('buy', 'sell')", name="ck_orders_side"),
+        CheckConstraint("order_type in ('market', 'limit')", name="ck_orders_type"),
+        CheckConstraint("status in ('open', 'filled', 'cancelled')", name="ck_orders_status"),
+        CheckConstraint("quantity > 0", name="ck_orders_quantity_positive"),
+    )
+
+
 class Transaction(Base, TimestampMixin):
     __tablename__ = "transactions"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     portfolio_id: Mapped[int] = mapped_column(ForeignKey("portfolios.id", ondelete="CASCADE"), nullable=False)
     company_id: Mapped[int] = mapped_column(ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    order_id: Mapped[Optional[int]] = mapped_column(ForeignKey("orders.id", ondelete="SET NULL"))
     sim_date: Mapped[date] = mapped_column(Date, nullable=False)
     side: Mapped[str] = mapped_column(String(10), nullable=False)
     quantity: Mapped[float] = mapped_column(Numeric, nullable=False)

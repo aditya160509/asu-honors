@@ -43,6 +43,7 @@ export default function HoldingsPage() {
       <HoldingsTable
         holdings={holdings}
         totalValue={portfolio.data ? Number(portfolio.data.total_value) : 0}
+        companies={market.data?.companies ?? []}
         loading={portfolio.isLoading}
         error={portfolio.isError}
         onRetry={() => portfolio.refetch()}

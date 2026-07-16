@@ -12,6 +12,7 @@ import { FilterRail } from "@/components/market/FilterRail";
 import { ExplorerTable, type SortState } from "@/components/market/ExplorerTable";
 import { ExplorerSkeleton, ExplorerErrorState, ExplorerEmptyFiltered, ExplorerEmptyUniverse } from "@/components/market/ExplorerStates";
 import { PreviewDrawer } from "@/components/market/PreviewDrawer";
+import { TopMoversBar } from "@/components/market/TopMoversBar";
 import { CompareDrawer } from "@/components/market/CompareDrawer";
 import { SectorBreakdown } from "@/components/market/SectorBreakdown";
 import { ComparisonOverlay } from "@/components/market/ComparisonOverlay";
@@ -356,6 +357,7 @@ export function MarketExplorer({ companies, loading, error, onRetry }: MarketExp
             </button>
           </div>
         </div>
+        <TopMoversBar companies={enriched} onActivateRow={setPreviewTicker} />
         <StatsBar companies={sorted} />
         <SavedScreensBar
           screens={savedScreens.screens}

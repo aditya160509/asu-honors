@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from apps.api.exceptions import NotFoundError
 from apps.api.schemas import AdvanceResponse
+from apps.api.services.trade_service import check_and_fill_limit_orders
 from db.models import ConfigParameter, EventInstance, MarketEvent, SimulationState, Timeline
 from engine.orchestrator import run_ticks
 
@@ -28,6 +29,12 @@ def advance_simulation(db: Session, timeline_id: int, days: int) -> AdvanceRespo
 
     ticks_executed = sum(1 for r in results if r.get("status") == "completed")
     last = results[-1] if results else {}
+
+    # Trading Desk (Phase 3): check open limit orders against the end-of-advance
+    # price once per advance call — not against every intermediate day of a
+    # multi-day advance (see trade_service.check_and_fill_limit_orders docstring).
+    if ticks_executed > 0:
+        check_and_fill_limit_orders(db, timeline_id)
 
     sim_state = db.query(SimulationState).filter_by(timeline_id=timeline_id).first()
     if sim_state is not None:

@@ -46,6 +46,11 @@ def test_get_current_user_optional_valid(test_db, test_user):
 
 
 def test_rate_limiter_exceeded():
+    """A rate-limited request must come back as a real HTTP 429 response, not
+    an unhandled exception — raising HTTPException from inside a
+    BaseHTTPMiddleware.dispatch() bypasses FastAPI's exception handlers and
+    surfaces as a raw 500 to real clients (TestClient's exception re-raising
+    previously masked this — see rate_limiter.py's dispatch() for the fix)."""
     test_app = FastAPI()
 
     @test_app.get("/ping")
@@ -59,9 +64,10 @@ def test_rate_limiter_exceeded():
         assert r1.status_code == 200
         r2 = c.get("/ping")
         assert r2.status_code == 200
-        with pytest.raises(HTTPException) as exc_info:
-            c.get("/ping")
-        assert exc_info.value.status_code == 429
+        r3 = c.get("/ping")
+        assert r3.status_code == 429
+        assert r3.json()["error_code"] == "TOO_MANY_REQUESTS"
+        assert "Retry-After" in r3.headers
 
 
 def test_rate_limiter_cleanup():

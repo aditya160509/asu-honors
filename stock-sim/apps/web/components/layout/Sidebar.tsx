@@ -4,6 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  ArrowLeftRight,
   BarChart3,
   ChevronDown,
   Home,
@@ -59,7 +60,13 @@ interface NavGroup {
 
 const NAV_GROUPS: NavGroup[] = [
   { eyebrow: "Overview", items: [{ href: "/dashboard", label: "Dashboard", icon: Home }] },
-  { eyebrow: "Markets", items: [{ href: "/market", label: "Market", icon: BarChart3 }] },
+  {
+    eyebrow: "Markets",
+    items: [
+      { href: "/market", label: "Market", icon: BarChart3 },
+      { href: "/trading", label: "Trading Desk", icon: ArrowLeftRight },
+    ],
+  },
   {
     eyebrow: "Portfolio",
     items: [
@@ -163,7 +170,7 @@ function SidebarRail({ collapsed, onToggleCollapse }: { collapsed: boolean; onTo
   return (
     <aside
       style={{ width }}
-      className="mer-surface-lit shrink-0 h-screen sticky top-0 bg-mer-surface-1 border-r border-mer-hairline flex flex-col overflow-hidden z-20"
+      className="mer-surface-lit shrink-0 h-screen sticky top-0 bg-mer-surface-1 border-r border-[color:var(--mer-stroke-hairline)] flex flex-col overflow-hidden z-20"
     >
       <SidebarBody collapsed={collapsed} onToggleCollapse={onToggleCollapse} />
     </aside>
@@ -188,7 +195,7 @@ function SidebarBody({
     <div className="flex h-full flex-col">
       <div
         className={cn(
-          "flex items-center h-14 shrink-0 border-b border-mer-hairline px-3",
+          "flex items-center h-14 shrink-0 border-b border-[color:var(--mer-stroke-hairline)] px-3",
           collapsed ? "justify-center" : "justify-between"
         )}
       >
@@ -233,7 +240,7 @@ function SidebarBody({
           onClick={() => openCommandPalette()}
           aria-label="Open command palette"
           className={cn(
-            "flex items-center gap-2 w-full h-9 rounded-mer-sm border border-mer-hairline bg-mer-surface-2 text-mer-ink-tertiary hover:border-mer-emphasis hover:text-mer-ink-secondary transition-colors text-small",
+            "flex items-center gap-2 w-full h-9 rounded-mer-sm border border-[color:var(--mer-stroke-hairline)] bg-mer-surface-2 text-mer-ink-tertiary hover:border-[color:var(--mer-stroke-emphasis)] hover:text-mer-ink-secondary transition-colors text-small",
             collapsed ? "justify-center px-0" : "px-3"
           )}
         >
@@ -331,7 +338,7 @@ function SidebarBody({
       </nav>
 
       {cycle && !collapsed && (
-        <div className="px-4 py-2 border-t border-mer-hairline">
+        <div className="px-4 py-2 border-t border-[color:var(--mer-stroke-hairline)]">
           <CycleIndicator phase={cycle.cycle_phase} tooltip={cycle.sim_date} />
         </div>
       )}
@@ -383,14 +390,14 @@ function SidebarUserCard({
 }) {
   if (!user) {
     return (
-      <div className="p-3 border-t border-mer-hairline">
+      <div className="p-3 border-t border-[color:var(--mer-stroke-hairline)]">
         <Skeleton width="100%" height={40} />
       </div>
     );
   }
 
   return (
-    <div className="border-t border-mer-hairline p-2">
+    <div className="border-t border-[color:var(--mer-stroke-hairline)] p-2">
       <DropdownMenu>
         <DropdownMenuTrigger
           className={cn(

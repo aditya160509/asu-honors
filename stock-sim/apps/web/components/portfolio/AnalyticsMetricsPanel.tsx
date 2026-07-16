@@ -7,7 +7,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ui/error-state";
 import { usePortfolioAnalytics } from "@/lib/api/hooks/usePortfolio";
-import { cn, formatPrice } from "@/lib/utils";
+import { formatPrice } from "@/lib/utils";
 
 interface MetricDef {
   key: "beta" | "sharpe_ratio" | "volatility_pct" | "max_drawdown_pct" | "win_rate";
@@ -191,7 +191,7 @@ function PnlBar({ label, value, max }: { label: string; value: number; max: numb
   );
 }
 
-function PnlCard({ loading, realized, unrealized }: { loading: boolean; realized: number; unrealized: number }) {
+export function PnlCard({ loading, realized, unrealized }: { loading: boolean; realized: number; unrealized: number }) {
   const max = Math.max(Math.abs(realized), Math.abs(unrealized), 1);
 
   return (

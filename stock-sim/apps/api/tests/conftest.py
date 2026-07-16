@@ -1,6 +1,6 @@
 """Pytest fixtures for API tests: in-memory SQLite DB shared across connections."""
 
-from datetime import date
+from datetime import date, datetime, timezone
 
 import os
 
@@ -74,6 +74,10 @@ def test_user(test_db: Session) -> User:
         display_name="Alice",
         role="user",
         starting_cash=100_000.0,
+        # Fixture bypasses POST /auth/register (where skip_email_verification
+        # normally auto-verifies) — mark verified directly so login-flow tests
+        # against this fixture reflect a normal, usable account.
+        email_verified_at=datetime.now(timezone.utc),
     )
     test_db.add(user)
     test_db.commit()
@@ -89,6 +93,7 @@ def test_admin(test_db: Session) -> User:
         display_name="Admin",
         role="admin",
         starting_cash=100_000.0,
+        email_verified_at=datetime.now(timezone.utc),
     )
     test_db.add(admin)
     test_db.commit()

@@ -4,12 +4,21 @@ import { formatTicker } from "@/lib/utils";
 export const ROUTE_LABELS: Record<string, string> = {
   dashboard: "Dashboard",
   market: "Market",
+  trading: "Trading Desk",
   portfolio: "Portfolio",
   leaderboard: "Leaderboard",
   news: "News",
   simulation: "Simulation",
   admin: "Admin",
   companies: "Market",
+  holdings: "Holdings",
+  analytics: "Analytics",
+  dividends: "Dividends",
+  goals: "Goals",
+  watchlists: "Watchlists",
+  allocation: "Allocation",
+  performance: "Performance",
+  transactions: "Transactions",
 };
 
 /** Single "current page" label for a pathname — used by the activity logger. */

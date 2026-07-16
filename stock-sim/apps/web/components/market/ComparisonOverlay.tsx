@@ -1,12 +1,14 @@
 "use client";
 
 import * as React from "react";
+import { useQueries } from "@tanstack/react-query";
 import { X, BarChart3 } from "lucide-react";
 import { ChartSurface } from "@/lib/charts/core/ChartSurface";
 import { drawGrid } from "@/lib/charts/core/Grid";
-import { drawLineSeries, lineYDomain } from "@/lib/charts/series/LineSeries";
-import { cn, formatPct } from "@/lib/utils";
+import { drawLineSeries } from "@/lib/charts/series/LineSeries";
+import { get } from "@/lib/api/client";
 import type { EnrichedCompany } from "@/lib/market/types";
+import type { PriceHistoryItem } from "@/lib/api/types";
 
 export interface ComparisonOverlayProps {
   companies: EnrichedCompany[];
@@ -17,6 +19,13 @@ export interface ComparisonOverlayProps {
 
 const LINE_COLORS = ["#0ea5e9", "#f97316", "#8b5cf6", "#22c55e", "#ef4444", "#06b6d4"];
 
+/** % change from the first close in the window — same approach as PortfolioPerformancePanel's normalizePct. */
+function normalizePct(items: PriceHistoryItem[]): { time: number; value: number }[] {
+  if (items.length === 0) return [];
+  const base = Number(items[0].close) || 1;
+  return items.map((item, i) => ({ time: i, value: ((Number(item.close) - base) / base) * 100 }));
+}
+
 export function ComparisonOverlay({
   companies,
   selectedTickers,
@@ -25,32 +34,39 @@ export function ComparisonOverlay({
 }: ComparisonOverlayProps) {
   const [hover, setHover] = React.useState<{ x: number; y: number } | null>(null);
   const [activeLine, setActiveLine] = React.useState<number | null>(null);
+  const widthRef = React.useRef(0);
 
   const selected = React.useMemo(
     () => selectedTickers.map((t) => companies.find((c) => c.ticker === t)).filter(Boolean) as EnrichedCompany[],
     [companies, selectedTickers]
   );
 
+  // Same queryKey shape as usePriceHistory(ticker) (no timelineId/from/to) so this
+  // shares the react-query cache with the company detail page instead of double-fetching.
+  const historyQueries = useQueries({
+    queries: selected.map((c) => ({
+      queryKey: ["history", c.ticker, undefined, undefined, undefined],
+      queryFn: () => get<PriceHistoryItem[]>(`/companies/${c.ticker}/history`),
+      staleTime: 30_000,
+    })),
+  });
+
   const PADDING = React.useMemo(() => ({ top: 12, right: 16, bottom: 28, left: 56 }), []);
 
   const lines = React.useMemo(() => {
-    return selected.map((c) => {
-      const price = Number(c.current_price);
-      const prevClose = c.prev_close != null ? Number(c.prev_close) : price;
-      const base = prevClose || price || 1;
-      const points = [
-        { time: 0, value: 0 },
-        { time: 1, value: prevClose != null ? ((price - prevClose) / prevClose) * 100 : 0 },
-      ];
-      return { ticker: c.ticker, points, currentPrice: price, change: c.day_change_pct != null ? Number(c.day_change_pct) : 0 };
+    return selected.map((c, i) => {
+      const items = historyQueries[i]?.data ?? [];
+      const points = normalizePct(items);
+      const change = points.length > 0 ? points[points.length - 1].value : 0;
+      return { ticker: c.ticker, points, change };
     });
-  }, [selected]);
+  }, [selected, historyQueries]);
+
+  const maxPoints = React.useMemo(() => Math.max(1, ...lines.map((l) => l.points.length)), [lines]);
 
   const allValues = React.useMemo(() => {
     const vals: number[] = [];
-    for (const line of lines) {
-      for (const p of line.points) vals.push(p.value);
-    }
+    for (const line of lines) for (const p of line.points) vals.push(p.value);
     return vals;
   }, [lines]);
 
@@ -64,11 +80,11 @@ export function ComparisonOverlay({
 
   const render = React.useCallback(
     ({ ctx, width, height: h, dpr }: { ctx: CanvasRenderingContext2D; width: number; height: number; dpr: number }) => {
+      widthRef.current = width;
       if (lines.length === 0) return;
 
       drawGrid({ ctx, width, height: h, dpr, padding: PADDING });
 
-      const plotW = width - PADDING.left - PADDING.right;
       const [yMin, yMax] = yDomain;
       const ySpan = yMax - yMin || 1;
 
@@ -76,7 +92,6 @@ export function ComparisonOverlay({
       ctx.strokeStyle = "rgba(255,255,255,0.15)";
       ctx.lineWidth = 1;
       ctx.setLineDash([4, 4]);
-      const zeroY = PADDING.top + (plotW * 0) * (1 - (0 - yMin) / ySpan);
       const yForZero = PADDING.top + (h - PADDING.top - PADDING.bottom) * (1 - (0 - yMin) / ySpan);
       ctx.beginPath();
       ctx.moveTo(PADDING.left, yForZero);
@@ -86,6 +101,7 @@ export function ComparisonOverlay({
       ctx.restore();
 
       lines.forEach((line, i) => {
+        if (line.points.length < 2) return;
         const color = LINE_COLORS[i % LINE_COLORS.length];
         const isActive = activeLine === i;
         drawLineSeries({
@@ -134,14 +150,14 @@ export function ComparisonOverlay({
         ctx.restore();
       }
     },
-    [lines, yDomain, hover, activeLine]
+    [lines, yDomain, hover, activeLine, PADDING]
   );
 
   function handlePointerMove(x: number, y: number) {
     setHover({ x, y });
-    const plotW = 800 - PADDING.left - PADDING.right;
+    const plotW = Math.max(1, widthRef.current - PADDING.left - PADDING.right);
     const frac = (x - PADDING.left) / plotW;
-    const timeIdx = Math.round(frac);
+    const timeIdx = Math.round(frac * (maxPoints - 1));
     let closest = 0;
     let closestDist = Infinity;
     lines.forEach((line, i) => {
@@ -213,7 +229,7 @@ export function ComparisonOverlay({
         {render}
       </ChartSurface>
       <div className="mt-1 flex items-center justify-center gap-3">
-        <span className="text-micro text-text-tertiary">Day Change %</span>
+        <span className="text-micro text-text-tertiary">Cumulative Return %</span>
       </div>
     </div>
   );

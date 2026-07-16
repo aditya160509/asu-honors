@@ -356,3 +356,154 @@ def test_place_order_invalid_quantity(client, test_db, auth_headers):
         headers=auth_headers,
     )
     assert resp.status_code == 422
+
+
+# --- Phase 3: Trading Desk — order types, cancel, status lifecycle ---------
+
+
+def test_place_limit_buy_order_does_not_cross(client, test_db, test_company, test_portfolio, auth_headers):
+    """current_price is 100.0; a buy limit well below that shouldn't fill yet."""
+    resp = client.post(
+        "/api/v1/orders",
+        json={"ticker": "TST", "side": "buy", "order_type": "limit", "limit_price": 90.0, "quantity": 10},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["status"] == "open"
+    assert body["order_type"] == "limit"
+    assert body["price"] is None
+    assert body["fees"] is None
+
+    from db.models import Holding
+    holding = test_db.query(Holding).filter_by(portfolio_id=test_portfolio.id, company_id=1).first()
+    assert holding is None  # nothing executed yet
+
+    portfolio_resp = client.get("/api/v1/portfolio", headers=auth_headers)
+    assert float(portfolio_resp.json()["cash_balance"]) == 100_000.0  # untouched
+
+
+def test_place_limit_buy_order_crosses_immediately(client, test_db, test_company, test_portfolio, auth_headers):
+    """A buy limit at/above current_price (100.0) should fill right away."""
+    resp = client.post(
+        "/api/v1/orders",
+        json={"ticker": "TST", "side": "buy", "order_type": "limit", "limit_price": 105.0, "quantity": 10},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["status"] == "filled"
+    assert body["price"] is not None
+    assert float(body["price"]) <= 105.0  # never fills worse than the limit
+
+
+def test_place_limit_sell_order_does_not_cross(client, test_db, test_company, test_portfolio, auth_headers):
+    from db.models import Holding
+    test_db.add(Holding(portfolio_id=test_portfolio.id, company_id=1, quantity=10, avg_cost_basis=90.0))
+    test_db.commit()
+
+    resp = client.post(
+        "/api/v1/orders",
+        json={"ticker": "TST", "side": "sell", "order_type": "limit", "limit_price": 110.0, "quantity": 5},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 201
+    assert resp.json()["status"] == "open"
+
+    holding = test_db.query(Holding).filter_by(portfolio_id=test_portfolio.id, company_id=1).first()
+    assert float(holding.quantity) == 10  # untouched
+
+
+def test_limit_order_missing_price_rejected(client, test_db, test_company, test_portfolio, auth_headers):
+    resp = client.post(
+        "/api/v1/orders",
+        json={"ticker": "TST", "side": "buy", "order_type": "limit", "quantity": 10},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 422
+
+
+def test_cancel_open_order(client, test_db, test_company, test_portfolio, auth_headers):
+    create = client.post(
+        "/api/v1/orders",
+        json={"ticker": "TST", "side": "buy", "order_type": "limit", "limit_price": 90.0, "quantity": 10},
+        headers=auth_headers,
+    )
+    order_id = create.json()["id"]
+
+    resp = client.delete(f"/api/v1/orders/{order_id}", headers=auth_headers)
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "cancelled"
+
+
+def test_cancel_filled_order_conflict(client, test_db, test_company, test_portfolio, auth_headers):
+    create = client.post(
+        "/api/v1/orders",
+        json={"ticker": "TST", "side": "buy", "quantity": 10},
+        headers=auth_headers,
+    )
+    order_id = create.json()["id"]  # market order — already filled
+
+    resp = client.delete(f"/api/v1/orders/{order_id}", headers=auth_headers)
+    assert resp.status_code == 409
+
+
+def test_cancel_order_not_found(client, test_db, auth_headers):
+    resp = client.delete("/api/v1/orders/999", headers=auth_headers)
+    assert resp.status_code == 404
+
+
+def test_get_orders_status_filter(client, test_db, test_company, test_portfolio, auth_headers):
+    client.post(
+        "/api/v1/orders",
+        json={"ticker": "TST", "side": "buy", "order_type": "limit", "limit_price": 90.0, "quantity": 10},
+        headers=auth_headers,
+    )
+    client.post("/api/v1/orders", json={"ticker": "TST", "side": "buy", "quantity": 5}, headers=auth_headers)
+
+    open_resp = client.get("/api/v1/orders?status=open", headers=auth_headers)
+    assert open_resp.status_code == 200
+    assert len(open_resp.json()) == 1
+    assert open_resp.json()[0]["status"] == "open"
+
+    filled_resp = client.get("/api/v1/orders?status=filled", headers=auth_headers)
+    assert len(filled_resp.json()) == 1
+
+    all_resp = client.get("/api/v1/orders", headers=auth_headers)
+    assert len(all_resp.json()) == 2
+
+
+def test_check_and_fill_limit_orders_fills_when_price_crosses(test_db, test_company, test_portfolio, test_user):
+    """Unit-level test of the fill-on-advance hook, independent of the full
+    simulation engine: place a non-crossing limit order, move current_price
+    past the limit (simulating what a day-advance would do), and confirm
+    check_and_fill_limit_orders fills it."""
+    from apps.api.schemas import OrderRequest
+    from apps.api.services.trade_service import check_and_fill_limit_orders, place_order
+
+    place_order(
+        test_db,
+        test_user,
+        OrderRequest(ticker="TST", side="buy", order_type="limit", limit_price=90.0, quantity=10, timeline_id=1),
+    )
+    test_db.commit()
+
+    from db.models import Order
+    order = test_db.query(Order).filter_by(portfolio_id=test_portfolio.id).first()
+    assert order.status == "open"
+
+    test_company.current_price = 88.0  # price now crosses the buy limit of 90
+    test_db.commit()
+
+    filled = check_and_fill_limit_orders(test_db, timeline_id=1)
+    test_db.commit()
+    assert filled == 1
+
+    test_db.refresh(order)
+    assert order.status == "filled"
+    assert float(order.avg_fill_price) <= 90.0
+
+    from db.models import Holding
+    holding = test_db.query(Holding).filter_by(portfolio_id=test_portfolio.id, company_id=1).first()
+    assert holding is not None
+    assert float(holding.quantity) == 10

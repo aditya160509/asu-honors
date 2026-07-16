@@ -19,7 +19,7 @@ export function StatusBar() {
   const tick = useAnimatedCounter(simState?.tick_count ?? 0, (v) => Math.round(v).toString());
 
   return (
-    <div className="mer-surface-lit flex h-7 shrink-0 items-center gap-4 border-t border-mer-hairline bg-mer-surface-1 px-4 text-micro text-mer-ink-tertiary">
+    <div className="mer-surface-lit flex h-7 shrink-0 items-center gap-4 border-t border-[color:var(--mer-stroke-hairline)] bg-mer-surface-1 px-4 text-micro text-mer-ink-tertiary">
       <span className="flex items-center gap-1.5 shrink-0">
         <span className="relative flex h-1.5 w-1.5">
           <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-positive opacity-60" />
