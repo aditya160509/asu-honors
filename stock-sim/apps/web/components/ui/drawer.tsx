@@ -11,7 +11,7 @@ export const DrawerTrigger = DialogPrimitive.Trigger;
 export const DrawerClose = DialogPrimitive.Close;
 
 const drawerContentVariants = cva(
-  "fixed z-50 flex flex-col border-mer-hairline bg-mer-surface-2 p-5 shadow-mer-overlay data-[state=open]:animate-in data-[state=closed]:animate-out",
+  "fixed z-50 flex flex-col border-[color:var(--mer-stroke-hairline)] bg-mer-surface-2 p-5 shadow-mer-overlay data-[state=open]:animate-in data-[state=closed]:animate-out",
   {
     variants: {
       side: {

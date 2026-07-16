@@ -29,7 +29,7 @@ export function Header() {
 
   return (
     <header className="flex flex-col shrink-0">
-      <div className="mer-surface-lit flex h-11 items-center gap-2 border-b border-mer-hairline bg-mer-surface-1 px-4">
+      <div className="mer-surface-lit flex h-11 items-center gap-2 border-b border-[color:var(--mer-stroke-hairline)] bg-mer-surface-1 px-4">
         <SidebarMobileTrigger />
         <WorkspaceSwitcher />
         <div className="flex-1" />
@@ -38,7 +38,7 @@ export function Header() {
         <CvdModeSelector />
       </div>
 
-      <div className="flex h-8 items-center gap-3 border-b border-mer-hairline bg-mer-surface-1 px-4 text-micro">
+      <div className="flex h-8 items-center gap-3 border-b border-[color:var(--mer-stroke-hairline)] bg-mer-surface-1 px-4 text-micro">
         {cycle ? (
           <>
             <CycleIndicator phase={cycle.cycle_phase} />
@@ -83,7 +83,7 @@ function ExpandingSearchTrigger() {
       <div
         ref={containerRef}
         className={cn(
-          "flex h-8 items-center gap-2 overflow-hidden rounded-mer-sm border border-mer-hairline bg-mer-surface-2 text-mer-ink-tertiary transition-colors",
+          "flex h-8 items-center gap-2 overflow-hidden rounded-mer-sm border border-[color:var(--mer-stroke-hairline)] bg-mer-surface-2 text-mer-ink-tertiary transition-colors",
           expanded ? "w-56 justify-start px-3" : "w-8 justify-center"
         )}
       >
