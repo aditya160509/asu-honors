@@ -150,7 +150,9 @@ function PnlBar({ label, value, max }: { label: string; value: number; max: numb
   );
 }
 
-function PnlCard({ loading, realized, unrealized }: { loading: boolean; realized: number; unrealized: number }) {
+/** Exported for reuse as the Trading Desk's Position Summary card (Phase 3) —
+ * same "realized/unrealized split, diverging bar centered on zero" P&L pattern. */
+export function PnlCard({ loading, realized, unrealized }: { loading: boolean; realized: number; unrealized: number }) {
   const max = Math.max(Math.abs(realized), Math.abs(unrealized), 1);
   return (
     <DashboardPanel eyebrow="Profit & Loss" title="Realized vs. Unrealized" icon={Activity}>

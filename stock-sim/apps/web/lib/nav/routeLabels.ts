@@ -4,6 +4,7 @@ import { formatTicker } from "@/lib/utils";
 export const ROUTE_LABELS: Record<string, string> = {
   dashboard: "Dashboard",
   market: "Market",
+  trading: "Trading Desk",
   portfolio: "Portfolio",
   leaderboard: "Leaderboard",
   news: "News",

@@ -1,15 +1,15 @@
-"""Order validation, execution, and transaction ledger management."""
+"""Order lifecycle (Phase 3 — Trading Desk), execution, and transaction ledger management."""
 
 import logging
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from apps.api.exceptions import InsufficientFundsError, InsufficientSharesError, NotFoundError
+from apps.api.exceptions import ConflictError, InsufficientFundsError, InsufficientSharesError, NotFoundError
 from apps.api.schemas import OrderRequest, OrderResponse, PortfolioAnalyticsResponse, SectorAllocation
-from db.models import Company, ConfigParameter, Holding, Industry, Portfolio, SimulationState, Transaction, User
+from db.models import Company, ConfigParameter, Holding, Industry, Order, Portfolio, SimulationState, Transaction, User
 from engine.liquidity import kyle_lambda_from_liquidity, kyle_lambda_impact
 
 logger = logging.getLogger(__name__)
@@ -41,6 +41,38 @@ def _compute_impact(company: Company, quantity: int) -> tuple[Decimal, Decimal]:
     lambda_val = kyle_lambda_from_liquidity(liq_score)
     impact = kyle_lambda_impact(float(quantity), lambda_val)
     return Decimal(str(impact)), Decimal(str(lambda_val))
+
+
+def _compute_execution_price(company: Company, side: str, quantity: int) -> tuple[Decimal, Decimal]:
+    """Kyle-lambda impact-adjusted execution price, before any limit-price clamp.
+    Returns (execution_price, impact_applied)."""
+    current_price = Decimal(str(company.current_price))
+    impact, _lambda_val = _compute_impact(company, quantity)
+    # Cap impact so a sell can never clear at <= 0 and a buy's impact never
+    # exceeds the current price; an unbounded impact would otherwise let the
+    # order silently reset to the undiscounted price, defeating the impact
+    # model entirely for large orders.
+    max_impact = current_price * Decimal("0.50") if side == "sell" else current_price * Decimal("0.99")
+    impact = min(impact, max_impact)
+    execution_price = current_price + (impact if side == "buy" else -impact)
+    return execution_price, impact
+
+
+def _clamp_to_limit(side: str, execution_price: Decimal, limit_price: Decimal) -> Decimal:
+    """A limit order never fills worse than its own limit, once crossed."""
+    return min(execution_price, limit_price) if side == "buy" else max(execution_price, limit_price)
+
+
+def _compute_fees(db: Session, quantity: int, execution_price: Decimal) -> Decimal:
+    fee_rate = _get_fee_rate(db)
+    return (Decimal(quantity) * execution_price * Decimal(str(fee_rate))).quantize(Decimal("0.0001"))
+
+
+def _limit_crosses(side: str, limit_price: Optional[Decimal], current_price: Decimal) -> bool:
+    if limit_price is None:
+        return False
+    limit_price = Decimal(str(limit_price))
+    return current_price <= limit_price if side == "buy" else current_price >= limit_price
 
 
 def _validate_order(
@@ -118,8 +150,76 @@ def _execute_sell(
     return realized_pnl
 
 
+def _fill_order(
+    db: Session,
+    order: Order,
+    portfolio: Portfolio,
+    holding: Optional[Holding],
+    company: Company,
+    execution_price: Decimal,
+    fees: Decimal,
+    impact: Decimal,
+    sim_date: date,
+) -> Optional[Decimal]:
+    """Executes the cash/holding mutation + Transaction write for an order that
+    is crossing right now (market, or a limit order whose price condition is
+    met) — shared by immediate fills in place_order and later fills from
+    check_and_fill_limit_orders."""
+    realized_pnl: Optional[Decimal] = None
+    quantity = int(order.quantity)
+    if order.side == "buy":
+        _execute_buy(db, portfolio, holding, company, quantity, execution_price, fees)
+    else:
+        realized_pnl = _execute_sell(db, portfolio, holding, quantity, execution_price, fees)
+
+    txn = Transaction(
+        portfolio_id=portfolio.id,
+        company_id=company.id,
+        order_id=order.id,
+        sim_date=sim_date,
+        side=order.side,
+        quantity=quantity,
+        price=execution_price,
+        fees=fees,
+        impact_applied=impact,
+        realized_pnl=realized_pnl,
+    )
+    db.add(txn)
+
+    order.status = "filled"
+    order.filled_quantity = quantity
+    order.avg_fill_price = float(execution_price)
+    order.fees = float(fees)
+    order.filled_at = datetime.now(timezone.utc)
+
+    db.flush()
+    return realized_pnl
+
+
+def _order_to_response(order: Order, ticker: str, realized_pnl: Optional[Decimal] = None) -> OrderResponse:
+    return OrderResponse(
+        id=order.id,
+        portfolio_id=order.portfolio_id,
+        company_id=order.company_id,
+        ticker=ticker,
+        sim_date=order.sim_date,
+        side=order.side,
+        order_type=order.order_type,
+        status=order.status,
+        quantity=int(order.quantity),
+        filled_quantity=int(order.filled_quantity),
+        limit_price=Decimal(str(order.limit_price)) if order.limit_price is not None else None,
+        price=Decimal(str(order.avg_fill_price)) if order.avg_fill_price is not None else None,
+        fees=Decimal(str(order.fees)) if order.fees is not None else None,
+        realized_pnl=realized_pnl,
+    )
+
+
 def place_order(db: Session, user: User, request: OrderRequest) -> OrderResponse:
-    """Full order lifecycle: validate -> execute -> write -> return."""
+    """Full order lifecycle: validate -> create Order -> fill immediately if
+    market (or a limit that already crosses) -> return. A non-crossing limit
+    order is persisted 'open' and left untouched (no cash/holding change) until
+    check_and_fill_limit_orders fills it or the user cancels it."""
     timeline_id = request.timeline_id
     company = db.query(Company).filter_by(ticker=request.ticker.upper()).first()
     if company is None:
@@ -132,55 +232,128 @@ def place_order(db: Session, user: User, request: OrderRequest) -> OrderResponse
         raise NotFoundError("Portfolio not found")
 
     holding = db.query(Holding).filter_by(portfolio_id=portfolio.id, company_id=company.id).first()
-
     current_price = Decimal(str(company.current_price))
-    impact, _lambda_val = _compute_impact(company, request.quantity)
-    # Cap impact so a sell can never clear at <= 0 and a buy's impact never
-    # exceeds the current price; an unbounded impact would otherwise let the
-    # order silently reset to the undiscounted price, defeating the impact
-    # model entirely for large orders.
-    max_impact = current_price * Decimal("0.50") if request.side == "sell" else current_price * Decimal("0.99")
-    impact = min(impact, max_impact)
-    execution_price = current_price + (impact if request.side == "buy" else -impact)
-
-    fee_rate = _get_fee_rate(db)
-    fees = (Decimal(request.quantity) * execution_price * Decimal(str(fee_rate))).quantize(Decimal("0.0001"))
-
-    _validate_order(portfolio, holding, request.side, request.quantity, execution_price, fees)
-
     sim_date = _current_sim_date(db, timeline_id)
-    realized_pnl: Optional[Decimal] = None
 
-    if request.side == "buy":
-        _execute_buy(db, portfolio, holding, company, request.quantity, execution_price, fees)
-    else:
-        realized_pnl = _execute_sell(db, portfolio, holding, request.quantity, execution_price, fees)
-
-    txn = Transaction(
+    order = Order(
         portfolio_id=portfolio.id,
         company_id=company.id,
         sim_date=sim_date,
         side=request.side,
+        order_type=request.order_type,
         quantity=request.quantity,
-        price=execution_price,
-        fees=fees,
-        impact_applied=impact,
-        realized_pnl=realized_pnl,
+        limit_price=float(request.limit_price) if request.limit_price is not None else None,
+        status="open",
+        filled_quantity=0,
     )
-    db.add(txn)
+    db.add(order)
+    db.flush()  # assigns order.id before any Transaction can reference it
+
+    crosses_now = request.order_type == "market" or _limit_crosses(request.side, request.limit_price, current_price)
+
+    realized_pnl: Optional[Decimal] = None
+    if crosses_now:
+        execution_price, impact = _compute_execution_price(company, request.side, request.quantity)
+        if request.order_type == "limit":
+            execution_price = _clamp_to_limit(request.side, execution_price, Decimal(str(request.limit_price)))
+        fees = _compute_fees(db, request.quantity, execution_price)
+        _validate_order(portfolio, holding, request.side, request.quantity, execution_price, fees)
+        realized_pnl = _fill_order(db, order, portfolio, holding, company, execution_price, fees, impact, sim_date)
+    else:
+        # Non-crossing limit order: pre-check buying power/shares against the
+        # limit price itself (the worst case the user has committed to). Cash
+        # is NOT reserved/escrowed for open orders in this v1 — a user could
+        # place several limit orders that collectively exceed current cash;
+        # check_and_fill_limit_orders re-validates at fill time and simply
+        # leaves an order open (rather than erroring) if funds are no longer
+        # sufficient by then.
+        limit_price = Decimal(str(request.limit_price))
+        fee_estimate = _compute_fees(db, request.quantity, limit_price)
+        _validate_order(portfolio, holding, request.side, request.quantity, limit_price, fee_estimate)
+
+    return _order_to_response(order, company.ticker, realized_pnl)
+
+
+def cancel_order(db: Session, user: User, order_id: int) -> OrderResponse:
+    order = (
+        db.query(Order)
+        .join(Portfolio, Portfolio.id == Order.portfolio_id)
+        .filter(Order.id == order_id, Portfolio.user_id == user.id)
+        .first()
+    )
+    if order is None:
+        raise NotFoundError("Order not found")
+    if order.status != "open":
+        raise ConflictError(f"Order is already {order.status} — cannot cancel")
+
+    order.status = "cancelled"
+    order.cancelled_at = datetime.now(timezone.utc)
     db.flush()
 
-    return OrderResponse(
-        id=txn.id,
-        portfolio_id=portfolio.id,
-        company_id=company.id,
-        sim_date=sim_date,
-        side=request.side,
-        quantity=request.quantity,
-        price=execution_price,
-        fees=fees,
-        realized_pnl=realized_pnl,
+    company = db.query(Company).filter_by(id=order.company_id).first()
+    return _order_to_response(order, company.ticker if company else "")
+
+
+def list_orders(
+    db: Session, user: User, timeline_id: int, status: Optional[str] = None
+) -> list[OrderResponse]:
+    query = (
+        db.query(Order)
+        .join(Portfolio, Portfolio.id == Order.portfolio_id)
+        .filter(Portfolio.user_id == user.id, Portfolio.timeline_id == timeline_id)
     )
+    if status is not None:
+        query = query.filter(Order.status == status)
+    orders = query.order_by(Order.created_at.desc()).all()
+
+    company_ids = {o.company_id for o in orders}
+    companies = {c.id: c for c in db.query(Company).filter(Company.id.in_(company_ids)).all()} if company_ids else {}
+    return [
+        _order_to_response(o, companies[o.company_id].ticker if o.company_id in companies else "")
+        for o in orders
+    ]
+
+
+def check_and_fill_limit_orders(db: Session, timeline_id: int) -> int:
+    """Called once per advance_simulation call, against the end-of-advance
+    price (not re-checked against every intermediate day of a multi-day
+    advance — see Phase 3 plan notes). Fills any open limit order whose limit
+    price has been crossed. Returns the number of orders filled."""
+    open_orders = (
+        db.query(Order)
+        .join(Portfolio, Portfolio.id == Order.portfolio_id)
+        .filter(Portfolio.timeline_id == timeline_id, Order.status == "open", Order.order_type == "limit")
+        .all()
+    )
+
+    filled_count = 0
+    sim_date = _current_sim_date(db, timeline_id)
+    for order in open_orders:
+        company = db.query(Company).filter_by(id=order.company_id).first()
+        if company is None or company.current_price is None:
+            continue
+        current_price = Decimal(str(company.current_price))
+        if not _limit_crosses(order.side, order.limit_price, current_price):
+            continue
+
+        portfolio = db.query(Portfolio).filter_by(id=order.portfolio_id).first()
+        holding = db.query(Holding).filter_by(portfolio_id=portfolio.id, company_id=company.id).first()
+        execution_price, impact = _compute_execution_price(company, order.side, int(order.quantity))
+        execution_price = _clamp_to_limit(order.side, execution_price, Decimal(str(order.limit_price)))
+        fees = _compute_fees(db, int(order.quantity), execution_price)
+
+        try:
+            _validate_order(portfolio, holding, order.side, int(order.quantity), execution_price, fees)
+        except (InsufficientFundsError, InsufficientSharesError):
+            # Portfolio state changed since the order was placed — leave it
+            # open rather than silently cancelling; the user can cancel
+            # manually if they no longer want it.
+            continue
+
+        _fill_order(db, order, portfolio, holding, company, execution_price, fees, impact, sim_date)
+        filled_count += 1
+
+    return filled_count
 
 
 def get_portfolio_analytics(db: Session, user: User, timeline_id: int) -> PortfolioAnalyticsResponse:

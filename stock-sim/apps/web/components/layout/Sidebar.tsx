@@ -4,6 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  ArrowLeftRight,
   BarChart3,
   ChevronDown,
   Home,
@@ -59,7 +60,13 @@ interface NavGroup {
 
 const NAV_GROUPS: NavGroup[] = [
   { eyebrow: "Overview", items: [{ href: "/dashboard", label: "Dashboard", icon: Home }] },
-  { eyebrow: "Markets", items: [{ href: "/market", label: "Market", icon: BarChart3 }] },
+  {
+    eyebrow: "Markets",
+    items: [
+      { href: "/market", label: "Market", icon: BarChart3 },
+      { href: "/trading", label: "Trading Desk", icon: ArrowLeftRight },
+    ],
+  },
   {
     eyebrow: "Portfolio",
     items: [

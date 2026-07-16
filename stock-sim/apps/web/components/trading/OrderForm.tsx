@@ -3,12 +3,13 @@
 import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { usePlaceOrder } from "@/lib/api/hooks/useOrders";
 import { formatPrice } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 import { DashboardPanel } from "@/components/dashboard/primitives/DashboardPanel";
 import { MER_HAIRLINE } from "@/components/dashboard/primitives/tokens";
-import type { OrderSide } from "@/lib/api/types";
+import type { OrderSide, OrderType } from "@/lib/api/types";
 
 export interface OrderFormProps {
   ticker: string;
@@ -30,22 +31,31 @@ export function OrderForm({
   onOrderPlaced,
 }: OrderFormProps) {
   const [side, setSide] = React.useState<OrderSide>("buy");
+  const [orderType, setOrderType] = React.useState<OrderType>("market");
   const [quantity, setQuantity] = React.useState(0);
+  const [limitPrice, setLimitPrice] = React.useState<number | "">("");
   const [showConfirm, setShowConfirm] = React.useState(false);
   const [pulse, setPulse] = React.useState(false);
   const placeOrder = usePlaceOrder();
 
   const priceUnavailable = currentPrice == null || currentPrice <= 0;
-  const maxBuyQty = priceUnavailable ? 0 : Math.floor(cashBalance / currentPrice);
+  // Limit orders are evaluated against the limit price itself (the worst case
+  // the user has committed to) once one is entered — matches how the backend
+  // pre-validates a non-crossing limit order's buying power.
+  const referencePrice = orderType === "limit" && limitPrice ? limitPrice : currentPrice;
+
+  const maxBuyQty = priceUnavailable || !referencePrice ? 0 : Math.floor(cashBalance / referencePrice);
   const maxQty = isPortfolioLoading ? Number.MAX_SAFE_INTEGER : side === "buy" ? maxBuyQty : sharesHeld;
 
-  const estimatedTotal = currentPrice ? quantity * currentPrice : 0;
+  const estimatedTotal = referencePrice ? quantity * referencePrice : 0;
+  const limitPriceMissing = orderType === "limit" && (limitPrice === "" || limitPrice <= 0);
   const insufficientFunds = !isPortfolioLoading && side === "buy" && estimatedTotal > cashBalance;
   const noSharesToSell = !isPortfolioLoading && side === "sell" && sharesHeld <= 0;
 
   const disabled =
     priceUnavailable ||
     quantity <= 0 ||
+    limitPriceMissing ||
     insufficientFunds ||
     noSharesToSell ||
     isPortfolioLoading ||
@@ -55,19 +65,26 @@ export function OrderForm({
     return Math.max(0, Math.min(maxQty, n));
   }
 
-  function handleSubmit() {
+  function handleSubmitClick() {
     if (disabled) return;
-    if (!showConfirm) {
-      setShowConfirm(true);
-      return;
-    }
+    setShowConfirm(true);
+  }
+
+  function handleConfirm() {
     placeOrder.mutate(
-      { ticker, side, quantity },
+      {
+        ticker,
+        side,
+        order_type: orderType,
+        quantity,
+        limit_price: orderType === "limit" ? Number(limitPrice) : undefined,
+      },
       {
         onSuccess: () => {
           setPulse(true);
           setTimeout(() => setPulse(false), 200);
           setQuantity(0);
+          setLimitPrice("");
           setShowConfirm(false);
           onOrderPlaced?.();
         },
@@ -81,10 +98,7 @@ export function OrderForm({
         <div className={cn("flex overflow-hidden rounded-mer-sm border", MER_HAIRLINE)}>
           <button
             type="button"
-            onClick={() => {
-              setSide("buy");
-              setShowConfirm(false);
-            }}
+            onClick={() => setSide("buy")}
             className={cn(
               "h-8 flex-1 text-body font-medium transition-colors",
               "focus-visible:outline focus-visible:outline-2 focus-visible:outline-[color:var(--mer-accent-500)] focus-visible:outline-offset-[-2px]",
@@ -95,10 +109,7 @@ export function OrderForm({
           </button>
           <button
             type="button"
-            onClick={() => {
-              setSide("sell");
-              setShowConfirm(false);
-            }}
+            onClick={() => setSide("sell")}
             className={cn(
               "h-8 flex-1 text-body font-medium transition-colors",
               "focus-visible:outline focus-visible:outline-2 focus-visible:outline-[color:var(--mer-accent-500)] focus-visible:outline-offset-[-2px]",
@@ -109,10 +120,47 @@ export function OrderForm({
           </button>
         </div>
 
+        <div className={cn("flex overflow-hidden rounded-mer-sm border", MER_HAIRLINE)}>
+          <button
+            type="button"
+            onClick={() => setOrderType("market")}
+            className={cn(
+              "h-7 flex-1 text-small font-medium transition-colors",
+              orderType === "market" ? "bg-mer-surface-4 text-mer-ink-primary" : "text-mer-ink-tertiary hover:text-mer-ink-secondary"
+            )}
+          >
+            Market
+          </button>
+          <button
+            type="button"
+            onClick={() => setOrderType("limit")}
+            className={cn(
+              "h-7 flex-1 text-small font-medium transition-colors",
+              orderType === "limit" ? "bg-mer-surface-4 text-mer-ink-primary" : "text-mer-ink-tertiary hover:text-mer-ink-secondary"
+            )}
+          >
+            Limit
+          </button>
+        </div>
+
         {priceUnavailable ? (
           <p className="text-small text-mer-ink-tertiary">No price available.</p>
         ) : (
           <>
+            {orderType === "limit" && (
+              <div className="relative">
+                <Input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={limitPrice}
+                  onChange={(e) => setLimitPrice(e.target.value === "" ? "" : Number(e.target.value))}
+                  placeholder={`Limit price (current ${formatPrice(currentPrice)})`}
+                  className="num"
+                />
+              </div>
+            )}
+
             <div className="flex items-center gap-2">
               <Button variant="outline" size="icon" onClick={() => setQuantity((q) => clampQty(q - 1))}>
                 −
@@ -151,8 +199,8 @@ export function OrderForm({
 
             <div className="flex flex-col gap-1 text-small">
               <div className="flex justify-between">
-                <span className="text-mer-ink-secondary">Est. price</span>
-                <span className="num text-mer-ink-primary">{formatPrice(currentPrice)}</span>
+                <span className="text-mer-ink-secondary">{orderType === "limit" ? "Limit price" : "Est. price"}</span>
+                <span className="num text-mer-ink-primary">{formatPrice(referencePrice)}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-mer-ink-secondary">Total</span>
@@ -175,34 +223,64 @@ export function OrderForm({
             {noSharesToSell && <p className="text-micro text-negative">You don&apos;t hold any {ticker}</p>}
             {quantity >= maxQty && maxQty > 0 && <p className="text-micro text-mer-ink-tertiary">Max: {maxQty}</p>}
 
-            {showConfirm && !disabled && (
-              <div
-                className={cn(
-                  "animate-in fade-in slide-in-from-bottom-1 rounded-mer-sm border bg-mer-surface-3 p-2 text-small duration-150",
-                  MER_HAIRLINE
-                )}
-              >
-                Confirm: {side === "buy" ? "Buy" : "Sell"} {quantity} {ticker} @ {formatPrice(currentPrice)} ={" "}
-                {formatPrice(estimatedTotal)}
-              </div>
-            )}
-
             {placeOrder.isError && <p className="text-micro text-negative">{(placeOrder.error as Error)?.message ?? "Order failed"}</p>}
 
-            <Button
-              variant={side === "buy" ? "buy" : "sell"}
-              disabled={disabled}
-              onClick={handleSubmit}
-            >
-              {placeOrder.isPending
-                ? "Submitting…"
-                : showConfirm
-                  ? `Confirm ${side === "buy" ? "Buy" : "Sell"}`
-                  : `${side === "buy" ? "Buy" : "Sell"} ${quantity || ""} ${ticker}`}
+            <Button variant={side === "buy" ? "buy" : "sell"} disabled={disabled} onClick={handleSubmitClick}>
+              {`${side === "buy" ? "Buy" : "Sell"} ${quantity || ""} ${ticker}`}
             </Button>
           </>
         )}
       </div>
+
+      {/* Spec-mandated "institutional read-back" pattern: restate the trade in a
+          raised well with mono figures before it actually submits. */}
+      <Dialog open={showConfirm} onOpenChange={setShowConfirm}>
+        <DialogContent>
+          <DialogTitle>Confirm {side === "buy" ? "Buy" : "Sell"} Order</DialogTitle>
+          <DialogDescription>Review the order before it&apos;s placed.</DialogDescription>
+          <div className={cn("mt-3 flex flex-col gap-2 rounded-mer-sm border bg-mer-surface-3 p-3 text-small", MER_HAIRLINE)}>
+            <div className="flex justify-between">
+              <span className="text-mer-ink-secondary">Ticker</span>
+              <span className="num font-semibold text-mer-ink-primary">{ticker}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-mer-ink-secondary">Side</span>
+              <span className={cn("num font-semibold", side === "buy" ? "text-positive" : "text-negative")}>
+                {side === "buy" ? "Buy" : "Sell"}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-mer-ink-secondary">Type</span>
+              <span className="num text-mer-ink-primary">{orderType === "market" ? "Market" : "Limit"}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-mer-ink-secondary">Quantity</span>
+              <span className="num text-mer-ink-primary">{quantity}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-mer-ink-secondary">{orderType === "limit" ? "Limit price" : "Est. price"}</span>
+              <span className="num text-mer-ink-primary">{formatPrice(referencePrice)}</span>
+            </div>
+            <div className={cn("flex justify-between border-t pt-2", MER_HAIRLINE)}>
+              <span className="text-mer-ink-secondary">Est. total</span>
+              <span className="num text-base font-semibold text-mer-ink-primary">{formatPrice(estimatedTotal)}</span>
+            </div>
+          </div>
+          <div className="mt-4 flex gap-2">
+            <Button variant="outline" className="flex-1" onClick={() => setShowConfirm(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant={side === "buy" ? "buy" : "sell"}
+              className="flex-1"
+              disabled={placeOrder.isPending}
+              onClick={handleConfirm}
+            >
+              {placeOrder.isPending ? "Submitting…" : `Confirm ${side === "buy" ? "Buy" : "Sell"}`}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </DashboardPanel>
   );
 }

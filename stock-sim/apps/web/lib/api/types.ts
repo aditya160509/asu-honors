@@ -153,11 +153,15 @@ export interface CycleStateResponse {
 // ---------------------------------------------------------------------------
 
 export type OrderSide = "buy" | "sell";
+export type OrderType = "market" | "limit";
+export type OrderStatus = "open" | "filled" | "cancelled";
 
 export interface OrderRequest {
   ticker: string;
   side: OrderSide;
+  order_type?: OrderType;
   quantity: number;
+  limit_price?: number;
   timeline_id?: number;
 }
 
@@ -165,11 +169,17 @@ export interface OrderResponse {
   id: number;
   portfolio_id: number;
   company_id: number;
+  ticker: string;
   sim_date: string;
   side: string;
+  order_type: OrderType;
+  status: OrderStatus;
   quantity: number;
-  price: number;
-  fees: number;
+  filled_quantity: number;
+  limit_price: number | null;
+  /** Avg fill price / fees — null while the order is still open. */
+  price: number | null;
+  fees: number | null;
   realized_pnl: number | null;
 }
 

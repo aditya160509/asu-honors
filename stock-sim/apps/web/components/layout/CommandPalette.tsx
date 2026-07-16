@@ -4,6 +4,7 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import {
   Activity,
+  ArrowLeftRight,
   Bell,
   BarChart3,
   Coins,
@@ -43,6 +44,7 @@ interface NavCommand {
 const NAV_COMMANDS: NavCommand[] = [
   { label: "Go to Dashboard", href: "/dashboard", icon: Home },
   { label: "Go to Market", href: "/market", icon: BarChart3 },
+  { label: "Go to Trading Desk", href: "/trading", icon: ArrowLeftRight },
   { label: "Go to Portfolio", href: "/portfolio", icon: Wallet },
   { label: "Go to Holdings", href: "/portfolio/holdings", icon: Layers },
   { label: "Go to Analytics", href: "/portfolio/analytics", icon: Activity },
