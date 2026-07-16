@@ -178,7 +178,8 @@ export function PortfolioPerformancePanel() {
           <button
             type="button"
             onClick={() => setCompare((c) => !c)}
-            aria-pressed={compare}
+            aria-checked={compare}
+            aria-label="Compare portfolio performance with market"
             style={compare ? toggleTrackActive : toggleTrack}
             role="switch"
           >
