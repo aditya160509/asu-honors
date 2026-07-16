@@ -10,6 +10,7 @@ import { useSimState } from "@/lib/api/hooks/useSimulation";
 import { useMarketGrid } from "@/lib/api/hooks/useMarket";
 import { formatPrice, formatPct, formatLarge } from "@/lib/utils";
 import type { PriceHistoryItem } from "@/lib/api/types";
+import type { IndicatorKey } from "@/components/charts/PriceChart";
 
 const TIME_RANGES = [
   { label: "1D", days: 1 },
@@ -21,6 +22,53 @@ const TIME_RANGES = [
   { label: "1Y", days: 365 },
   { label: "ALL", days: null },
 ] as const;
+
+const INDICATOR_OPTIONS: { key: IndicatorKey; label: string }[] = [
+  { key: "sma20", label: "SMA 20" },
+  { key: "sma50", label: "SMA 50" },
+  { key: "ema12", label: "EMA 12" },
+];
+
+function toNumber(value: number | string | null | undefined, fallback = 0): number {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+function TerminalButton({
+  active,
+  children,
+  onClick,
+  title,
+}: {
+  active?: boolean;
+  children: React.ReactNode;
+  onClick: () => void;
+  title?: string;
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      onClick={onClick}
+      style={{
+        height: 28,
+        padding: "0 10px",
+        border: "1px solid",
+        borderColor: active ? "var(--mer-stroke-accent)" : "var(--mer-stroke-hairline)",
+        borderRadius: "var(--mer-radius-sm)",
+        background: active ? "rgba(62, 111, 224, 0.16)" : "var(--mer-surface-2)",
+        color: active ? "var(--mer-accent-300)" : "var(--mer-ink-secondary)",
+        fontSize: "var(--fs-micro)",
+        fontWeight: 700,
+        letterSpacing: "0.04em",
+        textTransform: "uppercase",
+        cursor: "pointer",
+      }}
+    >
+      {children}
+    </button>
+  );
+}
 
 interface MiniSparklineProps {
   data: PriceHistoryItem[];
@@ -77,6 +125,8 @@ export function SimulationTradingView() {
   const { data: grid } = useMarketGrid(simState?.timeline_id);
   const [selectedTicker, setSelectedTicker] = React.useState<string | null>(null);
   const [timeRangeIdx, setTimeRangeIdx] = React.useState(7); // default ALL
+  const [indicators, setIndicators] = React.useState<IndicatorKey[]>(["sma20"]);
+  const [showVolumeProfile, setShowVolumeProfile] = React.useState(true);
   const chartContainerRef = React.useRef<HTMLDivElement>(null);
   const [chartHeight, setChartHeight] = React.useState(500);
 
@@ -123,9 +173,21 @@ export function SimulationTradingView() {
 
   // Recent OHLC for header
   const latestPrice = priceHistory && priceHistory.length > 0 ? priceHistory[priceHistory.length - 1] : null;
-  const prevClose = priceHistory && priceHistory.length > 1 ? priceHistory[priceHistory.length - 2].close : null;
-  const dayChange = latestPrice && prevClose ? ((latestPrice.close - prevClose) / prevClose) * 100 : currentCompany?.day_change_pct ?? 0;
+  const prevClose = priceHistory && priceHistory.length > 1 ? toNumber(priceHistory[priceHistory.length - 2].close) : null;
+  const latestClose = latestPrice ? toNumber(latestPrice.close) : null;
+  const dayChange = latestClose != null && prevClose
+    ? ((latestClose - prevClose) / prevClose) * 100
+    : toNumber(currentCompany?.day_change_pct);
+  const lastVolume = latestPrice ? toNumber(latestPrice.volume) : null;
   const isPositive = dayChange >= 0;
+
+  const currentRange = TIME_RANGES[timeRangeIdx];
+
+  function toggleIndicator(key: IndicatorKey) {
+    setIndicators((current) =>
+      current.includes(key) ? current.filter((item) => item !== key) : [...current, key]
+    );
+  }
 
   // Measure chart container height
   React.useEffect(() => {
@@ -145,7 +207,7 @@ export function SimulationTradingView() {
         display: "flex",
         flexDirection: "column",
         height: "calc(100vh - 100px)",
-        background: "var(--mer-bg-canvas)",
+        background: "linear-gradient(180deg, var(--mer-bg-canvas) 0%, #07090d 100%)",
         borderRadius: "var(--mer-radius-md)",
         border: "1px solid var(--mer-stroke-hairline)",
         overflow: "hidden",
@@ -163,9 +225,9 @@ export function SimulationTradingView() {
           display: "flex",
           alignItems: "center",
           gap: 16,
-          padding: "10px 20px",
+          padding: "12px 16px",
           borderBottom: "1px solid var(--mer-stroke-hairline)",
-          background: "var(--mer-surface-1)",
+          background: "linear-gradient(180deg, var(--mer-surface-2) 0%, var(--mer-surface-1) 100%)",
         }}
       >
         <TickerSelector
@@ -173,21 +235,26 @@ export function SimulationTradingView() {
           onChange={setSelectedTicker}
         />
 
-        <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+        <div style={{ display: "flex", minWidth: 0, flexDirection: "column", gap: 2 }}>
           <span
             style={{
-              fontSize: "var(--fs-h3)",
+              fontSize: "var(--fs-h2)",
               fontWeight: 700,
               color: "var(--mer-ink-primary)",
               fontFamily: "var(--font-mono)",
+              letterSpacing: "0.02em",
             }}
           >
-            {selectedTicker}
+            {selectedTicker ?? "SELECT"}
           </span>
           {currentCompany && (
             <span
               style={{
-                fontSize: "var(--fs-body)",
+                maxWidth: 280,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                fontSize: "var(--fs-small)",
                 color: "var(--mer-ink-tertiary)",
               }}
             >
@@ -205,7 +272,7 @@ export function SimulationTradingView() {
               color: "var(--mer-ink-primary)",
             }}
           >
-            {formatPrice(currentCompany?.current_price ?? latestPrice?.close ?? null)}
+            {formatPrice(currentCompany?.current_price ?? latestClose ?? null)}
           </span>
           <span
             className="num"
@@ -228,6 +295,12 @@ export function SimulationTradingView() {
             height={24}
           />
         )}
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(70px, auto))", gap: 8 }}>
+          <QuoteStat label="Range" value={currentRange.label} />
+          <QuoteStat label="Volume" value={lastVolume == null ? "--" : formatLarge(lastVolume)} />
+          <QuoteStat label="Mkt Cap" value={currentCompany?.market_cap == null ? "--" : formatLarge(currentCompany.market_cap)} />
+        </div>
       </div>
 
       {/* Main Content */}
@@ -249,17 +322,57 @@ export function SimulationTradingView() {
             padding: "12px 16px",
           }}
         >
-          {/* OHLC Overlay */}
+          {/* Chart Toolbar */}
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 10,
+              marginBottom: 10,
+            }}
+          >
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
+              {TIME_RANGES.map((range, i) => (
+                <TerminalButton key={range.label} active={i === timeRangeIdx} onClick={() => setTimeRangeIdx(i)}>
+                  {range.label}
+                </TerminalButton>
+              ))}
+            </div>
+
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
+              {INDICATOR_OPTIONS.map((indicator) => (
+                <TerminalButton
+                  key={indicator.key}
+                  active={indicators.includes(indicator.key)}
+                  onClick={() => toggleIndicator(indicator.key)}
+                >
+                  {indicator.label}
+                </TerminalButton>
+              ))}
+              <TerminalButton active={showVolumeProfile} onClick={() => setShowVolumeProfile((value) => !value)}>
+                VPVR
+              </TerminalButton>
+            </div>
+          </div>
+
           {latestPrice && (
             <div
               style={{
                 position: "relative",
                 zIndex: 10,
-                marginBottom: -28,
-                marginLeft: 8,
+                marginBottom: -34,
+                marginLeft: 12,
                 display: "flex",
                 gap: 12,
                 pointerEvents: "none",
+                width: "fit-content",
+                padding: "6px 8px",
+                border: "1px solid var(--mer-stroke-hairline)",
+                borderRadius: "var(--mer-radius-sm)",
+                background: "rgba(10, 12, 16, 0.78)",
+                backdropFilter: "blur(10px)",
               }}
             >
               <OhlcBadge label="O" value={latestPrice.open} />
@@ -274,11 +387,12 @@ export function SimulationTradingView() {
             ref={chartContainerRef}
             style={{
               flex: 1,
-              background: "var(--mer-surface-1)",
+              background: "radial-gradient(circle at 50% 0%, rgba(62,111,224,0.07), transparent 36%), var(--mer-surface-1)",
               border: "1px solid var(--mer-stroke-hairline)",
               borderRadius: "var(--mer-radius-md)",
               overflow: "hidden",
               minHeight: 0,
+              boxShadow: "var(--mer-shadow-rest)",
             }}
           >
             <PriceChart
@@ -288,57 +402,9 @@ export function SimulationTradingView() {
               onRetry={() => refetch()}
               ticker={selectedTicker ?? ""}
               height={chartHeight}
+              indicators={indicators}
+              showVolumeProfile={showVolumeProfile}
             />
-          </div>
-
-          {/* Time Range Selector */}
-          <div
-            style={{
-              display: "flex",
-              gap: 4,
-              marginTop: 8,
-              justifyContent: "center",
-            }}
-          >
-            {TIME_RANGES.map((range, i) => (
-              <button
-                key={range.label}
-                onClick={() => setTimeRangeIdx(i)}
-                style={{
-                  padding: "4px 10px",
-                  fontSize: "var(--fs-micro)",
-                  fontWeight: i === timeRangeIdx ? 600 : 400,
-                  color:
-                    i === timeRangeIdx
-                      ? "var(--mer-ink-primary)"
-                      : "var(--mer-ink-tertiary)",
-                  background:
-                    i === timeRangeIdx ? "var(--mer-surface-3)" : "transparent",
-                  border: "1px solid",
-                  borderColor:
-                    i === timeRangeIdx
-                      ? "var(--mer-stroke-emphasis)"
-                      : "transparent",
-                  borderRadius: "var(--mer-radius-xs)",
-                  cursor: "pointer",
-                  transition: "all 100ms",
-                }}
-                onMouseEnter={(e) => {
-                  if (i !== timeRangeIdx) {
-                    e.currentTarget.style.color = "var(--mer-ink-secondary)";
-                    e.currentTarget.style.background = "var(--mer-surface-2)";
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (i !== timeRangeIdx) {
-                    e.currentTarget.style.color = "var(--mer-ink-tertiary)";
-                    e.currentTarget.style.background = "transparent";
-                  }
-                }}
-              >
-                {range.label}
-              </button>
-            ))}
           </div>
         </div>
 
@@ -504,6 +570,43 @@ function OhlcBadge({ label, value }: { label: string; value: number | string | n
       >
         {Number.isFinite(numericValue) ? numericValue.toFixed(2) : "--"}
       </span>
+    </div>
+  );
+}
+
+function QuoteStat({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        minWidth: 70,
+        padding: "5px 8px",
+        border: "1px solid var(--mer-stroke-hairline)",
+        borderRadius: "var(--mer-radius-sm)",
+        background: "rgba(255,255,255,0.025)",
+      }}
+    >
+      <div
+        style={{
+          fontSize: "var(--fs-micro)",
+          color: "var(--mer-ink-tertiary)",
+          textTransform: "uppercase",
+          letterSpacing: "0.08em",
+        }}
+      >
+        {label}
+      </div>
+      <div
+        className="num"
+        style={{
+          marginTop: 2,
+          fontSize: "var(--fs-small)",
+          fontWeight: 700,
+          color: "var(--mer-ink-primary)",
+          fontFamily: "var(--font-mono)",
+        }}
+      >
+        {value}
+      </div>
     </div>
   );
 }
