@@ -64,6 +64,15 @@ def test_parse_range_malformed_returns_default():
     assert _parse_range("1.0") == (0.0, 0.0)
 
 
+def test_parse_range_double_dot_form():
+    # The actual format every event template in db/seeds/seed_events.py uses —
+    # regression test for the bug where only the comma form was recognized,
+    # silently zeroing every event's resolved_severity.
+    lo, hi = _parse_range("10..40")
+    assert lo == 10.0
+    assert hi == 40.0
+
+
 # ── select_and_fire_events ─────────────────────────────────────────────
 
 
@@ -248,6 +257,41 @@ def test_generate_news_with_industry_name():
     result = generate_news(s, 1, date(2026, 1, 2), ei, rng, industry_name="Tech")
     assert result is not None
     assert "Tech" in result.headline
+    s.close()
+
+
+def test_generate_news_uses_event_sentiment_not_severity_sign():
+    """Regression: sentiment must come from MarketEvent.sentiment, not from
+    resolved_severity's sign. Every real severity_range in seed_events.py is a
+    positive-only magnitude ("15..50"), so resolved_severity is never
+    negative — deriving sentiment from its sign meant bad-news events (e.g.
+    "Earnings Miss", sentiment="negative") were always mislabeled "positive"."""
+    s = _session()
+    _add_timeline(s)
+    s.add(MarketEvent(
+        id=1, name="Earnings Miss", category="earnings", scope="company",
+        severity_range="15..50", sentiment="negative",
+        effect_profile="{}", duration_days=12, decay_rate=0.18,
+        probability_weight=1.0,
+    ))
+    s.add(NewsTemplate(
+        category="earnings", template_text="{company} misses estimates.",
+        sentiment="negative", severity_band="high",
+        linked_event_category="earnings", linked_driver="earnings_surprise",
+    ))
+    s.commit()
+    ei = EventInstance(
+        event_id=1, timeline_id=1, scope_ref=5, scope_type="company",
+        sim_date=date(2026, 1, 2), resolved_severity=32.0,  # positive magnitude
+        applied_effects={}, expires_on=date(2026, 1, 14),
+    )
+    s.add(ei)
+    s.commit()
+
+    rng = random.Random(42)
+    result = generate_news(s, 1, date(2026, 1, 2), ei, rng, company_name="Test Corp")
+    assert result is not None
+    assert result.sentiment == "negative"
     s.close()
 
 
