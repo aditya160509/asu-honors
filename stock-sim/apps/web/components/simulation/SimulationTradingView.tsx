@@ -480,7 +480,9 @@ export function SimulationTradingView() {
   );
 }
 
-function OhlcBadge({ label, value }: { label: string; value: number }) {
+function OhlcBadge({ label, value }: { label: string; value: number | string | null | undefined }) {
+  const numericValue = Number(value);
+
   return (
     <div style={{ display: "flex", alignItems: "baseline", gap: 3 }}>
       <span
@@ -500,7 +502,7 @@ function OhlcBadge({ label, value }: { label: string; value: number }) {
           fontWeight: 500,
         }}
       >
-        {value.toFixed(2)}
+        {Number.isFinite(numericValue) ? numericValue.toFixed(2) : "--"}
       </span>
     </div>
   );
