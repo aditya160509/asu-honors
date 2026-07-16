@@ -44,7 +44,7 @@ export default function TradingDeskPage() {
         </div>
 
         <div className="flex flex-col gap-4">
-          <Select value={ticker ?? undefined} onValueChange={setTicker}>
+          <Select value={ticker ?? ""} onValueChange={setTicker}>
             <SelectTrigger>
               <SelectValue placeholder="Select a ticker" />
             </SelectTrigger>

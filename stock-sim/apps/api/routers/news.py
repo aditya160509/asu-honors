@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/news", tags=["News"])
 
 
-@router.get("/", response_model=list[NewsItem])
+@router.get("", response_model=list[NewsItem])
 def get_news(
     timeline_id: int = Query(default=settings.default_timeline_id),
     sim_date: Optional[date] = Query(default=None),

@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { get, post } from "@/lib/api/client";
+import { ApiError, get, post } from "@/lib/api/client";
 import type {
   ForgotPasswordRequest,
   LoginRequest,
@@ -20,7 +20,15 @@ export function useMe(enabled: boolean) {
     queryKey: ["me"],
     queryFn: () => get<UserResponse>("/auth/me"),
     enabled,
-    retry: false,
+    // A real 401 means the session is actually gone — client.ts has already
+    // tried a silent refresh before this error surfaces, so retrying here
+    // would just repeat a known-final answer. Anything else (429 rate limit,
+    // a network blip, a transient 5xx) is worth retrying rather than treating
+    // as "logged out" — see AuthContext.tsx's isDefinitivelyUnauthenticated.
+    retry: (failureCount, error) => {
+      if (error instanceof ApiError && error.status === 401) return false;
+      return failureCount < 3;
+    },
   });
 }
 

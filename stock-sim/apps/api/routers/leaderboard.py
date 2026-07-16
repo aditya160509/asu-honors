@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/leaderboard", tags=["Leaderboard"])
 
 
-@router.get("/", response_model=list[LeaderboardEntry])
+@router.get("", response_model=list[LeaderboardEntry])
 def get_leaderboard(
     timeline_id: int = Query(default=settings.default_timeline_id),
     limit: int = Query(default=20, le=100),
