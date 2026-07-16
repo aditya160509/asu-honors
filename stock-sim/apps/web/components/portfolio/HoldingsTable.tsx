@@ -11,14 +11,17 @@ import type { GridColumn, SortState } from "@/lib/grid/types";
 import { DashboardPanel } from "@/components/dashboard/primitives/DashboardPanel";
 import { MER_HAIRLINE } from "@/components/dashboard/primitives/tokens";
 import { MiniAreaSpark } from "@/components/dashboard/primitives/MiniAreaSpark";
-import { withWeights, type HoldingWithWeight } from "@/lib/portfolio/holdingsMath";
+import { withWeights, withDayChange, type HoldingWithWeight, type HoldingWithDayChange } from "@/lib/portfolio/holdingsMath";
 import { usePriceHistory } from "@/lib/api/hooks/useCompany";
-import { cn, cssVar, formatPct, formatPrice } from "@/lib/utils";
-import type { HoldingResponse } from "@/lib/api/types";
+import { cn, cssVar, formatPct, formatPrice, trendColorClass } from "@/lib/utils";
+import type { CompanyGridItem, HoldingResponse } from "@/lib/api/types";
 
 export interface HoldingsTableProps {
   holdings: HoldingResponse[];
   totalValue: number;
+  /** Market grid companies (already fetched by the Holdings page for the health strip) — joined
+   * in here to source real per-holding day-change %, never fabricated or refetched. */
+  companies?: CompanyGridItem[];
   loading?: boolean;
   error?: boolean;
   onRetry?: () => void;
@@ -28,7 +31,7 @@ export interface HoldingsTableProps {
  * supply sortable keys, not to render (this table draws its own header/rows so it can stay on
  * Meridian tokens without touching `lib/grid/*`'s legacy-token presentation, which is shared with
  * the Leaderboard table and out of scope here). */
-const SORT_KEYS: GridColumn<HoldingWithWeight>[] = [
+const SORT_KEYS: GridColumn<HoldingWithDayChange>[] = [
   { key: "ticker", header: "", width: 0, sortable: true },
   { key: "company_name", header: "", width: 0, sortable: true },
   { key: "quantity", header: "", width: 0, sortable: true },
@@ -38,6 +41,7 @@ const SORT_KEYS: GridColumn<HoldingWithWeight>[] = [
   { key: "weight", header: "", width: 0, sortable: true },
   { key: "unrealized_pnl", header: "", width: 0, sortable: true },
   { key: "unrealized_pnl_pct", header: "", width: 0, sortable: true },
+  { key: "dayChange", header: "", width: 0, sortable: true },
 ];
 
 interface HeaderCellProps {
@@ -91,6 +95,7 @@ const COL_WIDTHS = {
   weight: 76,
   pnl: 112,
   pnlPct: 84,
+  dayChange: 84,
 };
 
 function DensityToggle({ density, onChange }: { density: "comfortable" | "compact"; onChange: (d: "comfortable" | "compact") => void }) {
@@ -131,12 +136,15 @@ function DensityToggle({ density, onChange }: { density: "comfortable" | "compac
  * a simulated portfolio realistically holds a handful to a few dozen positions, well within what a
  * plain scrollable table handles without a windowing layer.
  */
-export function HoldingsTable({ holdings, totalValue, loading, error, onRetry }: HoldingsTableProps) {
+export function HoldingsTable({ holdings, totalValue, companies = [], loading, error, onRetry }: HoldingsTableProps) {
   const router = useRouter();
   const [density, setDensity] = React.useState<"comfortable" | "compact">("comfortable");
   const rowHeight = density === "comfortable" ? 40 : 28;
 
-  const weighted = React.useMemo(() => withWeights(holdings, totalValue), [holdings, totalValue]);
+  const weighted = React.useMemo(
+    () => withDayChange(withWeights(holdings, totalValue), companies),
+    [holdings, totalValue, companies]
+  );
   const { sortedData, sort, toggleSort } = useGridSort(weighted, SORT_KEYS);
 
   const prevValuesRef = React.useRef<Map<string, number>>(new Map());
@@ -217,6 +225,9 @@ export function HoldingsTable({ holdings, totalValue, loading, error, onRetry }:
               <div style={{ width: COL_WIDTHS.pnlPct }}>
                 <HeaderCell label="P&L %" sortKey="unrealized_pnl_pct" sort={sort} onSort={toggleSort} align="right" />
               </div>
+              <div style={{ width: COL_WIDTHS.dayChange }}>
+                <HeaderCell label="Day Chg" sortKey="dayChange" sort={sort} onSort={toggleSort} align="right" />
+              </div>
             </div>
 
             <div>
@@ -285,6 +296,12 @@ export function HoldingsTable({ holdings, totalValue, loading, error, onRetry }:
                       style={{ width: COL_WIDTHS.pnlPct }}
                     >
                       {formatPct(h.unrealized_pnl_pct)}
+                    </div>
+                    <div
+                      className={cn("num flex items-center justify-end px-3 text-small font-medium", trendColorClass(h.dayChange))}
+                      style={{ width: COL_WIDTHS.dayChange }}
+                    >
+                      {formatPct(h.dayChange)}
                     </div>
                   </div>
                 );

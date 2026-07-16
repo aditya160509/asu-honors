@@ -1,4 +1,4 @@
-import type { HoldingResponse, SectorAllocation } from "@/lib/api/types";
+import type { CompanyGridItem, HoldingResponse, SectorAllocation } from "@/lib/api/types";
 
 export interface HoldingWithWeight extends HoldingResponse {
   /** % of total portfolio value (holdings + cash) this position represents. */
@@ -12,6 +12,22 @@ export function withWeights(holdings: HoldingResponse[], totalValue: number): Ho
     ...h,
     weight: totalValue > 0 ? (Number(h.market_value) / totalValue) * 100 : 0,
   }));
+}
+
+export interface HoldingWithDayChange extends HoldingWithWeight {
+  /** Real per-company day-change % joined in from the market grid by ticker — null if not
+   * found there yet (e.g. market data still loading), never fabricated. */
+  dayChange: number | null;
+}
+
+/** Holdings don't carry their own day-change field, but the market grid (already fetched
+ * alongside Holdings for the health strip) has it per company — join rather than refetch. */
+export function withDayChange(
+  holdings: HoldingWithWeight[],
+  companies: CompanyGridItem[]
+): HoldingWithDayChange[] {
+  const byTicker = new Map(companies.map((c) => [c.ticker, c.day_change_pct]));
+  return holdings.map((h) => ({ ...h, dayChange: byTicker.get(h.ticker) ?? null }));
 }
 
 export function largestPositions<T extends HoldingWithWeight>(holdings: T[], n = 5): T[] {
