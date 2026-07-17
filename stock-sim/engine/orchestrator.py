@@ -236,7 +236,7 @@ def run_ticks(
             market_factor_return=state.f_m,
             companies=tick_inputs,
         )
-        tick_result = engine_run_tick(tick_state)
+        tick_result = engine_run_tick(tick_state, k_drift=float(state.params.get("k_drift", 0.03)))
 
         # -- Circuit breaker + OHLC + volume --------------------------------
         ohlc_results, volume_results, imbalance_results = _update_prices_and_ohlc(
