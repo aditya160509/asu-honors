@@ -176,7 +176,7 @@ function DropdownItem({
           color: "var(--mer-ink-secondary)",
         }}
       >
-        ${company.current_price.toFixed(2)}
+        ${Number(company.current_price ?? 0).toFixed(2)}
       </span>
     </button>
   );

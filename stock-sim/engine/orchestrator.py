@@ -338,8 +338,8 @@ def _load_tick_state(session: Session, timeline_id: int) -> SimpleNamespace:
 
     f_m = cycle_state["market_factor_return"]
 
-    companies = session.query(Company).all()
-    industries = {ind.id: ind for ind in session.query(Industry).all()}
+    companies = session.query(Company).order_by(Company.id).all()
+    industries = {ind.id: ind for ind in session.query(Industry).order_by(Industry.id).all()}
     industry_ids = list(industries.keys())
 
     sector_shocks = generate_sector_shocks(
@@ -752,7 +752,7 @@ def _execute_events(
     for ev in fired_events:
         event_instances = session.query(EventInstance).filter_by(
             event_id=ev.id, timeline_id=timeline_id, sim_date=sim_date,
-        ).all()
+        ).order_by(EventInstance.id).all()
         for ei in event_instances:
             company_name = None
             industry_name = None
@@ -852,21 +852,21 @@ def _refresh_fundamentals(
     tick_count: int,
 ) -> None:
     """Section 6.F -- generate new financial statements and recompute FQ/IV at quarter boundary."""
-    pw_rows = session.query(IndustryPillarWeight).all()
+    pw_rows = session.query(IndustryPillarWeight).order_by(IndustryPillarWeight.id).all()
     industry_pw: dict[int, dict[str, float]] = {}
     for pw in pw_rows:
         industry_pw.setdefault(pw.industry_id, {})[pw.pillar] = float(pw.weight)
 
-    fq_defs = session.query(FactorDefinition).filter_by(factor_type="fq_sub").all()
+    fq_defs = session.query(FactorDefinition).filter_by(factor_type="fq_sub").order_by(FactorDefinition.id).all()
     subfactor_pillar = {fd.key: fd.pillar for fd in fq_defs}
     fq_directions = {fd.key: fd.direction for fd in fq_defs}
     fq_keys = [fd.key for fd in fq_defs]
 
-    moat_defs = session.query(FactorDefinition).filter_by(factor_type="moat_sub").all()
+    moat_defs = session.query(FactorDefinition).filter_by(factor_type="moat_sub").order_by(FactorDefinition.id).all()
     moat_weights = {md.key: float(md.default_weight) for md in moat_defs if md.default_weight}
 
     moat_scores: dict[int, dict[str, float]] = {}
-    for ms in session.query(MoatSubscore).all():
+    for ms in session.query(MoatSubscore).order_by(MoatSubscore.id).all():
         moat_scores.setdefault(ms.company_id, {})[ms.subfactor_key] = float(ms.score)
 
     latest_period = _compute_fiscal_period(tick_count)
@@ -1224,7 +1224,7 @@ def _get_active_events_for_company(
             and_(EventInstance.scope_type == "company", EventInstance.scope_ref == company_id),
             and_(EventInstance.scope_type == "industry", EventInstance.scope_ref == industry_id),
         ),
-    ).all()
+    ).order_by(EventInstance.id).all()
 
     result = []
     for inst in instances:
@@ -1303,7 +1303,7 @@ def _apply_event_factor_effects(
     for ev in fired_events:
         event_instances = session.query(EventInstance).filter_by(
             event_id=ev.id, timeline_id=timeline_id, sim_date=sim_date
-        ).all()
+        ).order_by(EventInstance.id).all()
         for ei in event_instances:
             profile = ei.applied_effects
             if not profile or not isinstance(profile, dict):
@@ -1373,12 +1373,12 @@ def _apply_factor_effects_to_company(
         if ms.subfactor_key in updated and ms.subfactor_key not in top_level_keys:
             ms.score = round(updated[ms.subfactor_key], 4)
 
-    pw_rows = session.query(IndustryPillarWeight).all()
+    pw_rows = session.query(IndustryPillarWeight).order_by(IndustryPillarWeight.id).all()
     industry_pw: dict[int, dict[str, float]] = {}
     for pw in pw_rows:
         industry_pw.setdefault(pw.industry_id, {})[pw.pillar] = float(pw.weight)
 
-    fq_defs = session.query(FactorDefinition).filter_by(factor_type="fq_sub").all()
+    fq_defs = session.query(FactorDefinition).filter_by(factor_type="fq_sub").order_by(FactorDefinition.id).all()
     subfactor_pillar = {fd.key: fd.pillar for fd in fq_defs}
 
     ind_pw = industry_pw.get(company_map[cid].industry_id, {})
@@ -1395,7 +1395,7 @@ def _apply_factor_effects_to_company(
     fq_delta = updated["financial_quality"] - factor_scores["financial_quality"]
     fq = max(0.0, min(100.0, base_fq + fq_delta))
 
-    moat_defs = session.query(FactorDefinition).filter_by(factor_type="moat_sub").all()
+    moat_defs = session.query(FactorDefinition).filter_by(factor_type="moat_sub").order_by(FactorDefinition.id).all()
     moat_weights = {md.key: float(md.default_weight) for md in moat_defs if md.default_weight}
     # moat_composite requires every subfactor key to have a matching weight;
     # only pass sub-factors that are actually weighted (seed data may have

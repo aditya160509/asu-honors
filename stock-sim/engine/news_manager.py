@@ -27,7 +27,7 @@ def select_and_fire_events(
     Market-level events always fire if selected (scope_ref = 0).
     Industry-level events affect a random company in that industry.
     """
-    market_events = session.query(MarketEvent).all()
+    market_events = session.query(MarketEvent).order_by(MarketEvent.id).all()
 
     new_instances: list[EventInstance] = []
     selected_events: list[MarketEvent] = []
@@ -146,7 +146,7 @@ def generate_news(
 
     templates = session.query(NewsTemplate).filter_by(
         category=event.category,
-    ).all()
+    ).order_by(NewsTemplate.id).all()
     if not templates:
         return None
 
