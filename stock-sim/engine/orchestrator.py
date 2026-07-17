@@ -463,7 +463,7 @@ def _compute_drivers(
     iv = float(company.intrinsic_value)
 
     y = np.log(max(prev_close, 0.01) / max(iv, 0.01))
-    theta = float(state.params.get("mean_reversion_rate", 0.05))
+    theta = float(state.params.get("theta_default", 0.05))
     beta_m = float(company.beta_market)
     beta_s = float(company.beta_sector)
     epsilon = state.rng.gauss(0, 1)
@@ -504,7 +504,7 @@ def _compute_drivers(
     if latest_inc and latest_ce:
         actual_eps = float(latest_inc.eps)
         consensus_eps = float(latest_ce.consensus_eps)
-        es = earnings_surprise(actual_eps, consensus_eps, days_since_earnings, float(state.params.get("rho_es", 0.15)))
+        es = earnings_surprise(actual_eps, consensus_eps, days_since_earnings, float(state.params.get("earnings_surprise_decay_rate", 0.15)))
 
     gd = 0.0
     if latest_inc and latest_ce:
@@ -513,9 +513,9 @@ def _compute_drivers(
         beat = actual_eps > consensus_eps
         miss = actual_eps < consensus_eps
         if beat:
-            gd = guidance("raised", min(abs(actual_eps - consensus_eps) / max(abs(consensus_eps), 0.01), 0.5), days_since_earnings, float(state.params.get("rho_g", 0.15)))
+            gd = guidance("raised", min(abs(actual_eps - consensus_eps) / max(abs(consensus_eps), 0.01), 0.5), days_since_earnings, float(state.params.get("guidance_decay_rate", 0.15)))
         elif miss:
-            gd = guidance("cut", min(abs(actual_eps - consensus_eps) / max(abs(consensus_eps), 0.01), 0.5), days_since_earnings, float(state.params.get("rho_g", 0.15)))
+            gd = guidance("cut", min(abs(actual_eps - consensus_eps) / max(abs(consensus_eps), 0.01), 0.5), days_since_earnings, float(state.params.get("guidance_decay_rate", 0.15)))
 
     ib = institutional_buying(state.rng.uniform(-0.1, 0.1) + state.cycle_state.get("market_sentiment", 0) * 0.05)
 
@@ -524,7 +524,7 @@ def _compute_drivers(
         session, timeline_id, company.id, ind.id, sim_date, state.epoch_start,
     )
     if active_events:
-        ns = news_severity(active_events, tick_count, float(state.params.get("rho_news", 0.1)))
+        ns = news_severity(active_events, tick_count, float(state.params.get("news_decay_rate", 0.1)))
 
     driver_values = {
         "value_opportunity": vo,
@@ -1042,7 +1042,7 @@ def _generate_fake_quarterly_financials(
 
     shares = float(company.shares_outstanding)
     shares_dil = shares * rng.uniform(1.0, 1.05)
-    eps = ni / (shares_dil / 1_000_000) if shares_dil > 0 else 0
+    eps = ni / shares_dil if shares_dil > 0 else 0
 
     inc = IncomeStatement(
         company_id=company.id, fiscal_period=fiscal_period,

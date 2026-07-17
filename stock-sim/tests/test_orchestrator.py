@@ -72,7 +72,7 @@ def _seed_minimal(session: Session) -> int:
     session.execute(sa_text("""INSERT INTO consensus_estimates (company_id, fiscal_period, consensus_eps, consensus_revenue, created_at, updated_at) VALUES (1, '2026Q1', 0.95, 980000, datetime('now'), datetime('now'))"""))
     session.execute(sa_text("""INSERT INTO timelines (id, name, rng_seed, is_live, created_at, updated_at) VALUES (1, 'Live Market', 42, 1, datetime('now'), datetime('now'))"""))
     session.execute(sa_text("""INSERT INTO simulation_state (timeline_id, current_sim_date, tick_count, is_running, created_at, updated_at) VALUES (1, '2026-01-02', 0, 0, datetime('now'), datetime('now'))"""))
-    session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('mean_reversion_rate', '0.05', 'global', datetime('now'), datetime('now'))"""))
+    session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('theta_default', '0.05', 'global', datetime('now'), datetime('now'))"""))
     session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('quality_mult_min', '0.6', 'global', datetime('now'), datetime('now'))"""))
     session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('quality_mult_max', '2.0', 'global', datetime('now'), datetime('now'))"""))
     session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('quality_mult_k', '0.11', 'global', datetime('now'), datetime('now'))"""))
@@ -91,9 +91,9 @@ def _seed_minimal(session: Session) -> int:
     session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('k_m', '2.0', 'global', datetime('now'), datetime('now'))"""))
     session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('liquidity_sensitivity', '0.5', 'global', datetime('now'), datetime('now'))"""))
     session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('expected_annual_growth', '0.08', 'global', datetime('now'), datetime('now'))"""))
-    session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('rho_es', '0.15', 'global', datetime('now'), datetime('now'))"""))
-    session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('rho_g', '0.15', 'global', datetime('now'), datetime('now'))"""))
-    session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('rho_news', '0.1', 'global', datetime('now'), datetime('now'))"""))
+    session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('earnings_surprise_decay_rate', '0.15', 'global', datetime('now'), datetime('now'))"""))
+    session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('guidance_decay_rate', '0.15', 'global', datetime('now'), datetime('now'))"""))
+    session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('news_decay_rate', '0.1', 'global', datetime('now'), datetime('now'))"""))
     session.commit()
     return 1
 
@@ -633,7 +633,7 @@ def _run_factor_effects_directly(session, timeline_id, event_id, scope_type, sco
     sim_date = sim_date or date(2026, 1, 2)
     me = MarketEvent(
         id=event_id, name=f"Test Event {event_id}", category="governance",
-        scope=scope_type, severity_range="(1.0, 1.0)",
+        scope=scope_type, severity_range="(100.0, 100.0)",
         sentiment="negative", effect_profile=effect_profile,
         duration_days=10, decay_rate=0.1, probability_weight=1.0,
     )
@@ -641,7 +641,7 @@ def _run_factor_effects_directly(session, timeline_id, event_id, scope_type, sco
     session.flush()
     ei = EventInstance(
         event_id=event_id, timeline_id=timeline_id, scope_ref=scope_ref, scope_type=scope_type,
-        sim_date=sim_date, resolved_severity=1.0,
+        sim_date=sim_date, resolved_severity=100.0,
         applied_effects=effect_profile,
         expires_on=sim_date + timedelta(days=10),
     )
