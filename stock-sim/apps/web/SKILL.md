@@ -1029,10 +1029,10 @@ State:
   Empty:    "No players yet. Be the first to trade!"
 ```
 
-### 5.14 AdvanceControls / TimelineBranch / CycleIndicator
+### 5.14 SimControlPanel / TimelineBranch / CycleIndicator
 
 ```
-File: components/simulation/AdvanceControls.tsx
+File: components/simulation/SimControlPanel.tsx
 
 Displays:
   Current date: "July 11, 2026 (Tick #142)" — mono, large
@@ -1573,7 +1573,7 @@ Build in this exact dependency chain:
 22. `/leaderboard` page
 23. News hooks + NewsFeed + NewsCard + filter sidebar
 24. `/news` page
-25. Simulation hooks + AdvanceControls + TimelineBranch + CycleIndicator
+25. Simulation hooks + SimControlPanel + TimelineBranch + CycleIndicator
 26. `/simulation` page
 27. `/admin` page (stretch)
 28. **Marketing landing page (build AFTER full terminal is functional):**

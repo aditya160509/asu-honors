@@ -69,6 +69,9 @@ async function tryRefresh(): Promise<boolean> {
 function redirectToExpiredLogin(): void {
   if (typeof window === "undefined") return;
   setToken(null);
+  // Clear the session flag cookie so Next.js middleware stops letting
+  // unauthenticated requests through to protected pages.
+  document.cookie = "mv_session=; path=/; max-age=0";
   const path = window.location.pathname;
   const isAuthPage = ["/login", "/register", "/forgot-password", "/reset-password", "/verify-email"].some(
     (p) => path.startsWith(p)

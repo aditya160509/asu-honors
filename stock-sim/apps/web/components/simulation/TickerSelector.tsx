@@ -5,6 +5,7 @@ import { Search } from "lucide-react";
 import { useMarketGrid } from "@/lib/api/hooks/useMarket";
 import { useSimState } from "@/lib/api/hooks/useSimulation";
 import type { CompanyGridItem } from "@/lib/api/types";
+import { formatPrice } from "@/lib/utils";
 
 export interface TickerSelectorProps {
   value: string;
@@ -176,7 +177,7 @@ function DropdownItem({
           color: "var(--mer-ink-secondary)",
         }}
       >
-        ${company.current_price.toFixed(2)}
+        {formatPrice(company.current_price)}
       </span>
     </button>
   );

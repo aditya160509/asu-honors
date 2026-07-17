@@ -148,6 +148,11 @@ def get_portfolio_history(
 
 
 def _apply_txn(txn: Transaction, cash: float, qty: dict[int, float]) -> tuple[float, dict[int, float]]:
+    # These casts are load-bearing, not defensive: Transaction.quantity/price/fees
+    # are Decimal-backed columns, and this function's whole ledger reconstruction
+    # (many points x many transactions) is intentionally done in plain float for
+    # speed, not Decimal -- omitting any one of these would raise TypeError mixing
+    # Decimal with the float `cash` accumulator below.
     q = float(txn.quantity)
     price = float(txn.price)
     fees = float(txn.fees)

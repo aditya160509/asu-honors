@@ -108,14 +108,14 @@ def _execute_buy(
     fees: Decimal,
 ) -> None:
     cost = Decimal(quantity) * price
-    portfolio.cash_balance = float(Decimal(str(portfolio.cash_balance)) - cost - fees)
+    portfolio.cash_balance = Decimal(str(portfolio.cash_balance)) - cost - fees
 
     if holding is None:
         holding = Holding(
             portfolio_id=portfolio.id,
             company_id=company.id,
             quantity=quantity,
-            avg_cost_basis=float(price),
+            avg_cost_basis=price,
         )
         db.add(holding)
     else:
@@ -123,8 +123,8 @@ def _execute_buy(
         old_cost = Decimal(str(holding.avg_cost_basis))
         new_qty = old_qty + Decimal(quantity)
         new_avg = (old_qty * old_cost + Decimal(quantity) * price) / new_qty
-        holding.quantity = float(new_qty)
-        holding.avg_cost_basis = float(new_avg)
+        holding.quantity = new_qty
+        holding.avg_cost_basis = new_avg
 
 
 def _execute_sell(
@@ -139,13 +139,13 @@ def _execute_sell(
     realized_pnl = _compute_realized_pnl(avg_cost, price, quantity)
 
     proceeds = Decimal(quantity) * price
-    portfolio.cash_balance = float(Decimal(str(portfolio.cash_balance)) + proceeds - fees)
+    portfolio.cash_balance = Decimal(str(portfolio.cash_balance)) + proceeds - fees
 
     remaining = Decimal(str(holding.quantity)) - Decimal(quantity)
     if remaining <= 0:
         db.delete(holding)
     else:
-        holding.quantity = float(remaining)
+        holding.quantity = remaining
 
     return realized_pnl
 
@@ -188,8 +188,8 @@ def _fill_order(
 
     order.status = "filled"
     order.filled_quantity = quantity
-    order.avg_fill_price = float(execution_price)
-    order.fees = float(fees)
+    order.avg_fill_price = execution_price
+    order.fees = fees
     order.filled_at = datetime.now(timezone.utc)
 
     db.flush()
@@ -242,7 +242,7 @@ def place_order(db: Session, user: User, request: OrderRequest) -> OrderResponse
         side=request.side,
         order_type=request.order_type,
         quantity=request.quantity,
-        limit_price=float(request.limit_price) if request.limit_price is not None else None,
+        limit_price=request.limit_price,
         status="open",
         filled_quantity=0,
     )

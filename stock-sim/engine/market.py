@@ -1,8 +1,20 @@
 """Section 6.I-6.J — Ornstein-Uhlenbeck mean-reversion core and volatility sizing."""
 
-from typing import Callable, Optional
-
 import numpy as np
+
+
+def company_volatility(sigma_ind: float, market_cap: float, leverage: float) -> float:
+    """Section 6.G — company-specific daily volatility = sector_base × size_factor × leverage_factor.
+
+    The orchestrator's :func:`~engine.orchestrator.run_tick` overrides this formula
+    inline with a different parameterisation (tanh-based size factor, capped
+    leverage).  Both produce the same directional behaviour (smaller + more
+    leveraged → more volatile); the inline version is the production path, this
+    function is retained for unit-test compatibility.
+    """
+    f_size = (1e9 / max(market_cap, 1)) ** 0.25
+    f_lev = 1 + max(leverage, 0)
+    return sigma_ind * f_size * f_lev
 
 
 def update_log_gap(
@@ -15,45 +27,21 @@ def update_log_gap(
     f_s: float,
     sigma: float,
     epsilon: float,
+    k_drift: float = 1.0,
 ) -> float:
-    """Section 6.J — y_{t+1} = y_t - theta*y_t + price_pressure + beta_m*F_m + beta_s*F_s + sigma*epsilon.
+    """Section 6.J — y_{t+1} = y_t - theta*y_t + k_drift*price_pressure + beta_m*F_m + beta_s*F_s + sigma*epsilon.
 
     y is the log gap between price and intrinsic value; theta pulls it back to 0.
     With y_t=0 and all shocks/pressure zero, y_{t+1}=0 (fixed point).
+    k_drift scales price_pressure into a reasonable daily log-return (default 1.0
+    maintains backward compatibility for direct callers; production uses 0.03).
     """
-    return y_t - theta * y_t + price_pressure + beta_m * f_m + beta_s * f_s + sigma * epsilon
+    return y_t - theta * y_t + k_drift * price_pressure + beta_m * f_m + beta_s * f_s + sigma * epsilon
 
 
 def price_from_gap(iv: float, y: float) -> float:
     """Section 6.J — Price = IV * exp(y)."""
     return iv * np.exp(y)
-
-
-def _default_size_factor(market_cap: float, ref_cap: float = 1e9) -> float:
-    return (ref_cap / max(market_cap, 1.0)) ** 0.25
-
-
-def _default_leverage_factor(leverage: float) -> float:
-    return 1.0 + max(leverage, 0.0)
-
-
-def company_volatility(
-    sigma_ind: float,
-    market_cap: float,
-    leverage: float,
-    f_size_fn: Optional[Callable[[float], float]] = None,
-    f_lev_fn: Optional[Callable[[float], float]] = None,
-) -> float:
-    """Section 6.I — company volatility = sigma_ind * f_size(market_cap) * f_lev(leverage).
-
-    f_size decreases with market cap (smaller caps are more volatile),
-    normalised so a 1B cap company gets factor 1.0;
-    f_lev increases with leverage. Defaults are sane placeholders when
-    industry-specific curves aren't supplied.
-    """
-    size_fn = f_size_fn or _default_size_factor
-    lev_fn = f_lev_fn or _default_leverage_factor
-    return sigma_ind * size_fn(market_cap) * lev_fn(leverage)
 
 
 def update_market_tick(
@@ -66,6 +54,7 @@ def update_market_tick(
     f_s: np.ndarray,
     sigma: np.ndarray,
     epsilon: np.ndarray,
+    k_drift: float = 1.0,
 ) -> np.ndarray:
     """Section 6.J / Section 8 — vectorized OU step for an entire universe of companies in one call."""
-    return y - theta * y + price_pressure + beta_m * f_m + beta_s * f_s + sigma * epsilon
+    return y - theta * y + k_drift * price_pressure + beta_m * f_m + beta_s * f_s + sigma * epsilon

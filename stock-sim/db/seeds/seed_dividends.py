@@ -12,12 +12,12 @@ import random
 import sys
 from datetime import timedelta
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, func
 from sqlalchemy.orm import Session
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
-from db.models import CashFlowStatement, Company, Dividend, SimulationState, Timeline
+from db.models import CashFlowStatement, Company, Dividend, PriceHistory, Timeline
 
 QUARTERS_BACK = 4
 QUARTERS_FORWARD = 2
@@ -44,10 +44,10 @@ def seed(session: Session) -> None:
         paid_by_company.setdefault(row.company_id, []).append(abs(float(row.dividends_paid)))
 
     for timeline in timelines:
-        state = session.query(SimulationState).filter_by(timeline_id=timeline.id).first()
-        if state is None:
+        first_price_date = session.query(func.min(PriceHistory.sim_date)).filter_by(timeline_id=timeline.id).scalar()
+        if first_price_date is None:
             continue
-        current = state.current_sim_date
+        current = first_price_date
 
         for company in companies:
             payments = paid_by_company.get(company.id)

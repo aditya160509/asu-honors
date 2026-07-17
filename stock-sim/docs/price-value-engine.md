@@ -4,7 +4,7 @@
 >
 > **Maintenance contract.** This file must be kept in sync with the code. **Any commit that adds, removes, or changes a function/formula/config-key related to price or value movement (files under `engine/`, `_recompute_valuation`/`_apply_event_factor_effects`/`_compute_drivers`/etc. in `engine/orchestrator.py`, or the corresponding rows in `db/seeds/seed_config.py`) must update this file in the same commit.** See [Maintenance Protocol](#maintenance-protocol) at the bottom for the exact procedure. `done.md` tracks project phases; this file tracks the math itself — update both when a price/value-affecting change lands.
 >
-> Last synced with code: 2026-07-11 (matches `done.md` through "Deep Code Review — Phase C").
+> Last synced with code: 2026-07-17 (factor-score event effects now decay instead of applying once permanently; `k_drift` wired into the OU price step; see §6.3, §4, §9.3).
 
 ---
 
@@ -138,18 +138,19 @@ Driver-specific notes:
 The market price is never set directly — it's derived from a **log-gap** `y` between price and IV, which mean-reverts:
 
 ```
-y_{t+1} = y_t − θ·y_t + price_pressure + β_m·F_m + β_s·F_s + σ·ε
+y_{t+1} = y_t − θ·y_t + k_drift·composite_price_pressure + β_m·F_m + β_s·F_s + σ·ε
 Price_{t+1} = IV · e^(y_{t+1})
 ```
 
 - `θ` (theta) — mean-reversion speed, default `mean_reversion_rate=0.05` (config also seeds `theta_default/stable/speculative` per company type, currently only `theta_default` is wired into `_compute_drivers`).
+- `k_drift` — scales the raw `composite_price_pressure` (§3, `Σ weight_i · driver_i`, itself already ∈ roughly [−1, 1]) down into a plausible single-day log-return contribution before it enters the OU step. Config key `k_drift` (default 0.03 if unseeded), passed as `TickState.pressure_scale` in `engine/tick.py`'s `run_tick()`. **Wired in 2026-07-16/17** — previously `k_drift` was seeded but never read (§9.1 used to list this as dead config) and the raw composite pressure (magnitude up to ~1.0) was fed directly into `y`, which routinely overshot the circuit breaker's `r_cap` whenever several drivers aligned across many companies at once (e.g. every company during the same cycle phase), producing lockstep, lookalike price action that masked company-specific fundamentals.
 - `F_m` — market factor return for the day, from the economic cycle (§4.1).
 - `F_s` — sector/industry factor shock (§4.2).
 - `β_m`, `β_s` — company's market beta and sector beta (`Company.beta_market/beta_sector`).
 - `σ` (sigma) — company-specific volatility (§4.3).
 - `ε` — `rng.gauss(0, 1)`, one fresh draw per company per tick.
 
-`run_tick()` in `engine/tick.py` vectorizes this across all ~150 companies with NumPy in a single call (`update_market_tick`). This is pure — no DB access; `orchestrator.py` builds `CompanyTickInput` per company and calls it.
+`run_tick()` in `engine/tick.py` vectorizes this across all ~150 companies with NumPy in a single call (`update_market_tick`). This is pure — no DB access; `orchestrator.py` builds `CompanyTickInput` per company and calls it, passing `pressure_scale=params.get("k_drift", 0.03)`.
 
 ### 4.1 Economic cycle — `engine/cycle.py`
 
@@ -204,11 +205,17 @@ Two entirely separate application paths for the same `EventInstance.applied_effe
 
 For each key in `effect_profile` that matches one of the 7 `DRIVER_KEYS`: `driver[key] += base_effect × severity × decay(ρ, days_elapsed)`, clamped to [−1, 1]. Applied every tick the event is still active, so the effect fades naturally as `days_elapsed` grows — a fire-once, fade-out shock to short-term price pressure (e.g. `news_severity`, `guidance`).
 
-### 6.3 Path B — Factor-score effects (structural, persistent) — `_apply_event_factor_effects()` / `apply_effect_to_factor_scores()`
+### 6.3 Path B — Factor-score effects (structural, now also decaying) — `_apply_event_factor_effects()` / `apply_effect_to_factor_scores()`
 
-For `effect_profile` keys that are **not** driver keys (i.e. target `management_quality`, `moat_score`, `financial_quality`, `fcf_quality`, `growth_potential`, or an individual `MoatSubscore` sub-factor like `innovation`): permanently nudges the underlying `CompanyFactorScore`/`MoatSubscore` row, then re-runs the full valuation chain (§2.4) to produce a new IV. **Always applied with `days_elapsed=0`** — i.e. full severity lands immediately and undiscounted; there is no decay on this path (deliberate: structural events are meant to be a permanent step-change, not a fading shock — see §7 for the one open question this leaves).
+For `effect_profile` keys that are **not** driver keys (i.e. target `management_quality`, `moat_score`, `financial_quality`, `fcf_quality`, `growth_potential`, or an individual `MoatSubscore` sub-factor like `innovation`): nudges the underlying `CompanyFactorScore`/`MoatSubscore` row, then re-runs the full valuation chain (§2.4) to produce a new IV.
 
 Scope handling (`_scope_target_company_ids`): `company` scope → that one company; `industry` scope → every company in that industry; `market` scope → every company in the simulation.
+
+**Changed 2026-07-17: this path now decays like the driver path, superseding the earlier "always `days_elapsed=0`, permanent step-change" design.** Previously (see the removed §9.1 note and `done.md`'s "News/Event → Factor Score Propagation Fix" entry) this was a deliberate choice: structural events were meant to be a one-time permanent shift, not a fading shock. On reconsideration during a 2026-07-17 code review, that design had an unintended side effect: the function is re-invoked on *every* tick an event is still active (needed so a still-open event's effect participates correctly if it fires again or the quarterly base changes), and each call read the *already-mutated* effective column as its own baseline — so repeated ticks of the *same* event kept re-adding a fresh full-severity delta on top of the previous tick's already-applied one, silently compounding far beyond the originally-intended single step-change. Rather than re-deriving "was this event already applied this tick" bookkeeping to preserve the old apply-once semantics, the fix makes the whole path decay-based like driver effects: `_apply_event_factor_effects` now scans every currently-active (non-expired) `EventInstance` each tick and computes `days_elapsed = sim_date - EventInstance.sim_date` fresh per event, matching `apply_effect_to_drivers`.
+
+To make decay possible without losing the seeded/carried-forward baseline, `CompanyFactorScore` gained three snapshot columns — `management_quality_base`, `growth_potential_base`, `fcf_quality_base` — and `MoatSubscore` gained `score_base` (migration `0010_factor_score_bases`). Quarterly refresh (`_refresh_fundamentals`) writes these from the prior quarter's *base* (not the event-mutated effective value), and event effects are computed against that base each tick, never mutating it. `moat_score`/`financial_quality` didn't need new columns — they were already re-derived fresh from `MoatSubscore`/`FinancialQualitySubscore` sub-factor tables every call, so they already had an equivalent "base" to decay against; only `management_quality`/`growth_potential`/`fcf_quality` (and individual `MoatSubscore` sub-factors) lacked one.
+
+Net effect for a game designer reading this: a structural event's factor-score nudge now fades over the event's `duration_days` (governed by the event's own `decay_rate`), the same as its driver-side price-pressure nudge — there is no longer an asymmetry where the driver effect on `news_severity` fades but the correlated `financial_quality` hit from the same event stays at full strength forever.
 
 **Fixed 2026-07-10 (all three, see `done.md` "News/Event → Factor Score Propagation Fix"):**
 1. `financial_quality` effects used to be silently dropped (baseline dict never included it).
@@ -244,7 +251,8 @@ Fix also **persists to the real `CompanyFactorScore` row**, not just the denorma
 |---|---|
 | `mean_reversion_rate` (referenced as `theta_default` fallback) | OU pull-back speed θ |
 | `k_m` | technical_momentum tanh steepness |
-| `k_drift`, `k_flow` | seeded but **not currently read** by any engine call site — see §9 |
+| `k_drift` | scales `composite_price_pressure` before it enters the OU step (§4) — wired in 2026-07-16/17, previously unread |
+| `k_flow` | seeded but **not currently read** by any engine call site — see §9 |
 | `w_vo`/`w_es`/`w_ns`/`w_eo`/`w_g`/`w_tm`/`w_ib` | 7 driver weights |
 | `rho_es` / `earnings_surprise_decay_rate`, `rho_g` / `guidance_decay_rate`, `rho_news` / `news_decay_rate` | decay rates ρ per driver |
 | `quality_mult_min/max/k/inflection` | M(S) logistic curve shape |
@@ -267,9 +275,9 @@ Cross-referenced against `done.md` and `docs/calibration-strategy.md`. Items pur
 ### 9.1 Unresolved design/logic notes flagged in code or `done.md`
 
 - **`expected_annual_growth` config key is never seeded.** `run_ticks()` reads it with `.get("expected_annual_growth", 0.08)`, so every company drifts IV at the same flat 8%/yr regardless of its own `growth_potential`/`growth_rate` — the per-company growth rate computed in `growth_score_to_rate()` for the *valuation* chain is never reused for the *drift* chain. These two growth concepts (fair-PE growth rate vs. IV daily drift rate) are currently disconnected; worth deciding whether drift should use the company's own derived growth rate instead of one global constant.
-- **`k_drift` and `k_flow` config keys are seeded but never read** anywhere in `engine/` or `orchestrator.py` — dead config, or a placeholder for an unimplemented mechanism (unclear which). Should be either wired in or removed.
+- **`k_flow` config key is seeded but never read** anywhere in `engine/` or `orchestrator.py` — dead config, or a placeholder for an unimplemented mechanism (unclear which). Should be either wired in or removed. (`k_drift`, its neighbor, was wired in 2026-07-16/17 — see §4 and §9.3.)
 - **`institutional_buying` has no real signal** — it's `rng.uniform(-0.1, 0.1) + 0.05 × market_sentiment`, i.e. mostly noise with a small macro tilt. None of the 15% weight it carries reflects any actual "institutional" behavior (e.g. large simulated fund flows, insider trades, block orders). Lowest-fidelity of the 7 drivers.
-- **Factor-score event effects apply with `days_elapsed=0` always (no decay), unlike driver effects.** Documented as deliberate in `done.md` ("a fire-and-forget shift, not something that fades day by day") — flagging here again since it's an asymmetry a reader might assume is a bug. If a future revision wants structural effects to also fade (e.g. a "temporary regulatory probe" vs. "permanent regulation change"), this is the place to add per-event-type decay-vs-permanent semantics — currently *all* factor-score effects are permanent, with no way for an event to declare itself temporary.
+- **All factor-score effects now decay uniformly (§6.3, changed 2026-07-17) — there is no longer a way for an event to declare itself a "permanent step-change."** The old always-`days_elapsed=0` design intentionally supported that distinction (e.g. a "temporary regulatory probe" fading vs. "permanent regulation change" not fading); the current implementation applies the same `decay(rho, days_elapsed)` curve to every factor-score effect, same as driver effects, with no per-event permanent/temporary flag. If a future revision wants some events to be truly permanent again, `MarketEvent` would need an explicit flag (e.g. `permanent: bool`) that `_apply_event_factor_effects` checks before deciding whether to floor `days_elapsed` at 0 for that event.
 - **Reliance Industries real-world calibration sanity check (`done.md`, `docs/valuation_dry_run.py`) found FairPE ≈3× too high** at hand-estimated realistic quality inputs (mgmt=78, moat=82, fq=62, fcfq=58, growth=70) against real EPS/industry PE. Backwards-solving showed `IntrinsicScore≈50` (not ≈72) reproduces the real multiple at defaults `k=0.11, c=60`. **Conclusion reached:** the `M(S)` formula itself is mathematically sound (monotonic, correctly bounded, correct diminishing-marginal-valuation shape) — the miscalibration is in the *qualitative 0–100 score inputs*, which are synthetic placeholders never fitted to real market data. **This is the single highest-priority open correctness item** in the whole price/value engine, since it means every company's IV is plausible only by luck of what score it happened to seed with, not because the formula was validated end-to-end.
 - **Discrepancy between the PRD image and PRD text for `M(S)`** (`done.md`, Valuation Formula Revision #2): the uploaded spec image showed `M(S) = 0.3 + 2.7/(1+e^{-0.11(S-60)})` (implying `M_min=0.3, M_max=3.0`) but the accompanying text said the range should be "approximately 0.6 to 2.0" and gave `M(S) = 0.6 + 1.4/(...)`. Implemented per the text (current code), not the image. If the image was actually authoritative, the multiplier range is currently ~46% too narrow — worth a final confirmation from whoever owns the spec.
 - **`theta_stable`/`theta_speculative` are seeded but not wired into per-company theta selection** — every company currently uses the single flat `mean_reversion_rate` (0.05) regardless of whether it's a "stable" blue-chip or "speculative" small-cap, even though the config anticipates per-company-type mean-reversion speeds.
@@ -287,6 +295,8 @@ Cross-referenced against `done.md` and `docs/calibration-strategy.md`. Items pur
 - `pe_min`/`pe_max`/`baseline_pe` clamp removal (2026-07-09/10) and later full column drop (Phase C, 2026-07-11) — intentional, the PEG formula's own `M_min`/`M_max` bounds already bound `FairPE` without a second clamp.
 - Flush-in-service/commit-in-router split — deliberate architecture, not a transaction bug (reconciliation note, `done.md`).
 - `engine/market.py`'s `company_volatility()` and `engine/liquidity.py`'s `daily_volume()` — both dead code paths, kept intentionally as tested, spec-referenced reference implementations, not accidental duplication.
+- **`k_drift` wired into the OU step as `pressure_scale` (2026-07-16/17)** — previously listed here as dead config alongside `k_flow`; now resolved, see §4.
+- **Factor-score event effects now decay (2026-07-17), reversing the earlier deliberate "always permanent, never decays" design** — see §6.3 for the full rationale. Superseded, not contradicted: the old design was intentional at the time, but the re-invoke-every-tick call pattern it was paired with made effects silently compound across ticks rather than stay at a single fixed step-change, which was the actual, previously-undetected bug.
 
 ---
 

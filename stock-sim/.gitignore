@@ -9,3 +9,6 @@ __pycache__/
 .venv/
 api.out.log
 api.err.log
+apps/dev.out.log
+apps/dev.err.log
+dev-script.log

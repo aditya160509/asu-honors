@@ -125,7 +125,7 @@ function TickerItem({
         }}
       >
         {isPositive ? "+" : ""}
-        {change.toFixed(2)}%
+        {Number(change).toFixed(2)}%
       </span>
     </button>
   );

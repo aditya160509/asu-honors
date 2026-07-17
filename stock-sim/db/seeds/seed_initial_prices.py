@@ -86,25 +86,25 @@ def _load_company_data(session: Session) -> dict:
         p.scope_id: float(p.value)
         for p in session.query(ConfigParameter).filter_by(key="neutral_industry_peg", scope="industry").all()
     }
-    industries = {ind.id: ind for ind in session.query(Industry).all()}
-    pw_rows = session.query(IndustryPillarWeight).all()
+    industries = {ind.id: ind for ind in session.query(Industry).order_by(Industry.id).all()}
+    pw_rows = session.query(IndustryPillarWeight).order_by(IndustryPillarWeight.id).all()
     industry_pw: dict[int, dict[str, float]] = {}
     for pw in pw_rows:
         industry_pw.setdefault(pw.industry_id, {})[pw.pillar] = float(pw.weight)
-    fq_defs = session.query(FactorDefinition).filter_by(factor_type="fq_sub").all()
+    fq_defs = session.query(FactorDefinition).filter_by(factor_type="fq_sub").order_by(FactorDefinition.id).all()
     subfactor_pillar = {fd.key: fd.pillar for fd in fq_defs}
     fq_directions = {fd.key: fd.direction for fd in fq_defs}
-    moat_defs = session.query(FactorDefinition).filter_by(factor_type="moat_sub").all()
+    moat_defs = session.query(FactorDefinition).filter_by(factor_type="moat_sub").order_by(FactorDefinition.id).all()
     moat_weights = {md.key: float(md.default_weight) for md in moat_defs if md.default_weight}
-    companies = session.query(Company).options(joinedload(Company.industry)).all()
-    income_map = {r.company_id: r for r in session.query(IncomeStatement).filter_by(fiscal_period=FISCAL_PERIOD).all()}
-    balance_map = {r.company_id: r for r in session.query(BalanceSheet).filter_by(fiscal_period=FISCAL_PERIOD).all()}
-    cashflow_map = {r.company_id: r for r in session.query(CashFlowStatement).filter_by(fiscal_period=FISCAL_PERIOD).all()}
-    ms_rows = session.query(MoatSubscore).all()
+    companies = session.query(Company).options(joinedload(Company.industry)).order_by(Company.id).all()
+    income_map = {r.company_id: r for r in session.query(IncomeStatement).filter_by(fiscal_period=FISCAL_PERIOD).order_by(IncomeStatement.id).all()}
+    balance_map = {r.company_id: r for r in session.query(BalanceSheet).filter_by(fiscal_period=FISCAL_PERIOD).order_by(BalanceSheet.id).all()}
+    cashflow_map = {r.company_id: r for r in session.query(CashFlowStatement).filter_by(fiscal_period=FISCAL_PERIOD).order_by(CashFlowStatement.id).all()}
+    ms_rows = session.query(MoatSubscore).order_by(MoatSubscore.id).all()
     moat_scores: dict[int, dict[str, float]] = {}
     for ms in ms_rows:
         moat_scores.setdefault(ms.company_id, {})[ms.subfactor_key] = float(ms.score)
-    seed_rows = session.query(CompanyFactorScore).filter_by(fiscal_period="SEED").all()
+    seed_rows = session.query(CompanyFactorScore).filter_by(fiscal_period="SEED").order_by(CompanyFactorScore.id).all()
     seed_scores = {s.company_id: s for s in seed_rows}
     timeline = session.query(Timeline).filter_by(is_live=True).first()
     return dict(
@@ -192,14 +192,6 @@ def _safe_finite(v: float) -> float:
 
 def seed(session: Session) -> None:
     now = datetime.now(timezone.utc)
-    from db.models import PriceHistory
-    initial_date = FIRST_SIM_DATE
-    existing = session.query(PriceHistory).filter(PriceHistory.sim_date == initial_date).first()
-    if existing is not None:
-        import logging
-        logging.getLogger(__name__).warning("Initial prices already seeded — skipping")
-        return
-
     d = _load_company_data(session)
     timeline = d["timeline"]
     if timeline is None:

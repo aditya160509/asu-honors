@@ -8,6 +8,7 @@ simulation by one business day for all companies.
 import math
 import random
 from datetime import date, datetime, timezone, timedelta
+from decimal import Decimal
 from types import SimpleNamespace
 from typing import Optional
 
@@ -129,11 +130,15 @@ def run_ticks(
     """Run multiple ticks in sequence. Each tick is idempotent."""
     results = []
     for _ in range(num_ticks):
-        state = _load_tick_state(session, timeline_id)
-        sim_date = state.sim_date
-        tick_count = state.tick_count
-        companies = state.companies
-        company_by_id = {c.id: c for c in companies}
+        # Same existence-check order as _load_tick_state (Timeline before
+        # SimulationState) so error messages/precedence are unchanged now that
+        # this validation runs here first, before the side-effecting state load.
+        if session.query(Timeline).filter_by(id=timeline_id).first() is None:
+            raise ValueError(f"Timeline {timeline_id} not found")
+        sim_state = session.query(SimulationState).filter_by(timeline_id=timeline_id).first()
+        if sim_state is None:
+            raise ValueError(f"No SimulationState for timeline {timeline_id} -- run seed_initial_prices first")
+        sim_date = _resolve_tick_target_date(session, timeline_id, sim_state)
 
         existing = session.query(PriceHistory).filter_by(
             timeline_id=timeline_id, sim_date=sim_date
@@ -141,24 +146,31 @@ def run_ticks(
         if existing is not None:
             # A PriceHistory row for `sim_date` already exists — either the seed's
             # day-0 baseline close (seed_initial_prices.py writes one for
-            # FIRST_SIM_DATE up front) or a genuine duplicate call that already
-            # completed this day. Either way that day's close is legitimately
-            # already computed, so still advance the pointer instead of leaving
-            # current_sim_date frozen forever — the previous "skip and continue
-            # without advancing" made every Advance call re-check the same day
-            # and never make progress.
+            # FIRST_SIM_DATE up front; _resolve_tick_target_date already shifts
+            # sim_date past that specific case using is_running, so this branch
+            # mainly guards a genuine duplicate/retried call for a day that's
+            # already been fully ticked) or some other collision. Either way that
+            # day's close is legitimately already computed, so still advance the
+            # pointer instead of leaving current_sim_date frozen forever — a bare
+            # "skip and continue without advancing" would make every subsequent
+            # Advance call re-check the same day and never make progress.
             next_date = sim_date + timedelta(days=1)
-            state.sim_state.current_sim_date = next_date
-            state.sim_state.tick_count = tick_count + 1
+            sim_state.current_sim_date = next_date
+            sim_state.tick_count = sim_state.tick_count + 1
             session.flush()
             results.append({
                 "status": "skipped",
                 "reason": "already_executed",
                 "sim_date": sim_date,
                 "next_date": next_date,
-                "tick_count": tick_count + 1,
+                "tick_count": sim_state.tick_count,
             })
             continue
+
+        state = _load_tick_state(session, timeline_id, sim_date)
+        tick_count = state.tick_count
+        companies = state.companies
+        company_by_id = {c.id: c for c in companies}
 
         # -- Quarter boundary: refresh fundamentals -------------------------
         if state.is_quarter_boundary:
@@ -168,12 +180,27 @@ def run_ticks(
                 datetime.now(timezone.utc), state.rng, tick_count,
             )
 
-        # -- IV drift -------------------------------------------------------
+        # -- IV drift ---------------------------------------------------------
+        # Each company drifts at its own long-term growth rate (derived from its
+        # growth_potential score, same mapping used for FairPE at quarter
+        # boundaries), not a single market-wide rate -- otherwise every
+        # company's intrinsic value (and hence price) grows identically
+        # regardless of its fundamentals.
+        growth_rate_min = float(state.params.get("growth_rate_min", DEFAULT_GROWTH_RATE_MIN))
+        growth_rate_max = float(state.params.get("growth_rate_max", DEFAULT_GROWTH_RATE_MAX))
         for company in companies:
             if company.intrinsic_value is not None:
-                expected_growth = float(state.params.get("expected_annual_growth", 0.08))
+                cfs = state.latest_cfs.get(company.id)
+                growth_potential = float(cfs.growth_potential) if cfs else 50.0
+                # growth_score_to_rate returns a percentage (e.g. 18.0 for 18%, per
+                # docs/price-value-engine.md's scale note); drift_iv expects a
+                # fraction (0.08 for 8%), so this must be divided by 100 before
+                # being passed in -- confirmed against drift_iv's daily_growth
+                # formula, which computes (1+g)**(1/252)-1 and would produce an
+                # absurd compounding rate if fed a raw percentage directly.
+                growth_rate_pct = growth_score_to_rate(growth_potential, growth_rate_min, growth_rate_max)
                 company.intrinsic_value = float(drift_iv(
-                    float(company.intrinsic_value), expected_growth, TRADING_DAYS_PER_YEAR,
+                    float(company.intrinsic_value), growth_rate_pct / 100.0, TRADING_DAYS_PER_YEAR,
                 ))
 
         # -- Compute drivers per company ------------------------------------
@@ -187,7 +214,7 @@ def run_ticks(
         company_ns: dict[int, float] = {}
 
         for company in companies:
-            result = _compute_drivers(company, state, tick_count)
+            result = _compute_drivers(session, company, state, timeline_id, sim_date, tick_count)
             if result is None:
                 continue
             pricing_data["company_ids"].append(result["company_id"])
@@ -234,8 +261,9 @@ def run_ticks(
             sim_day=tick_count,
             market_factor_return=state.f_m,
             companies=tick_inputs,
+            pressure_scale=float(state.params.get("k_drift", 0.03)),
         )
-        tick_result = engine_run_tick(tick_state)
+        tick_result = engine_run_tick(tick_state, k_drift=float(state.params.get("k_drift", 0.03)))
 
         # -- Circuit breaker + OHLC + volume --------------------------------
         ohlc_results, volume_results, imbalance_results = _update_prices_and_ohlc(
@@ -283,13 +311,43 @@ def run_ticks(
 # ── Extracted helper methods ────────────────────────────────────────────────
 
 
-def _load_tick_state(session: Session, timeline_id: int) -> SimpleNamespace:
+def _resolve_tick_target_date(session: Session, timeline_id: int, sim_state: SimulationState) -> date:
+    """Resolve which sim_date the next tick should target, without any side effects.
+
+    Cheap and read-only so the caller can check idempotency (does PriceHistory
+    already exist for this date?) before calling the side-effecting
+    _load_tick_state -- otherwise _load_tick_state's EconomicCycleState insert
+    happens even when the tick turns out to be a no-op skip, leaving a
+    duplicate EconomicCycleState row for the same (timeline_id, sim_date) once
+    the caller's idempotency check discards the rest of that iteration.
+    """
+    sim_date = sim_state.current_sim_date
+    # seed_initial_prices (unlike test fixtures / a fresh SimulationState with no
+    # PriceHistory yet) writes a PriceHistory row for current_sim_date as the day-0
+    # baseline close and sets is_running=False; the first real tick flips is_running
+    # to True and never resets it, so is_running (not tick_count, which a retried/
+    # rewound call could reset to 0 for an already-ticked day) is the reliable signal
+    # that current_sim_date is still an unticked seed baseline whose first real tick
+    # must target the following day, not re-check the baseline day itself.
+    if not sim_state.is_running:
+        seeded_baseline_exists = session.query(PriceHistory).filter_by(
+            timeline_id=timeline_id, sim_date=sim_date
+        ).first() is not None
+        if seeded_baseline_exists:
+            sim_date = sim_date + timedelta(days=1)
+    return sim_date
+
+
+def _load_tick_state(session: Session, timeline_id: int, sim_date: date) -> SimpleNamespace:
     """Load and return all simulation state for one tick.
 
     Loads timeline, sim_state, economic cycle, companies, industries, balance
     sheets, and previous tick news_severity.  Raises ValueError if the timeline
     or simulation state does not exist.  Does NOT check idempotency — the
-    caller is responsible for that.
+    caller is responsible for that (see _resolve_tick_target_date, which must
+    be called first to compute sim_date so idempotency can be checked before
+    this function's side effects, e.g. the EconomicCycleState insert below,
+    run).
     """
     timeline = session.query(Timeline).filter_by(id=timeline_id).first()
     if timeline is None:
@@ -299,9 +357,8 @@ def _load_tick_state(session: Session, timeline_id: int) -> SimpleNamespace:
     if sim_state is None:
         raise ValueError(f"No SimulationState for timeline {timeline_id} -- run seed_initial_prices first")
 
-    sim_date = sim_state.current_sim_date
     tick_count = sim_state.tick_count
-    epoch_start = sim_date - timedelta(days=tick_count)
+    epoch_start = sim_state.current_sim_date - timedelta(days=tick_count)
 
     rng = random.Random(timeline.rng_seed + tick_count)
     params = _load_params(session)
@@ -337,8 +394,8 @@ def _load_tick_state(session: Session, timeline_id: int) -> SimpleNamespace:
 
     f_m = cycle_state["market_factor_return"]
 
-    companies = session.query(Company).all()
-    industries = {ind.id: ind for ind in session.query(Industry).all()}
+    companies = session.query(Company).order_by(Company.id).all()
+    industries = {ind.id: ind for ind in session.query(Industry).order_by(Industry.id).all()}
     industry_ids = list(industries.keys())
 
     sector_shocks = generate_sector_shocks(
@@ -368,6 +425,17 @@ def _load_tick_state(session: Session, timeline_id: int) -> SimpleNamespace:
     for ce in all_ce:
         if ce.company_id not in latest_ce:
             latest_ce[ce.company_id] = ce
+
+    # Sort by fiscal_period (not id) for consistency with the other latest_*
+    # lookups above (BalanceSheet/IncomeStatement/ConsensusEstimate all sort by
+    # fiscal_period.desc()) -- id.desc() happens to coincide with fiscal-period
+    # order for a normal forward-only simulation, but isn't guaranteed to if a
+    # row is ever backfilled or re-inserted out of chronological order.
+    all_cfs = session.query(CompanyFactorScore).order_by(CompanyFactorScore.fiscal_period.desc()).all()
+    latest_cfs: dict[int, CompanyFactorScore] = {}
+    for cfs_row in all_cfs:
+        if cfs_row.company_id not in latest_cfs:
+            latest_cfs[cfs_row.company_id] = cfs_row
 
     # Trailing closes for the technical_momentum moving average, batch-loaded
     # so _compute_drivers doesn't issue N queries per company per tick.
@@ -402,8 +470,9 @@ def _load_tick_state(session: Session, timeline_id: int) -> SimpleNamespace:
 
     # Batch-load every active EventInstance (+ its MarketEvent) once per
     # tick, instead of _compute_drivers issuing 2 queries per company per
-    # tick (this was the dominant cost of Advance — ~2s/tick with 150
-    # companies, almost entirely DB round-trips here).
+    # tick via _get_active_events_for_company (previously the dominant cost
+    # of Advance -- ~2s/tick with 150 companies, almost entirely DB
+    # round-trips here).
     market_events, industry_events, company_events, event_defs = _load_active_events(
         session, timeline_id, sim_date,
     )
@@ -429,6 +498,7 @@ def _load_tick_state(session: Session, timeline_id: int) -> SimpleNamespace:
         latest_bal=latest_bal,
         latest_inc=latest_inc,
         latest_ce=latest_ce,
+        latest_cfs=latest_cfs,
         recent_closes=recent_closes,
         prev_ns=prev_ns,
         market_events=market_events,
@@ -449,7 +519,7 @@ def _load_active_events(
     instances = session.query(EventInstance).filter(
         EventInstance.timeline_id == timeline_id,
         EventInstance.expires_on >= sim_date,
-    ).all()
+    ).order_by(EventInstance.id).all()
 
     market_events: list[EventInstance] = []
     industry_events: dict[int, list[EventInstance]] = {}
@@ -465,15 +535,18 @@ def _load_active_events(
     event_ids = {inst.event_id for inst in instances}
     event_defs: dict[int, MarketEvent] = {}
     if event_ids:
-        for me in session.query(MarketEvent).filter(MarketEvent.id.in_(event_ids)).all():
+        for me in session.query(MarketEvent).filter(MarketEvent.id.in_(event_ids)).order_by(MarketEvent.id).all():
             event_defs[me.id] = me
 
     return market_events, industry_events, company_events, event_defs
 
 
 def _compute_drivers(
+    session: Session,
     company: Company,
     state: SimpleNamespace,
+    timeline_id: int,
+    sim_date: date,
     tick_count: int,
 ) -> Optional[dict]:
     """Compute all 7 driver values and OU pricing inputs for one company.
@@ -496,7 +569,7 @@ def _compute_drivers(
     iv = float(company.intrinsic_value)
 
     y = np.log(max(prev_close, 0.01) / max(iv, 0.01))
-    theta = float(state.params.get("mean_reversion_rate", 0.05))
+    theta = float(state.params.get("theta_default", 0.05))
     beta_m = float(company.beta_market)
     beta_s = float(company.beta_sector)
     epsilon = state.rng.gauss(0, 1)
@@ -537,7 +610,7 @@ def _compute_drivers(
     if latest_inc and latest_ce:
         actual_eps = float(latest_inc.eps)
         consensus_eps = float(latest_ce.consensus_eps)
-        es = earnings_surprise(actual_eps, consensus_eps, days_since_earnings, float(state.params.get("rho_es", 0.15)))
+        es = earnings_surprise(actual_eps, consensus_eps, days_since_earnings, float(state.params.get("earnings_surprise_decay_rate", 0.15)))
 
     gd = 0.0
     if latest_inc and latest_ce:
@@ -546,9 +619,9 @@ def _compute_drivers(
         beat = actual_eps > consensus_eps
         miss = actual_eps < consensus_eps
         if beat:
-            gd = guidance("raised", min(abs(actual_eps - consensus_eps) / max(abs(consensus_eps), 0.01), 0.5), days_since_earnings, float(state.params.get("rho_g", 0.15)))
+            gd = guidance("raised", min(abs(actual_eps - consensus_eps) / max(abs(consensus_eps), 0.01), 0.5), days_since_earnings, float(state.params.get("guidance_decay_rate", 0.15)))
         elif miss:
-            gd = guidance("cut", min(abs(actual_eps - consensus_eps) / max(abs(consensus_eps), 0.01), 0.5), days_since_earnings, float(state.params.get("rho_g", 0.15)))
+            gd = guidance("cut", min(abs(actual_eps - consensus_eps) / max(abs(consensus_eps), 0.01), 0.5), days_since_earnings, float(state.params.get("guidance_decay_rate", 0.15)))
 
     ib = institutional_buying(state.rng.uniform(-0.1, 0.1) + state.cycle_state.get("market_sentiment", 0) * 0.05)
 
@@ -558,7 +631,7 @@ def _compute_drivers(
         company.id, ind.id, state.epoch_start,
     )
     if active_events:
-        ns = news_severity(active_events, tick_count, float(state.params.get("rho_news", 0.1)))
+        ns = news_severity(active_events, tick_count, float(state.params.get("news_decay_rate", 0.1)))
 
     driver_values = {
         "value_opportunity": vo,
@@ -664,7 +737,7 @@ def _update_prices_and_ohlc(
         ns_delta = abs(ns_now - ns_prev)
         is_earnings_day = False
         if tick_count > 5:
-            is_earnings_day = (tick_count % QUARTER_LENGTH) <= 5
+            is_earnings_day = (tick_count % QUARTER_LENGTH) == 0
 
         vol = compute_volume_prd(
             market_cap=mcap,
@@ -741,6 +814,8 @@ def _write_tick_results(
         total_pressure = composite_price_pressure(inp.driver_values, inp.driver_weights)
         for drv_key, drv_val in inp.driver_values.items():
             drv_w = inp.driver_weights.get(drv_key, 0.0)
+            raw_contribution = drv_w * drv_val / max(abs(total_pressure), 1e-10)
+            contribution = round(max(-1.0, min(1.0, raw_contribution)), 6)
             driver_score_rows.append(dict(
                 timeline_id=timeline_id,
                 company_id=cid,
@@ -748,7 +823,7 @@ def _write_tick_results(
                 driver_key=drv_key,
                 value=round(drv_val, 6),
                 weight=round(drv_w, 6),
-                contribution=round(drv_w * drv_val / max(abs(total_pressure), 1e-10), 6),
+                contribution=contribution,
             ))
 
     if price_history_rows:
@@ -802,7 +877,7 @@ def _execute_events(
     for ev in fired_events:
         event_instances = session.query(EventInstance).filter_by(
             event_id=ev.id, timeline_id=timeline_id, sim_date=sim_date,
-        ).all()
+        ).order_by(EventInstance.id).all()
         for ei in event_instances:
             company_name = None
             industry_name = None
@@ -830,9 +905,8 @@ def _execute_events(
                           extra_replacements=extra_replacements)
 
     _apply_event_factor_effects(
-        session, companies, fired_events, sim_date, timeline_id,
-        state.rng, state.params, state.neutral_industry_pegs,
-        datetime.now(timezone.utc), state.industries,
+        session, companies, sim_date, timeline_id,
+        state.params, state.neutral_industry_pegs, state.industries,
     )
 
 
@@ -902,21 +976,21 @@ def _refresh_fundamentals(
     tick_count: int,
 ) -> None:
     """Section 6.F -- generate new financial statements and recompute FQ/IV at quarter boundary."""
-    pw_rows = session.query(IndustryPillarWeight).all()
+    pw_rows = session.query(IndustryPillarWeight).order_by(IndustryPillarWeight.id).all()
     industry_pw: dict[int, dict[str, float]] = {}
     for pw in pw_rows:
         industry_pw.setdefault(pw.industry_id, {})[pw.pillar] = float(pw.weight)
 
-    fq_defs = session.query(FactorDefinition).filter_by(factor_type="fq_sub").all()
+    fq_defs = session.query(FactorDefinition).filter_by(factor_type="fq_sub").order_by(FactorDefinition.id).all()
     subfactor_pillar = {fd.key: fd.pillar for fd in fq_defs}
     fq_directions = {fd.key: fd.direction for fd in fq_defs}
     fq_keys = [fd.key for fd in fq_defs]
 
-    moat_defs = session.query(FactorDefinition).filter_by(factor_type="moat_sub").all()
+    moat_defs = session.query(FactorDefinition).filter_by(factor_type="moat_sub").order_by(FactorDefinition.id).all()
     moat_weights = {md.key: float(md.default_weight) for md in moat_defs if md.default_weight}
 
     moat_scores: dict[int, dict[str, float]] = {}
-    for ms in session.query(MoatSubscore).all():
+    for ms in session.query(MoatSubscore).order_by(MoatSubscore.id).all():
         moat_scores.setdefault(ms.company_id, {})[ms.subfactor_key] = float(ms.score)
 
     latest_period = _compute_fiscal_period(tick_count)
@@ -965,14 +1039,18 @@ def _refresh_fundamentals(
         fq = financial_quality_composite(r["fq_subscores"], ind_pw, subfactor_pillar)
         moat_val = moat_composite(moat_scores.get(company.id, {}), moat_weights)
         prior_cfs = latest_cfs_by_company.get(company.id)
-        mgmt = float(prior_cfs.management_quality) if prior_cfs else 50.0
-        growth = float(prior_cfs.growth_potential) if prior_cfs else 50.0
-        fcfq = float(prior_cfs.fcf_quality) if prior_cfs else 50.0
-        iscore = compute_intrinsic_score(mgmt, moat_val, fq, fcfq, growth)
+        # Carry forward from the *_base snapshot, not the (possibly event-mutated)
+        # effective column, so undecayed event deltas from the prior quarter don't
+        # get baked into next quarter's baseline -- see CompanyFactorScore's *_base
+        # column docstring and _apply_factor_effects_to_company below.
+        mgmt_base = float(prior_cfs.management_quality_base) if prior_cfs and prior_cfs.management_quality_base is not None else (float(prior_cfs.management_quality) if prior_cfs else 50.0)
+        growth_base = float(prior_cfs.growth_potential_base) if prior_cfs and prior_cfs.growth_potential_base is not None else (float(prior_cfs.growth_potential) if prior_cfs else 50.0)
+        fcfq_base = float(prior_cfs.fcf_quality_base) if prior_cfs and prior_cfs.fcf_quality_base is not None else (float(prior_cfs.fcf_quality) if prior_cfs else 50.0)
+        iscore = compute_intrinsic_score(mgmt_base, moat_val, fq, fcfq_base, growth_base)
 
         eps_val = float(r["raw"].get("eps", 0.0))
         fpe, iv = _recompute_valuation(
-            iscore, growth, company.industry_id, neutral_industry_pegs, params, eps_val,
+            iscore, growth_base, company.industry_id, neutral_industry_pegs, params, eps_val,
         )
 
         company.intrinsic_value = round(iv, 4)
@@ -993,11 +1071,14 @@ def _refresh_fundamentals(
             cfs = CompanyFactorScore(
                 company_id=company.id,
                 fiscal_period=latest_period,
-                management_quality=round(mgmt, 4),
+                management_quality=round(mgmt_base, 4),
                 moat_score=round(moat_val, 4),
                 financial_quality=round(fq, 4),
-                fcf_quality=round(fcfq, 4),
-                growth_potential=round(growth, 4),
+                fcf_quality=round(fcfq_base, 4),
+                growth_potential=round(growth_base, 4),
+                management_quality_base=round(mgmt_base, 4),
+                growth_potential_base=round(growth_base, 4),
+                fcf_quality_base=round(fcfq_base, 4),
                 intrinsic_score=round(iscore, 4),
                 fair_pe=round(fpe, 4),
                 intrinsic_value=round(iv, 4),
@@ -1034,20 +1115,30 @@ def _generate_fake_quarterly_financials(
     rng: random.Random,
 ) -> dict[str, float]:
     """Generate plausible next-quarter financials from the most recent quarter."""
+    # Check every table this function writes to, not just IncomeStatement --
+    # gating solely on IncomeStatement let a retried/re-crossed advance for
+    # this (company_id, fiscal_period) fall through to the insert path below
+    # and hit uq_balance_sheets_company_period on an already-present
+    # BalanceSheet row even though IncomeStatement looked absent (e.g. it was
+    # queried via a stale relationship cache). Only treat the quarter as
+    # already-refreshed when every row this function writes is present --
+    # a genuine transaction rollback removes all of them together, so a
+    # same-fiscal-period retry is either "none of these rows exist yet" or
+    # "all of them already do".
     existing_inc = session.query(IncomeStatement).filter_by(
         company_id=company.id, fiscal_period=fiscal_period
     ).first()
-    if existing_inc is not None:
+    existing_bal = session.query(BalanceSheet).filter_by(
+        company_id=company.id, fiscal_period=fiscal_period
+    ).first()
+    existing_cf = session.query(CashFlowStatement).filter_by(
+        company_id=company.id, fiscal_period=fiscal_period
+    ).first()
+    if existing_inc is not None and existing_bal is not None and existing_cf is not None:
         # This company's quarter was already refreshed (e.g. a retried advance
         # call re-crossing the same boundary) -- reuse the existing rows
         # instead of inserting a second row for the same (company_id,
         # fiscal_period) and hitting the unique constraint.
-        existing_bal = session.query(BalanceSheet).filter_by(
-            company_id=company.id, fiscal_period=fiscal_period
-        ).first()
-        existing_cf = session.query(CashFlowStatement).filter_by(
-            company_id=company.id, fiscal_period=fiscal_period
-        ).first()
         prior_incs = session.query(IncomeStatement).filter_by(
             company_id=company.id
         ).order_by(IncomeStatement.fiscal_period.asc()).all()
@@ -1092,7 +1183,7 @@ def _generate_fake_quarterly_financials(
 
     shares = float(company.shares_outstanding)
     shares_dil = shares * rng.uniform(1.0, 1.05)
-    eps = ni / (shares_dil / 1_000_000) if shares_dil > 0 else 0
+    eps = ni / shares_dil if shares_dil > 0 else 0
 
     inc = IncomeStatement(
         company_id=company.id, fiscal_period=fiscal_period,
@@ -1295,15 +1386,15 @@ def _mark_to_market(
 ) -> None:
     """Section 6.O step 13 -- update portfolio market values based on latest prices."""
     portfolios = session.query(Portfolio).filter_by(timeline_id=timeline_id).all()
-    price_map = {c.id: float(c.current_price or 0) for c in companies}
+    price_map = {c.id: Decimal(str(c.current_price or 0)) for c in companies}
     for pf in portfolios:
         holdings = session.query(Holding).filter_by(portfolio_id=pf.id).all()
         holdings_value = sum(
-            float(h.quantity) * price_map.get(h.company_id, 0)
-            for h in holdings
+            (Decimal(str(h.quantity)) * price_map.get(h.company_id, Decimal(0)) for h in holdings),
+            start=Decimal(0),
         )
-        total_value = float(pf.cash_balance) + holdings_value
-        pf.total_value = round(total_value, 2)
+        total_value = Decimal(str(pf.cash_balance)) + holdings_value
+        pf.total_value = total_value.quantize(Decimal("0.01"))
 
 
 def _scope_target_company_ids(
@@ -1330,67 +1421,83 @@ def _scope_target_company_ids(
 def _apply_event_factor_effects(
     session: Session,
     companies: list[Company],
-    fired_events: list,
     sim_date: date,
     timeline_id: int,
-    rng: random.Random,
     params: dict[str, float],
     neutral_industry_pegs: dict[int, float],
-    now: datetime,
     industries: dict[int, object],
 ) -> set[int]:
     """Section 6.N -- apply structural event effect_profiles to factor scores and recompute IV.
+
+    Re-applied every tick against every *currently active* (non-expired) EventInstance
+    with factor-score effects, not just events that fired today -- otherwise the effect
+    is baked in once at full severity and never decays. days_elapsed is computed fresh
+    from each instance's own sim_date, so a still-active event's contribution shrinks
+    tick by tick, matching how driver effects (apply_effect_to_drivers) already behave.
 
     Returns the set of company ids whose factor scores/IV were touched.
     """
     company_map = {c.id: c for c in companies}
     affected_company_ids: set[int] = set()
 
-    # First pass: figure out every (target_cids, effects, severity, rho) this
-    # tick needs, without touching any per-company table yet. A single
-    # market- or industry-scope factor event can target every company (or a
-    # whole sector) — previously each one ran 7 separate queries per company
-    # via _apply_factor_effects_to_company, so one market-wide event could
-    # mean 150 companies x 7 queries in a single tick. Batching below turns
-    # that into a handful of queries total, regardless of how many companies
-    # are targeted.
-    pending: list[tuple[list[int], dict[str, float], float, float]] = []
-    all_target_cids: set[int] = set()
+    active_instances = session.query(EventInstance).filter(
+        EventInstance.timeline_id == timeline_id,
+        EventInstance.expires_on >= sim_date,
+    ).all()
 
-    for ev in fired_events:
-        event_instances = session.query(EventInstance).filter_by(
-            event_id=ev.id, timeline_id=timeline_id, sim_date=sim_date
-        ).all()
-        for ei in event_instances:
-            profile = ei.applied_effects
-            if not profile or not isinstance(profile, dict):
-                continue
-            factor_keys = [k for k in profile if k not in DRIVER_KEYS]
-            if not factor_keys:
-                continue
+    event_cache: dict[int, MarketEvent] = {}
 
-            target_cids = _scope_target_company_ids(ei, company_map)
-            if not target_cids:
-                continue
+    # Collect every active instance's decayed (effects, severity, rho, days_elapsed)
+    # per target company first, so a company hit by N simultaneous events gets all N
+    # deltas applied together against its one true base in a single pass -- calling
+    # _apply_factor_effects_to_company once per event per company would have each
+    # call read the previous call's already-mutated effective column as its
+    # "factor_scores" input, silently re-introducing the same cross-call compounding
+    # this function exists to eliminate across ticks.
+    per_company_instances: dict[int, list[tuple[dict, float, float, int]]] = {}
 
-            # ei.event_id == ev.id by construction (event_instances was
-            # filtered on it above) -- ev already has decay_rate, no need to
-            # re-query MarketEvent by id here.
-            pending.append((target_cids, {k: profile[k] for k in factor_keys}, float(ei.resolved_severity), float(ev.decay_rate)))
-            all_target_cids.update(target_cids)
+    for ei in active_instances:
+        profile = ei.applied_effects
+        if not profile or not isinstance(profile, dict):
+            continue
+        factor_keys = [k for k in profile if k not in DRIVER_KEYS]
+        if not factor_keys:
+            continue
 
-    if not pending:
+        target_cids = _scope_target_company_ids(ei, company_map)
+        if not target_cids:
+            continue
+
+        if ei.event_id not in event_cache:
+            event_cache[ei.event_id] = session.query(MarketEvent).filter_by(id=ei.event_id).first()
+        event = event_cache[ei.event_id]
+
+        days_elapsed = (sim_date - ei.sim_date).days
+        severity = float(ei.resolved_severity)
+        rho = float(event.decay_rate) if event else 0.1
+        effects = {k: profile[k] for k in factor_keys}
+
+        for cid in target_cids:
+            per_company_instances.setdefault(cid, []).append((effects, severity, rho, days_elapsed))
+
+    if not per_company_instances:
         return affected_company_ids
 
-    batch = _load_factor_effect_batch(session, all_target_cids)
+    # Batch-load everything _apply_factor_effects_to_company needs across
+    # every affected company in a handful of queries, instead of 7 queries
+    # per company inside the loop below (3 of which -- IndustryPillarWeight/
+    # fq_sub/moat_sub definitions -- don't even vary by company and were
+    # being re-fetched on every single call). A currently-active event can
+    # span its full duration_days and touch a whole industry or the entire
+    # market, so this loop can easily cover most/all companies on any given
+    # tick, not just the ones with an event newly firing today.
+    batch = _load_factor_effect_batch(session, set(per_company_instances.keys()))
 
-    for target_cids, effects, severity, rho in pending:
-        for cid in target_cids:
-            _apply_factor_effects_to_company(
-                cid, company_map, industries, params, neutral_industry_pegs,
-                effects, severity, rho, 0, batch,
-            )
-            affected_company_ids.add(cid)
+    for cid, instances in per_company_instances.items():
+        _apply_factor_effects_to_company(
+            cid, company_map, industries, params, neutral_industry_pegs, instances, batch,
+        )
+        affected_company_ids.add(cid)
 
     return affected_company_ids
 
@@ -1400,19 +1507,19 @@ def _load_factor_effect_batch(session: Session, cids: set[int]) -> SimpleNamespa
     set of companies in a handful of queries, instead of 7 queries per
     company (3 of which -- IndustryPillarWeight/fq_sub/moat_sub definitions
     -- don't even vary by company and were being re-fetched every time)."""
-    pw_rows = session.query(IndustryPillarWeight).all()
+    pw_rows = session.query(IndustryPillarWeight).order_by(IndustryPillarWeight.id).all()
     industry_pw: dict[int, dict[str, float]] = {}
     for pw in pw_rows:
         industry_pw.setdefault(pw.industry_id, {})[pw.pillar] = float(pw.weight)
 
-    fq_defs = session.query(FactorDefinition).filter_by(factor_type="fq_sub").all()
+    fq_defs = session.query(FactorDefinition).filter_by(factor_type="fq_sub").order_by(FactorDefinition.id).all()
     subfactor_pillar = {fd.key: fd.pillar for fd in fq_defs}
 
-    moat_defs = session.query(FactorDefinition).filter_by(factor_type="moat_sub").all()
+    moat_defs = session.query(FactorDefinition).filter_by(factor_type="moat_sub").order_by(FactorDefinition.id).all()
     moat_weights = {md.key: float(md.default_weight) for md in moat_defs if md.default_weight}
 
     moat_rows_by_company: dict[int, list[MoatSubscore]] = {}
-    for ms in session.query(MoatSubscore).filter(MoatSubscore.company_id.in_(cids)).all():
+    for ms in session.query(MoatSubscore).filter(MoatSubscore.company_id.in_(cids)).order_by(MoatSubscore.id).all():
         moat_rows_by_company.setdefault(ms.company_id, []).append(ms)
 
     latest_cfs_by_company: dict[int, CompanyFactorScore] = {}
@@ -1463,19 +1570,29 @@ def _apply_factor_effects_to_company(
     industries: dict[int, object],
     params: dict[str, float],
     neutral_industry_pegs: dict[int, float],
-    effects: dict[str, float],
-    severity: float,
-    rho: float,
-    days_elapsed: int,
+    instances: list[tuple[dict, float, float, int]],
     batch: SimpleNamespace,
 ) -> None:
-    """Apply one event's factor-score effects to a single company and recompute IV.
+    """Apply every currently-active event's factor-score effects to a single company
+    and recompute IV. `instances` is a list of (effects, severity, rho, days_elapsed)
+    tuples, one per active EventInstance targeting this company -- summed together so
+    simultaneous events each contribute independently against the same base rather
+    than compounding on each other's already-applied deltas.
 
     Handles all 5 top-level CompanyFactorScore fields (management_quality,
     moat_score, financial_quality, fcf_quality, growth_potential) plus
     individual MoatSubscore sub-factor keys. A direct "moat_score" effect
     nudges the composite after sub-factor aggregation, distinct from
     sub-factor keys like "innovation" which feed into the composite itself.
+
+    management_quality/growth_potential/fcf_quality and MoatSubscore sub-factor
+    scores have no other source of truth to re-derive from each tick (unlike
+    moat_score/financial_quality, always recomputed fresh from MoatSubscore/
+    FinancialQualitySubscore), so their deltas are computed against the *_base /
+    score_base snapshot -- written once per quarter (or at seed time) and never
+    itself mutated by events -- so a still-active event's contribution actually
+    decays as days_elapsed grows, instead of compounding on top of yesterday's
+    already-decayed-but-baked-in value.
 
     `batch` is the pre-loaded `_load_factor_effect_batch` result shared
     across every company touched this tick, in place of per-company queries.
@@ -1486,19 +1603,37 @@ def _apply_factor_effects_to_company(
         return
 
     top_level_keys = {"management_quality", "moat_score", "financial_quality", "fcf_quality", "growth_potential"}
-    factor_scores = {ms.subfactor_key: float(ms.score) for ms in moat_rows}
-    factor_scores["management_quality"] = float(latest_cfs.management_quality)
-    factor_scores["moat_score"] = float(latest_cfs.moat_score)
-    factor_scores["financial_quality"] = float(latest_cfs.financial_quality)
-    factor_scores["fcf_quality"] = float(latest_cfs.fcf_quality)
-    factor_scores["growth_potential"] = float(latest_cfs.growth_potential)
 
-    updated = apply_effect_to_factor_scores(factor_scores, effects, severity, rho, days_elapsed)
+    base_scores = {
+        ms.subfactor_key: float(ms.score_base) if ms.score_base is not None else float(ms.score)
+        for ms in moat_rows
+    }
+    base_scores["management_quality"] = (
+        float(latest_cfs.management_quality_base) if latest_cfs.management_quality_base is not None
+        else float(latest_cfs.management_quality)
+    )
+    base_scores["moat_score"] = float(latest_cfs.moat_score)
+    base_scores["financial_quality"] = float(latest_cfs.financial_quality)
+    base_scores["fcf_quality"] = (
+        float(latest_cfs.fcf_quality_base) if latest_cfs.fcf_quality_base is not None
+        else float(latest_cfs.fcf_quality)
+    )
+    base_scores["growth_potential"] = (
+        float(latest_cfs.growth_potential_base) if latest_cfs.growth_potential_base is not None
+        else float(latest_cfs.growth_potential)
+    )
 
-    # Write back MoatSubscore sub-factor updates (keys that aren't top-level).
+    updated = dict(base_scores)
+    for effects, severity, rho, days_elapsed in instances:
+        updated = apply_effect_to_factor_scores(updated, effects, severity, rho, days_elapsed)
+
+    # Write back MoatSubscore sub-factor updates (keys that aren't top-level);
+    # score_base is untouched so next tick's decay is computed from the same anchor.
     for ms in moat_rows:
         if ms.subfactor_key in updated and ms.subfactor_key not in top_level_keys:
             ms.score = round(updated[ms.subfactor_key], 4)
+            if ms.score_base is None:
+                ms.score_base = round(base_scores[ms.subfactor_key], 4)
 
     ind_pw = batch.industry_pw.get(company_map[cid].industry_id, {})
     subfactor_pillar = batch.subfactor_pillar
@@ -1510,7 +1645,7 @@ def _apply_factor_effects_to_company(
     latest_fq_subs = batch.fq_subs_by_company.get(cid, [])
     fq_subs = {fs.subfactor_key: float(fs.subscore) for fs in latest_fq_subs}
     base_fq = financial_quality_composite(fq_subs, ind_pw, subfactor_pillar) if fq_subs else float(latest_cfs.financial_quality)
-    fq_delta = updated["financial_quality"] - factor_scores["financial_quality"]
+    fq_delta = updated["financial_quality"] - base_scores["financial_quality"]
     fq = max(0.0, min(100.0, base_fq + fq_delta))
 
     moat_weights = batch.moat_weights
@@ -1525,7 +1660,7 @@ def _apply_factor_effects_to_company(
         moat_composite(weighted_subfactors, moat_weights)
         if weighted_subfactors else float(latest_cfs.moat_score)
     )
-    moat_delta = updated["moat_score"] - factor_scores["moat_score"]
+    moat_delta = updated["moat_score"] - base_scores["moat_score"]
     moat_val = max(0.0, min(100.0, subfactor_moat + moat_delta))
 
     mgmt = updated["management_quality"]
@@ -1543,6 +1678,18 @@ def _apply_factor_effects_to_company(
     # Persist onto the actual CompanyFactorScore row (not just the
     # denormalized Company fields) so the next tick's driver computations
     # and any direct query of CompanyFactorScore see the updated scores.
+    # *_base columns are left untouched so next tick's decay is computed from
+    # the same anchor -- except when a legacy/pre-migration row has no base
+    # snapshot yet, in which case this tick's pre-effect value becomes the
+    # anchor going forward (best available; the true undecayed value predates
+    # this row and isn't otherwise recoverable).
+    if latest_cfs.management_quality_base is None:
+        latest_cfs.management_quality_base = round(base_scores["management_quality"], 4)
+    if latest_cfs.fcf_quality_base is None:
+        latest_cfs.fcf_quality_base = round(base_scores["fcf_quality"], 4)
+    if latest_cfs.growth_potential_base is None:
+        latest_cfs.growth_potential_base = round(base_scores["growth_potential"], 4)
+
     latest_cfs.management_quality = round(mgmt, 4)
     latest_cfs.moat_score = round(moat_val, 4)
     latest_cfs.financial_quality = round(fq, 4)

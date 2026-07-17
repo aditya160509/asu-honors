@@ -27,8 +27,9 @@ def apply_effect_to_drivers(
     """
     decay_factor = decay(rho, days_elapsed)
     updated = dict(driver_values)
+    normalized_severity = severity / 100.0
     for driver_key, base_effect in effect_profile.items():
-        delta = base_effect * severity * decay_factor
+        delta = base_effect * normalized_severity * decay_factor
         updated[driver_key] = _clamp(updated.get(driver_key, 0.0) + delta)
     return updated
 
@@ -45,8 +46,9 @@ def apply_effect_to_factor_scores(
     """Section 6.N — same decayed-effect application, clamped to the valid score range."""
     decay_factor = decay(rho, days_elapsed)
     updated = dict(factor_scores)
+    normalized_severity = severity / 100.0
     for factor_key, base_effect in effect_profile.items():
-        delta = base_effect * severity * decay_factor
+        delta = base_effect * normalized_severity * decay_factor
         new_value = updated.get(factor_key, 0.0) + delta
         updated[factor_key] = max(score_min, min(score_max, new_value))
     return updated

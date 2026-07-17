@@ -36,6 +36,7 @@ class TickState:
     sim_day: int
     market_factor_return: float
     companies: tuple[CompanyTickInput, ...] = field(default_factory=tuple)
+    pressure_scale: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -44,13 +45,20 @@ class TickResult:
     outputs: tuple[CompanyTickOutput, ...]
 
 
-def run_tick(state: TickState) -> TickResult:
+def run_tick(state: TickState, k_drift: float = 0.03) -> TickResult:
     """Section 6.O — advance every company one sim-day via a single vectorized OU update."""
     n = len(state.companies)
     if n == 0:
         return TickResult(sim_day=state.sim_day + 1, outputs=())
 
-    price_pressures = np.array(
+    # composite_price_pressure sums 7 drivers each clamped to [-1, 1], so it can
+    # reach magnitude ~1.0 -- far larger than a plausible single-day return.
+    # pressure_scale converts that composite score into an actual daily log-return
+    # contribution; without it, whenever several drivers align (e.g. every
+    # company during the same cycle phase) the raw move overshoots the circuit
+    # breaker's r_cap and gets clipped identically for every company, producing
+    # lockstep price action regardless of company-specific fundamentals.
+    price_pressures = state.pressure_scale * np.array(
         [composite_price_pressure(c.driver_values, c.driver_weights) for c in state.companies]
     )
     y = np.array([c.y for c in state.companies])
@@ -72,6 +80,7 @@ def run_tick(state: TickState) -> TickResult:
         f_s=f_s,
         sigma=sigma,
         epsilon=epsilon,
+        k_drift=k_drift,
     )
     new_price = price_from_gap(iv, new_y)
 

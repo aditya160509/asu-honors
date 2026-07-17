@@ -72,7 +72,7 @@ def _seed_minimal(session: Session) -> int:
     session.execute(sa_text("""INSERT INTO consensus_estimates (company_id, fiscal_period, consensus_eps, consensus_revenue, created_at, updated_at) VALUES (1, '2026Q1', 0.95, 980000, datetime('now'), datetime('now'))"""))
     session.execute(sa_text("""INSERT INTO timelines (id, name, rng_seed, is_live, created_at, updated_at) VALUES (1, 'Live Market', 42, 1, datetime('now'), datetime('now'))"""))
     session.execute(sa_text("""INSERT INTO simulation_state (timeline_id, current_sim_date, tick_count, is_running, created_at, updated_at) VALUES (1, '2026-01-02', 0, 0, datetime('now'), datetime('now'))"""))
-    session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('mean_reversion_rate', '0.05', 'global', datetime('now'), datetime('now'))"""))
+    session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('theta_default', '0.05', 'global', datetime('now'), datetime('now'))"""))
     session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('quality_mult_min', '0.6', 'global', datetime('now'), datetime('now'))"""))
     session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('quality_mult_max', '2.0', 'global', datetime('now'), datetime('now'))"""))
     session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('quality_mult_k', '0.11', 'global', datetime('now'), datetime('now'))"""))
@@ -91,9 +91,9 @@ def _seed_minimal(session: Session) -> int:
     session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('k_m', '2.0', 'global', datetime('now'), datetime('now'))"""))
     session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('liquidity_sensitivity', '0.5', 'global', datetime('now'), datetime('now'))"""))
     session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('expected_annual_growth', '0.08', 'global', datetime('now'), datetime('now'))"""))
-    session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('rho_es', '0.15', 'global', datetime('now'), datetime('now'))"""))
-    session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('rho_g', '0.15', 'global', datetime('now'), datetime('now'))"""))
-    session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('rho_news', '0.1', 'global', datetime('now'), datetime('now'))"""))
+    session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('earnings_surprise_decay_rate', '0.15', 'global', datetime('now'), datetime('now'))"""))
+    session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('guidance_decay_rate', '0.15', 'global', datetime('now'), datetime('now'))"""))
+    session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('news_decay_rate', '0.1', 'global', datetime('now'), datetime('now'))"""))
     session.commit()
     return 1
 
@@ -127,23 +127,55 @@ def test_run_tick_basic(session):
 
 
 def test_run_tick_idempotent(session):
+    """Rewind to replay a day that already has a real PriceHistory row from a
+    completed tick (tick_count > 0), not the seeded tick_count == 0 state --
+    that specific state is reserved for "this is the seed_initial_prices
+    baseline day, not yet ticked" and is covered by
+    test_run_tick_first_tick_skips_seeded_baseline_day instead."""
     timeline_id = _seed_minimal(session)
     r1 = run_tick(session, timeline_id)
     session.commit()
-
-    sim_state = session.query(SimulationState).filter_by(timeline_id=timeline_id).first()
-    sim_state.current_sim_date = r1["sim_date"]
-    sim_state.tick_count = r1["tick_count"] - 1
-    session.commit()
-
     r2 = run_tick(session, timeline_id)
     session.commit()
 
+    sim_state = session.query(SimulationState).filter_by(timeline_id=timeline_id).first()
+    sim_state.current_sim_date = r2["sim_date"]
+    sim_state.tick_count = r2["tick_count"] - 1
+    session.commit()
+
+    r3 = run_tick(session, timeline_id)
+    session.commit()
+
     assert r1["status"] == "completed"
-    assert r2["status"] == "skipped"
+    assert r2["status"] == "completed"
+    assert r3["status"] == "skipped"
 
     prices = session.query(PriceHistory).filter_by(timeline_id=timeline_id).all()
-    assert len(prices) == 1
+    assert len(prices) == 2
+
+
+def test_run_tick_first_tick_skips_seeded_baseline_day(session):
+    """Regression test: db/seeds/seed_initial_prices.py writes a PriceHistory row
+    for SimulationState.current_sim_date as the day-0 baseline close, with
+    tick_count left at 0 (it's a seed, not a completed tick). The first real
+    /sim/advance call must target the following day, not treat the seeded
+    baseline as "already executed" and get stuck at tick_count == 0 forever."""
+    timeline_id = _seed_minimal(session)
+    sim_state = session.query(SimulationState).filter_by(timeline_id=timeline_id).first()
+    session.add(PriceHistory(
+        timeline_id=timeline_id, company_id=1, sim_date=sim_state.current_sim_date,
+        open=100.0, high=101.0, low=99.0, close=100.0, volume=1000,
+        intrinsic_value=100.0, order_imbalance=0.0,
+    ))
+    session.commit()
+    seeded_date = sim_state.current_sim_date
+
+    result = run_tick(session, timeline_id)
+    session.commit()
+
+    assert result["status"] == "completed"
+    assert result["sim_date"] == seeded_date + timedelta(days=1)
+    assert result["tick_count"] == 1
 
 
 def test_run_tick_writes_driver_scores(session):
@@ -643,7 +675,7 @@ def _run_factor_effects_directly(session, timeline_id, event_id, scope_type, sco
     sim_date = sim_date or date(2026, 1, 2)
     me = MarketEvent(
         id=event_id, name=f"Test Event {event_id}", category="governance",
-        scope=scope_type, severity_range="(1.0, 1.0)",
+        scope=scope_type, severity_range="(100.0, 100.0)",
         sentiment="negative", effect_profile=effect_profile,
         duration_days=10, decay_rate=0.1, probability_weight=1.0,
     )
@@ -651,7 +683,7 @@ def _run_factor_effects_directly(session, timeline_id, event_id, scope_type, sco
     session.flush()
     ei = EventInstance(
         event_id=event_id, timeline_id=timeline_id, scope_ref=scope_ref, scope_type=scope_type,
-        sim_date=sim_date, resolved_severity=1.0,
+        sim_date=sim_date, resolved_severity=100.0,
         applied_effects=effect_profile,
         expires_on=sim_date + timedelta(days=10),
     )
@@ -662,10 +694,10 @@ def _run_factor_effects_directly(session, timeline_id, event_id, scope_type, sco
     industries = {ind.id: ind for ind in session.query(Industry).all()}
     neutral_industry_pegs = {ind.id: 1.4 for ind in session.query(Industry).all()}
     affected = _apply_event_factor_effects(
-        session, companies, [me], sim_date, timeline_id,
-        random.Random(1), {"quality_mult_min": "0.6", "quality_mult_max": "2.0",
-                            "quality_mult_k": "0.11", "quality_mult_inflection": "60"},
-        neutral_industry_pegs, None, industries,
+        session, companies, sim_date, timeline_id,
+        {"quality_mult_min": "0.6", "quality_mult_max": "2.0",
+         "quality_mult_k": "0.11", "quality_mult_inflection": "60"},
+        neutral_industry_pegs, industries,
     )
     session.commit()
     return affected
@@ -692,6 +724,76 @@ def test_financial_quality_effect_persists_to_company_factor_score(session):
     # base 50.0 + (-10.0 * severity=1.0 * decay(0.1, 0)=1.0) = 40.0, not 0.0 - 10.0.
     assert math.isclose(float(after.financial_quality), 40.0, abs_tol=0.01)
     assert float(after.intrinsic_value) != before_iv
+
+
+def test_management_quality_effect_decays_across_ticks_without_compounding(session):
+    """Regression test: management_quality has no other source of truth to re-derive
+    from each tick (unlike moat_score/financial_quality), so its event effect used to
+    be baked in once at full severity via a hardcoded days_elapsed=0 and never decay --
+    worse, calling the apply function again on a later day would read the already-
+    mutated column as its baseline and add a second full-strength delta on top,
+    compounding instead of decaying. Verify the effect now (a) shrinks as days_elapsed
+    grows and (b) never exceeds what a single application at the correct days_elapsed
+    would produce, proving repeated ticks decay toward baseline rather than stack."""
+    from engine.orchestrator import _apply_event_factor_effects
+    from engine.events import decay
+
+    timeline_id = _seed_minimal(session)
+    baseline = session.query(CompanyFactorScore).filter_by(company_id=1).order_by(
+        CompanyFactorScore.fiscal_period.desc()
+    ).first()
+    base_mgmt = float(baseline.management_quality)
+    assert base_mgmt == 50.0
+
+    rho = 0.1
+    severity = 100.0
+    effect_profile = {"management_quality": -20.0}
+    fire_date = date(2026, 1, 2)
+    me = MarketEvent(
+        id=201, name="Mgmt Event", category="governance", scope="company",
+        severity_range="(100.0, 100.0)", sentiment="negative", effect_profile=effect_profile,
+        duration_days=30, decay_rate=rho, probability_weight=1.0,
+    )
+    session.add(me)
+    session.flush()
+    session.add(EventInstance(
+        event_id=201, timeline_id=timeline_id, scope_ref=1, scope_type="company",
+        sim_date=fire_date, resolved_severity=severity, applied_effects=effect_profile,
+        expires_on=fire_date + timedelta(days=30),
+    ))
+    session.commit()
+
+    companies = session.query(Company).all()
+    industries = {ind.id: ind for ind in session.query(Industry).all()}
+    neutral_industry_pegs = {ind.id: 1.4 for ind in session.query(Industry).all()}
+    params = {"quality_mult_min": "0.6", "quality_mult_max": "2.0",
+              "quality_mult_k": "0.11", "quality_mult_inflection": "60"}
+
+    # Simulate 3 ticks on the day the event fires, then 5 and 10 days later --
+    # re-invoking the same way run_ticks would call this once per tick.
+    mgmt_by_day: dict[int, float] = {}
+    for days_after in (0, 5, 10):
+        _apply_event_factor_effects(
+            session, companies, fire_date + timedelta(days=days_after), timeline_id,
+            params, neutral_industry_pegs, industries,
+        )
+        session.commit()
+        cfs = session.query(CompanyFactorScore).filter_by(company_id=1).order_by(
+            CompanyFactorScore.fiscal_period.desc()
+        ).first()
+        mgmt_by_day[days_after] = float(cfs.management_quality)
+
+    # Effect must shrink monotonically toward the undecayed base as days_elapsed grows.
+    assert mgmt_by_day[0] < mgmt_by_day[5] < mgmt_by_day[10] < base_mgmt + 0.01
+
+    # Each day's value must match a single correctly-decayed application against the
+    # true base (50.0), not a compounded sum of 3 successive full/partial deltas.
+    for days_after, observed in mgmt_by_day.items():
+        expected = base_mgmt + (-20.0 * (severity / 100.0) * decay(rho, days_after))
+        assert math.isclose(observed, expected, abs_tol=0.01), (
+            f"day {days_after}: expected {expected}, got {observed} -- "
+            f"looks compounded rather than recomputed from base"
+        )
 
 
 def test_moat_score_direct_key_effect_applies_on_top_of_subfactor_composite(session):
@@ -1153,6 +1255,38 @@ def test_economic_cycle_reused_from_existing(session):
 
     cycles = session.query(EconomicCycleState).filter_by(timeline_id=timeline_id).all()
     assert len(cycles) == 1  # No new cycle created
+
+
+def test_repeated_skipped_tick_does_not_duplicate_economic_cycle_state(session):
+    """Regression test: run_ticks used to call _load_tick_state (which inserts a new
+    EconomicCycleState row when none exists yet for the target date) BEFORE checking
+    whether that date was already ticked. A client retry / double-click of advance for
+    an already-completed day would still add and commit a second EconomicCycleState
+    row for the same (timeline_id, sim_date), since the idempotency check only
+    discarded the rest of that loop iteration, not the side effect already performed
+    by _load_tick_state. Verify a repeat call for a day that's already ticked adds
+    zero new EconomicCycleState rows."""
+    from db.models.timeseries import EconomicCycleState
+
+    timeline_id = _seed_minimal(session)
+    r1 = run_tick(session, timeline_id)
+    session.commit()
+    assert r1["status"] == "completed"
+
+    cycles_after_first_tick = session.query(EconomicCycleState).filter_by(timeline_id=timeline_id).count()
+
+    # Rewind to replay the same day again, simulating a retried/duplicate advance call.
+    sim_state = session.query(SimulationState).filter_by(timeline_id=timeline_id).first()
+    sim_state.current_sim_date = r1["sim_date"]
+    sim_state.tick_count = r1["tick_count"] - 1
+    session.commit()
+
+    r2 = run_tick(session, timeline_id)
+    session.commit()
+    assert r2["status"] == "skipped"
+
+    cycles_after_retry = session.query(EconomicCycleState).filter_by(timeline_id=timeline_id).count()
+    assert cycles_after_retry == cycles_after_first_tick
 
 
 # ── Event in _apply_event_factor_effects with company not in company_map (line 1099)

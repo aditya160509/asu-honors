@@ -123,8 +123,8 @@ def test_drift_iv_zero_growth_is_noop():
 
 def test_drift_iv_matches_daily_compounding_formula():
     iv = 100.0
-    growth = 0.08
+    growth = 8.0
     days = 252
     result = val.drift_iv(iv, growth, days)
-    expected = iv * (1 + growth) ** (1 / days)
+    expected = iv * (1 + growth / 100.0) ** (1 / days)
     assert math.isclose(result, expected)

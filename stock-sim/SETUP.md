@@ -93,6 +93,24 @@ alembic upgrade head                 # apply any new migrations
 python3 -m pytest tests/ -v          # run tests
 ```
 
+**Then restart your dev servers.** A running `uvicorn` process does NOT
+pick up new SQLAlchemy models or code changes on its own unless it was
+started with `--reload` — after `git pull` + `alembic upgrade head`, an
+already-running API process will keep using its old in-memory model
+definitions and start throwing `UndefinedColumn` / schema-mismatch errors
+against the now-newer database. This bit us once already (migration 0009
+added `orders`/`transactions.order_id`; a stale process without `--reload`
+crashed every trade/portfolio endpoint until it was restarted).
+
+Use `./dev.sh` instead of starting `uvicorn` by hand — it runs the
+migration-drift check above automatically, applies any pending migration,
+and starts the API with `--reload` so future code changes are picked up
+live without a manual restart:
+
+```bash
+./dev.sh
+```
+
 ---
 
 ## Run seed data
