@@ -45,7 +45,7 @@ class TickResult:
     outputs: tuple[CompanyTickOutput, ...]
 
 
-def run_tick(state: TickState) -> TickResult:
+def run_tick(state: TickState, k_drift: float = 0.03) -> TickResult:
     """Section 6.O — advance every company one sim-day via a single vectorized OU update."""
     n = len(state.companies)
     if n == 0:
@@ -80,6 +80,7 @@ def run_tick(state: TickState) -> TickResult:
         f_s=f_s,
         sigma=sigma,
         epsilon=epsilon,
+        k_drift=k_drift,
     )
     new_price = price_from_gap(iv, new_y)
 

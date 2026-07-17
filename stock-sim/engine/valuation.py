@@ -99,5 +99,5 @@ def intrinsic_value_per_share(fair_pe: float, eps: float) -> float:
 
 def drift_iv(iv: float, expected_annual_growth: float, trading_days_per_year: int = 252) -> float:
     """Section 6.F — daily drift of intrinsic value toward its annual growth rate."""
-    daily_growth = (1 + expected_annual_growth) ** (1 / trading_days_per_year) - 1
+    daily_growth = (1 + expected_annual_growth / 100.0) ** (1 / trading_days_per_year) - 1
     return iv * (1 + daily_growth)

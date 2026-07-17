@@ -262,7 +262,7 @@ def run_ticks(
             companies=tick_inputs,
             pressure_scale=float(state.params.get("k_drift", 0.03)),
         )
-        tick_result = engine_run_tick(tick_state)
+        tick_result = engine_run_tick(tick_state, k_drift=float(state.params.get("k_drift", 0.03)))
 
         # -- Circuit breaker + OHLC + volume --------------------------------
         ohlc_results, volume_results, imbalance_results = _update_prices_and_ohlc(
@@ -393,8 +393,8 @@ def _load_tick_state(session: Session, timeline_id: int, sim_date: date) -> Simp
 
     f_m = cycle_state["market_factor_return"]
 
-    companies = session.query(Company).all()
-    industries = {ind.id: ind for ind in session.query(Industry).all()}
+    companies = session.query(Company).order_by(Company.id).all()
+    industries = {ind.id: ind for ind in session.query(Industry).order_by(Industry.id).all()}
     industry_ids = list(industries.keys())
 
     sector_shocks = generate_sector_shocks(
@@ -523,7 +523,7 @@ def _compute_drivers(
     iv = float(company.intrinsic_value)
 
     y = np.log(max(prev_close, 0.01) / max(iv, 0.01))
-    theta = float(state.params.get("mean_reversion_rate", 0.05))
+    theta = float(state.params.get("theta_default", 0.05))
     beta_m = float(company.beta_market)
     beta_s = float(company.beta_sector)
     epsilon = state.rng.gauss(0, 1)
@@ -564,7 +564,7 @@ def _compute_drivers(
     if latest_inc and latest_ce:
         actual_eps = float(latest_inc.eps)
         consensus_eps = float(latest_ce.consensus_eps)
-        es = earnings_surprise(actual_eps, consensus_eps, days_since_earnings, float(state.params.get("rho_es", 0.15)))
+        es = earnings_surprise(actual_eps, consensus_eps, days_since_earnings, float(state.params.get("earnings_surprise_decay_rate", 0.15)))
 
     gd = 0.0
     if latest_inc and latest_ce:
@@ -573,9 +573,9 @@ def _compute_drivers(
         beat = actual_eps > consensus_eps
         miss = actual_eps < consensus_eps
         if beat:
-            gd = guidance("raised", min(abs(actual_eps - consensus_eps) / max(abs(consensus_eps), 0.01), 0.5), days_since_earnings, float(state.params.get("rho_g", 0.15)))
+            gd = guidance("raised", min(abs(actual_eps - consensus_eps) / max(abs(consensus_eps), 0.01), 0.5), days_since_earnings, float(state.params.get("guidance_decay_rate", 0.15)))
         elif miss:
-            gd = guidance("cut", min(abs(actual_eps - consensus_eps) / max(abs(consensus_eps), 0.01), 0.5), days_since_earnings, float(state.params.get("rho_g", 0.15)))
+            gd = guidance("cut", min(abs(actual_eps - consensus_eps) / max(abs(consensus_eps), 0.01), 0.5), days_since_earnings, float(state.params.get("guidance_decay_rate", 0.15)))
 
     ib = institutional_buying(state.rng.uniform(-0.1, 0.1) + state.cycle_state.get("market_sentiment", 0) * 0.05)
 
@@ -584,7 +584,7 @@ def _compute_drivers(
         session, timeline_id, company.id, ind.id, sim_date, state.epoch_start,
     )
     if active_events:
-        ns = news_severity(active_events, tick_count, float(state.params.get("rho_news", 0.1)))
+        ns = news_severity(active_events, tick_count, float(state.params.get("news_decay_rate", 0.1)))
 
     driver_values = {
         "value_opportunity": vo,
@@ -812,7 +812,7 @@ def _execute_events(
     for ev in fired_events:
         event_instances = session.query(EventInstance).filter_by(
             event_id=ev.id, timeline_id=timeline_id, sim_date=sim_date,
-        ).all()
+        ).order_by(EventInstance.id).all()
         for ei in event_instances:
             company_name = None
             industry_name = None
@@ -911,21 +911,21 @@ def _refresh_fundamentals(
     tick_count: int,
 ) -> None:
     """Section 6.F -- generate new financial statements and recompute FQ/IV at quarter boundary."""
-    pw_rows = session.query(IndustryPillarWeight).all()
+    pw_rows = session.query(IndustryPillarWeight).order_by(IndustryPillarWeight.id).all()
     industry_pw: dict[int, dict[str, float]] = {}
     for pw in pw_rows:
         industry_pw.setdefault(pw.industry_id, {})[pw.pillar] = float(pw.weight)
 
-    fq_defs = session.query(FactorDefinition).filter_by(factor_type="fq_sub").all()
+    fq_defs = session.query(FactorDefinition).filter_by(factor_type="fq_sub").order_by(FactorDefinition.id).all()
     subfactor_pillar = {fd.key: fd.pillar for fd in fq_defs}
     fq_directions = {fd.key: fd.direction for fd in fq_defs}
     fq_keys = [fd.key for fd in fq_defs]
 
-    moat_defs = session.query(FactorDefinition).filter_by(factor_type="moat_sub").all()
+    moat_defs = session.query(FactorDefinition).filter_by(factor_type="moat_sub").order_by(FactorDefinition.id).all()
     moat_weights = {md.key: float(md.default_weight) for md in moat_defs if md.default_weight}
 
     moat_scores: dict[int, dict[str, float]] = {}
-    for ms in session.query(MoatSubscore).all():
+    for ms in session.query(MoatSubscore).order_by(MoatSubscore.id).all():
         moat_scores.setdefault(ms.company_id, {})[ms.subfactor_key] = float(ms.score)
 
     latest_period = _compute_fiscal_period(tick_count)
@@ -1050,20 +1050,27 @@ def _generate_fake_quarterly_financials(
     rng: random.Random,
 ) -> dict[str, float]:
     """Generate plausible next-quarter financials from the most recent quarter."""
+    # Check every table this function writes to, not just IncomeStatement --
+    # a request that crashed mid-tick can leave a partial write where some
+    # rows for this (company_id, fiscal_period) exist and others don't (e.g.
+    # BalanceSheet committed but IncomeStatement didn't). Gating solely on
+    # IncomeStatement let a retried advance fall through to the insert path
+    # below and hit uq_balance_sheets_company_period on the already-present
+    # BalanceSheet row.
     existing_inc = session.query(IncomeStatement).filter_by(
         company_id=company.id, fiscal_period=fiscal_period
     ).first()
-    if existing_inc is not None:
-        # This company's quarter was already refreshed (e.g. a retried advance
-        # call re-crossing the same boundary) -- reuse the existing rows
-        # instead of inserting a second row for the same (company_id,
-        # fiscal_period) and hitting the unique constraint.
-        existing_bal = session.query(BalanceSheet).filter_by(
-            company_id=company.id, fiscal_period=fiscal_period
-        ).first()
-        existing_cf = session.query(CashFlowStatement).filter_by(
-            company_id=company.id, fiscal_period=fiscal_period
-        ).first()
+    existing_bal = session.query(BalanceSheet).filter_by(
+        company_id=company.id, fiscal_period=fiscal_period
+    ).first()
+    existing_cf = session.query(CashFlowStatement).filter_by(
+        company_id=company.id, fiscal_period=fiscal_period
+    ).first()
+    if existing_inc is not None or existing_bal is not None or existing_cf is not None:
+        # This company's quarter was already (at least partially) refreshed --
+        # reuse whatever rows exist instead of re-inserting and hitting a
+        # unique constraint. Missing rows are backfilled from the ones that
+        # are present rather than left null.
         prior_incs = session.query(IncomeStatement).filter_by(
             company_id=company.id
         ).order_by(IncomeStatement.fiscal_period.asc()).all()
@@ -1108,7 +1115,7 @@ def _generate_fake_quarterly_financials(
 
     shares = float(company.shares_outstanding)
     shares_dil = shares * rng.uniform(1.0, 1.05)
-    eps = ni / (shares_dil / 1_000_000) if shares_dil > 0 else 0
+    eps = ni / shares_dil if shares_dil > 0 else 0
 
     inc = IncomeStatement(
         company_id=company.id, fiscal_period=fiscal_period,
@@ -1290,7 +1297,7 @@ def _get_active_events_for_company(
             and_(EventInstance.scope_type == "company", EventInstance.scope_ref == company_id),
             and_(EventInstance.scope_type == "industry", EventInstance.scope_ref == industry_id),
         ),
-    ).all()
+    ).order_by(EventInstance.id).all()
 
     result = []
     for inst in instances:
@@ -1488,12 +1495,12 @@ def _apply_factor_effects_to_company(
             if ms.score_base is None:
                 ms.score_base = round(base_scores[ms.subfactor_key], 4)
 
-    pw_rows = session.query(IndustryPillarWeight).all()
+    pw_rows = session.query(IndustryPillarWeight).order_by(IndustryPillarWeight.id).all()
     industry_pw: dict[int, dict[str, float]] = {}
     for pw in pw_rows:
         industry_pw.setdefault(pw.industry_id, {})[pw.pillar] = float(pw.weight)
 
-    fq_defs = session.query(FactorDefinition).filter_by(factor_type="fq_sub").all()
+    fq_defs = session.query(FactorDefinition).filter_by(factor_type="fq_sub").order_by(FactorDefinition.id).all()
     subfactor_pillar = {fd.key: fd.pillar for fd in fq_defs}
 
     ind_pw = industry_pw.get(company_map[cid].industry_id, {})
@@ -1510,7 +1517,7 @@ def _apply_factor_effects_to_company(
     fq_delta = updated["financial_quality"] - base_scores["financial_quality"]
     fq = max(0.0, min(100.0, base_fq + fq_delta))
 
-    moat_defs = session.query(FactorDefinition).filter_by(factor_type="moat_sub").all()
+    moat_defs = session.query(FactorDefinition).filter_by(factor_type="moat_sub").order_by(FactorDefinition.id).all()
     moat_weights = {md.key: float(md.default_weight) for md in moat_defs if md.default_weight}
     # moat_composite requires every subfactor key to have a matching weight;
     # only pass sub-factors that are actually weighted (seed data may have

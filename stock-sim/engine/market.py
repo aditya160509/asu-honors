@@ -27,13 +27,16 @@ def update_log_gap(
     f_s: float,
     sigma: float,
     epsilon: float,
+    k_drift: float = 1.0,
 ) -> float:
-    """Section 6.J — y_{t+1} = y_t - theta*y_t + price_pressure + beta_m*F_m + beta_s*F_s + sigma*epsilon.
+    """Section 6.J — y_{t+1} = y_t - theta*y_t + k_drift*price_pressure + beta_m*F_m + beta_s*F_s + sigma*epsilon.
 
     y is the log gap between price and intrinsic value; theta pulls it back to 0.
     With y_t=0 and all shocks/pressure zero, y_{t+1}=0 (fixed point).
+    k_drift scales price_pressure into a reasonable daily log-return (default 1.0
+    maintains backward compatibility for direct callers; production uses 0.03).
     """
-    return y_t - theta * y_t + price_pressure + beta_m * f_m + beta_s * f_s + sigma * epsilon
+    return y_t - theta * y_t + k_drift * price_pressure + beta_m * f_m + beta_s * f_s + sigma * epsilon
 
 
 def price_from_gap(iv: float, y: float) -> float:
@@ -51,6 +54,7 @@ def update_market_tick(
     f_s: np.ndarray,
     sigma: np.ndarray,
     epsilon: np.ndarray,
+    k_drift: float = 1.0,
 ) -> np.ndarray:
     """Section 6.J / Section 8 — vectorized OU step for an entire universe of companies in one call."""
-    return y - theta * y + price_pressure + beta_m * f_m + beta_s * f_s + sigma * epsilon
+    return y - theta * y + k_drift * price_pressure + beta_m * f_m + beta_s * f_s + sigma * epsilon

@@ -31,16 +31,22 @@ def asset_turnover(revenue: float, total_assets: float) -> float:
 
 def days_sales_outstanding(receivables: float, revenue: float, period_days: float = 365) -> float:
     """Section 4.4 — DSO = Receivables / Revenue * period_days."""
+    if revenue == 0:
+        return float("inf")
     return receivables / revenue * period_days
 
 
 def days_inventory_outstanding(inventory: float, cogs: float, period_days: float = 365) -> float:
     """Section 4.4 — DIO = Inventory / COGS * period_days."""
+    if cogs == 0:
+        return float("inf")
     return inventory / cogs * period_days
 
 
 def days_payables_outstanding(payables: float, cogs: float, period_days: float = 365) -> float:
     """Section 4.4 — DPO = Payables / COGS * period_days."""
+    if cogs == 0:
+        return float("inf")
     return payables / cogs * period_days
 
 
@@ -77,11 +83,15 @@ def accruals_ratio(net_profit: float, operating_cash_flow: float, total_assets: 
 
 def free_cash_flow_margin(free_cash_flow: float, revenue: float) -> float:
     """Section 4.4 — FCF Margin = Free Cash Flow / Revenue."""
+    if revenue == 0:
+        return float("inf")
     return free_cash_flow / revenue
 
 
 def gross_margin(gross_profit: float, revenue: float) -> float:
     """Section 4.4 — Gross Margin = Gross Profit / Revenue."""
+    if revenue == 0:
+        return float("inf")
     return gross_profit / revenue
 
 
