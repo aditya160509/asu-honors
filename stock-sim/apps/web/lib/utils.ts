@@ -5,12 +5,14 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-/** Prices — always 2 decimal places, $ prefix. */
+/** Prices — always 2 decimal places, $ prefix, thousands separators, minus before the $ for negatives. */
 export function formatPrice(price: number | string | null | undefined): string {
   if (price == null) return "N/A";
   const num = Number(price);
   if (Number.isNaN(num)) return "N/A";
-  return `$${num.toFixed(2)}`;
+  const sign = num < 0 ? "-" : "";
+  const abs = Math.abs(num).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return `${sign}$${abs}`;
 }
 
 /** Percentages — always show sign, 2 decimal places. */
@@ -22,16 +24,18 @@ export function formatPct(value: number | string | null | undefined): string {
   return `${sign}${num.toFixed(2)}%`;
 }
 
-/** Large numbers — abbreviate with B/M/K. */
+/** Large numbers — abbreviate with B/M/K; below that, same rules as formatPrice. */
 export function formatLarge(value: number | string | null | undefined): string {
   if (value == null) return "N/A";
   const num = Number(value);
   if (Number.isNaN(num)) return "N/A";
+  const sign = num < 0 ? "-" : "";
   const abs = Math.abs(num);
-  if (abs >= 1e9) return `$${(num / 1e9).toFixed(2)}B`;
-  if (abs >= 1e6) return `$${(num / 1e6).toFixed(2)}M`;
-  if (abs >= 1e3) return `$${(num / 1e3).toFixed(1)}K`;
-  return `$${num.toFixed(2)}`;
+  const withSeparators = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  if (abs >= 1e9) return `${sign}$${withSeparators(abs / 1e9)}B`;
+  if (abs >= 1e6) return `${sign}$${withSeparators(abs / 1e6)}M`;
+  if (abs >= 1e3) return `${sign}$${(abs / 1e3).toFixed(1)}K`;
+  return formatPrice(num);
 }
 
 /** Compact dates in tables — YYYY-MM-DD. */

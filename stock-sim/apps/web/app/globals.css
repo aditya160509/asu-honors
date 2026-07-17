@@ -172,6 +172,22 @@
     --radius: var(--radius-md);
   }
 
+  /* Bloomberg-terminal tokens — scoped to the Screener page only via
+     .mv-terminal, never leaking into the rest of the TERMINAL surface's
+     Meridian design language. Amber is a deliberate, isolated homage here. */
+  .mv-terminal {
+    --term-bg: #0a0c10;
+    --term-hairline: rgba(255, 255, 255, 0.08);
+    --term-divider: rgba(255, 255, 255, 0.14);
+    --term-amber: #c9922e;
+    --term-ink: #e8eaee;
+    --term-ink-secondary: #9ba3b0;
+    --term-ink-tertiary: #5c6470;
+    --term-up: #3fbf85;
+    --term-down: #e85d68;
+    --term-accent: #3e6fe0;
+  }
+
   html,
   body {
     background: var(--bg-primary);

@@ -71,10 +71,37 @@ export function PriceChart({
   const panStartX = React.useRef(0);
   const panStartRange = React.useRef<VisibleRange>({ from: 0, to: 0 });
   const widthRef = React.useRef(0);
+  const prevTickerRef = React.useRef(ticker);
+  const prevLenRef = React.useRef(ohlc.length);
+  const rangeRef = React.useRef(range);
+  rangeRef.current = range;
 
   React.useEffect(() => {
-    setRange(defaultRange(ohlc.length));
-  }, [ohlc.length]);
+    const tickerChanged = prevTickerRef.current !== ticker;
+    const prevLen = prevLenRef.current;
+    prevTickerRef.current = ticker;
+    prevLenRef.current = ohlc.length;
+
+    if (tickerChanged || prevLen === 0) {
+      // New instrument (or first load) — nothing to preserve, show the default window.
+      setRange(defaultRange(ohlc.length));
+      return;
+    }
+    if (ohlc.length === prevLen) return;
+
+    // Same ticker, new candles arrived (e.g. live auto-advance). If the user
+    // was already looking at the latest bar, keep following it — same zoom
+    // width, window slides right — instead of yanking their pan/zoom back to
+    // the default every time a new tick lands. If they'd panned into history
+    // to look at older data, leave their view alone.
+    const wasAtLiveEdge = rangeRef.current.to >= prevLen;
+    if (wasAtLiveEdge) {
+      const span = rangeRef.current.to - rangeRef.current.from;
+      const to = ohlc.length;
+      const from = Math.max(0, to - span);
+      setRange({ from, to });
+    }
+  }, [ohlc.length, ticker]);
 
   // Computed once per data/indicator-selection change, not per render frame —
   // `time` stays a true index into `ohlc` even after null-filtering, so

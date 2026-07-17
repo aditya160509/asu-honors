@@ -22,6 +22,7 @@ export type ColumnKey =
   | "price"
   | "prevClose"
   | "dayChange"
+  | "dayChangeAbs"
   | "ivGap"
   | "iv"
   | "marketCap"
@@ -30,7 +31,8 @@ export type ColumnKey =
   | "volume"
   | "high52w"
   | "low52w"
-  | "pctOffHigh";
+  | "pctOffHigh"
+  | "spark";
 
 export interface ColumnDef {
   key: ColumnKey;

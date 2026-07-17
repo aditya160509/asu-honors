@@ -10,7 +10,7 @@ interface StoredColumnState {
   hidden: ColumnKey[];
 }
 
-function load(defaultOrder: ColumnKey[]): StoredColumnState {
+function load(defaultOrder: ColumnKey[], defaultHidden: ColumnKey[]): StoredColumnState {
   if (typeof window !== "undefined") {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
@@ -27,16 +27,16 @@ function load(defaultOrder: ColumnKey[]): StoredColumnState {
       // ignore malformed storage
     }
   }
-  return { order: defaultOrder, hidden: [] };
+  return { order: defaultOrder, hidden: defaultHidden };
 }
 
 /** Persists Market Explorer column order/visibility to localStorage — scoped to this page only. */
-export function useColumnVisibility(allColumns: ColumnDef[]) {
+export function useColumnVisibility(allColumns: ColumnDef[], defaultHidden: ColumnKey[] = []) {
   const defaultOrder = React.useMemo(() => allColumns.map((c) => c.key), [allColumns]);
-  const [state, setState] = React.useState<StoredColumnState>(() => ({ order: defaultOrder, hidden: [] }));
+  const [state, setState] = React.useState<StoredColumnState>(() => ({ order: defaultOrder, hidden: defaultHidden }));
 
   React.useEffect(() => {
-    setState(load(defaultOrder));
+    setState(load(defaultOrder, defaultHidden));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -76,7 +76,7 @@ export function useColumnVisibility(allColumns: ColumnDef[]) {
     [state, persist]
   );
 
-  const reset = React.useCallback(() => persist({ order: defaultOrder, hidden: [] }), [defaultOrder, persist]);
+  const reset = React.useCallback(() => persist({ order: defaultOrder, hidden: defaultHidden }), [defaultOrder, defaultHidden, persist]);
 
   return { order: state.order, hidden: state.hidden, orderedVisible, toggle, move, reset };
 }

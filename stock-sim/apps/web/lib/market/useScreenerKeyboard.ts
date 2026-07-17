@@ -13,6 +13,13 @@ export interface UseScreenerKeyboardOptions {
   onSelectPreset?: (index: number) => void;
   rowGetter?: (index: number) => { ticker: string } | null;
   onEsc?: () => void;
+  /** F1-F6 load the first six saved screens — a mouse-free path to the same
+   * screens the SCREEN label's dropdown offers. */
+  onSelectScreenByFKey?: (index: number) => void;
+  /** ⌘D / Ctrl+D toggles row density (comfortable <-> terminal). */
+  onToggleDensity?: () => void;
+  /** `f` opens/closes the Filter Overlay. */
+  onToggleFilters?: () => void;
 }
 
 export function useScreenerKeyboard({
@@ -26,6 +33,9 @@ export function useScreenerKeyboard({
   onSelectPreset,
   rowGetter,
   onEsc,
+  onSelectScreenByFKey,
+  onToggleDensity,
+  onToggleFilters,
 }: UseScreenerKeyboardOptions) {
   React.useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -36,9 +46,22 @@ export function useScreenerKeyboard({
         target.tagName === "SELECT" ||
         target.isContentEditable;
 
-      if (e.key === "/" || (e.ctrlKey && e.key === "k")) {
+      if (e.key === "/" || (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         searchInputRef.current?.focus();
+        return;
+      }
+
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "d") {
+        e.preventDefault();
+        onToggleDensity?.();
+        return;
+      }
+
+      const fMatch = e.key.match(/^F([1-6])$/);
+      if (fMatch && onSelectScreenByFKey) {
+        e.preventDefault();
+        onSelectScreenByFKey(parseInt(fMatch[1], 10) - 1);
         return;
       }
 
@@ -51,6 +74,12 @@ export function useScreenerKeyboard({
       }
 
       if (isInput) return;
+
+      if (e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        onToggleFilters?.();
+        return;
+      }
 
       switch (e.key) {
         case "j":
@@ -96,5 +125,19 @@ export function useScreenerKeyboard({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [focusedIndex, setFocusedIndex, totalRows, onActivateRow, onToggleSelect, onToggleWatch, searchInputRef, onSelectPreset, rowGetter, onEsc]);
+  }, [
+    focusedIndex,
+    setFocusedIndex,
+    totalRows,
+    onActivateRow,
+    onToggleSelect,
+    onToggleWatch,
+    searchInputRef,
+    onSelectPreset,
+    rowGetter,
+    onEsc,
+    onSelectScreenByFKey,
+    onToggleDensity,
+    onToggleFilters,
+  ]);
 }

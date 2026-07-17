@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Loader2 } from "lucide-react";
+import { Loader2, Pause, Play } from "lucide-react";
 import { useAdvance, useSimState } from "@/lib/api/hooks/useSimulation";
 import { useCycleState } from "@/lib/api/hooks/useMarket";
 import { useNews } from "@/lib/api/hooks/useNews";
@@ -10,6 +10,7 @@ import { formatDateFull } from "@/lib/utils";
 import type { NewsItem } from "@/lib/api/types";
 
 const ADVANCE_OPTIONS = [1, 5, 30] as const;
+const LIVE_TICK_GAP_MS = 150;
 
 export function SimControlPanel() {
   const simState = useSimState();
@@ -19,6 +20,45 @@ export function SimControlPanel() {
     timelineId: simState?.data?.timeline_id,
     limit: 10,
   });
+
+  const [isLive, setIsLive] = React.useState(false);
+  const timelineId = simState.data?.timeline_id;
+
+  // Auto-advance one day at a time while live — a ref (not state) so the
+  // scheduling closure always calls the current mutate function.
+  const advanceRef = React.useRef(advance);
+  advanceRef.current = advance;
+
+  // Chains the next tick off the previous one's actual completion (onSettled)
+  // instead of a fixed setInterval — runs as fast as the backend genuinely
+  // responds instead of being capped at an arbitrary cadence, while the
+  // small gap after each tick keeps individual ticks visible rather than a
+  // blur, and guarantees no two advance calls ever overlap.
+  React.useEffect(() => {
+    if (!isLive || !timelineId) return;
+    let cancelled = false;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+    function fireNext() {
+      if (cancelled) return;
+      advanceRef.current.mutate(
+        { timeline_id: timelineId, days: 1 },
+        { onSettled: () => { if (!cancelled) timeoutId = setTimeout(fireNext, LIVE_TICK_GAP_MS); } }
+      );
+    }
+    fireNext();
+
+    return () => {
+      cancelled = true;
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+  }, [isLive, timelineId]);
+
+  // A real failure (not just a slow tick) should stop the auto-play instead
+  // of silently retrying forever against a broken backend.
+  React.useEffect(() => {
+    if (isLive && advance.isError) setIsLive(false);
+  }, [isLive, advance.isError]);
 
   const isAdvancing = advance.isPending;
   const error = advance.isError ? (advance.error as Error)?.message : null;
@@ -41,6 +81,9 @@ export function SimControlPanel() {
           padding: "12px 14px",
           borderBottom: "1px solid var(--mer-stroke-hairline)",
           background: "var(--mer-surface-2)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
         }}
       >
         <span
@@ -54,6 +97,34 @@ export function SimControlPanel() {
         >
           Simulation Control
         </span>
+
+        <button
+          type="button"
+          disabled={!simState.data}
+          onClick={() => setIsLive((v) => !v)}
+          title={isLive ? "Pause live simulation" : "Play — auto-advance one day at a time"}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 5,
+            height: 22,
+            padding: "0 8px",
+            border: "1px solid",
+            borderColor: isLive ? "var(--positive)" : "var(--mer-stroke-hairline)",
+            borderRadius: "var(--mer-radius-sm)",
+            background: isLive ? "rgba(34, 197, 94, 0.14)" : "var(--mer-surface-3)",
+            color: isLive ? "var(--positive)" : "var(--mer-ink-secondary)",
+            fontSize: "var(--fs-micro)",
+            fontWeight: 700,
+            textTransform: "uppercase",
+            letterSpacing: "0.05em",
+            cursor: simState.data ? "pointer" : "not-allowed",
+            opacity: simState.data ? 1 : 0.5,
+          }}
+        >
+          {isLive ? <Pause size={11} /> : <Play size={11} />}
+          {isLive ? "Live" : "Play"}
+        </button>
       </div>
 
       {/* Date & Tick */}
@@ -69,16 +140,30 @@ export function SimControlPanel() {
           />
         ) : simState.data ? (
           <>
-            <div
-              className="num"
-              style={{
-                fontSize: "var(--fs-h2)",
-                fontWeight: 700,
-                color: "var(--mer-ink-primary)",
-                lineHeight: 1.2,
-              }}
-            >
-              {formatDateFull(simState.data.current_sim_date)}
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div
+                className="num"
+                style={{
+                  fontSize: "var(--fs-h2)",
+                  fontWeight: 700,
+                  color: "var(--mer-ink-primary)",
+                  lineHeight: 1.2,
+                }}
+              >
+                {formatDateFull(simState.data.current_sim_date)}
+              </div>
+              {isLive && (
+                <span
+                  aria-hidden
+                  className="animate-pulse"
+                  style={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: "50%",
+                    background: "var(--positive)",
+                  }}
+                />
+              )}
             </div>
             <div
               className="num"
@@ -140,7 +225,7 @@ export function SimControlPanel() {
           {ADVANCE_OPTIONS.map((days) => (
             <button
               key={days}
-              disabled={isAdvancing || !simState.data}
+              disabled={isAdvancing || isLive || !simState.data}
               onClick={() =>
                 advance.mutate({
                   timeline_id: simState.data!.timeline_id,
@@ -160,12 +245,12 @@ export function SimControlPanel() {
                 color: "var(--mer-ink-primary)",
                 fontSize: "var(--fs-small)",
                 fontWeight: 500,
-                cursor: isAdvancing ? "not-allowed" : "pointer",
-                opacity: isAdvancing ? 0.5 : 1,
+                cursor: isAdvancing || isLive ? "not-allowed" : "pointer",
+                opacity: isAdvancing || isLive ? 0.5 : 1,
                 transition: "background 100ms",
               }}
               onMouseEnter={(e) => {
-                if (!isAdvancing) e.currentTarget.style.background = "var(--mer-surface-4)";
+                if (!isAdvancing && !isLive) e.currentTarget.style.background = "var(--mer-surface-4)";
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.background = "var(--mer-surface-3)";

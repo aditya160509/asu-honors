@@ -1,10 +1,10 @@
-import type { ColumnDef } from "@/lib/market/types";
+import type { ColumnDef, ColumnKey } from "@/lib/market/types";
 
 export const COLUMN_DEFS: ColumnDef[] = [
   {
     key: "industry",
-    header: "Industry",
-    width: 160,
+    header: "Sector",
+    width: 72,
     align: "left",
     sortAccessor: (r) => r.industry_name,
     group: "fundamental",
@@ -27,24 +27,37 @@ export const COLUMN_DEFS: ColumnDef[] = [
   },
   {
     key: "dayChange",
-    header: "Day Chg %",
-    width: 120,
+    header: "Chg %",
+    width: 90,
     align: "right",
     sortAccessor: (r) => (r.day_change_pct == null ? null : Number(r.day_change_pct)),
     group: "price",
   },
   {
+    key: "dayChangeAbs",
+    header: "Chg",
+    width: 84,
+    align: "right",
+    sortAccessor: (r) => {
+      if (r.day_change_pct == null || r.current_price == null) return null;
+      const cur = Number(r.current_price);
+      const pct = Number(r.day_change_pct);
+      return cur - cur / (1 + pct / 100);
+    },
+    group: "price",
+  },
+  {
     key: "ivGap",
-    header: "IV Gap %",
-    width: 88,
+    header: "IVGap %",
+    width: 84,
     align: "right",
     sortAccessor: (r) => r.ivGapPct,
     group: "valuation",
   },
   {
     key: "iv",
-    header: "Intrinsic Val",
-    width: 96,
+    header: "Intr Val",
+    width: 88,
     align: "right",
     sortAccessor: (r) => (r.intrinsic_value == null ? null : Number(r.intrinsic_value)),
     group: "valuation",
@@ -56,6 +69,14 @@ export const COLUMN_DEFS: ColumnDef[] = [
     align: "right",
     sortAccessor: (r) => (r.market_cap == null ? null : Number(r.market_cap)),
     group: "fundamental",
+  },
+  {
+    key: "spark",
+    header: "Spark",
+    width: 88,
+    align: "right",
+    sortAccessor: () => null,
+    group: "price",
   },
   {
     key: "marketCapCategory",
@@ -107,12 +128,27 @@ export const COLUMN_DEFS: ColumnDef[] = [
   },
 ];
 
+/** "compact" is this page's Terminal density (⌘D / >dense) — 24px rows,
+ * ~34 visible on a laptop viewport, per the Bloomberg-terminal rebuild spec. */
 export const DEFAULT_ROW_HEIGHT: Record<"comfortable" | "compact", number> = {
-  comfortable: 38,
-  compact: 26,
+  comfortable: 32,
+  compact: 24,
 };
 
-export const PINNED_COLUMN_WIDTH = 210;
+export const PINNED_COLUMN_WIDTH = 190;
+
+/** Default column set is Sector/Price/Chg%/Chg/IVGap%/Intr Val/Mkt Cap/Spark
+ * (8 columns, matching TKR+COMPANY already pinned) — everything else here
+ * stays available via the column manager but isn't shown until asked for. */
+export const DEFAULT_HIDDEN_KEYS: ColumnKey[] = [
+  "prevClose",
+  "marketCapCategory",
+  "volatility",
+  "volume",
+  "high52w",
+  "low52w",
+  "pctOffHigh",
+];
 
 export const COLUMN_GROUPS = [
   { key: "price", label: "Price" },

@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { ArrowDownAZ, ArrowUpDown, ArrowUpAZ, Download, LayoutList, Rows3 } from "lucide-react";
+import { ArrowDownAZ, ArrowUpDown, ArrowUpAZ, Download, LayoutList, Rows3, Sparkles } from "lucide-react";
 import { SearchInput } from "@/components/ui/search-input";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -12,7 +12,6 @@ import type { SortState } from "@/components/market/ExplorerTable";
 export interface ToolbarProps {
   query: string;
   onQueryChange: (q: string) => void;
-  resultCount: number;
   totalCount: number;
   columns: ColumnDef[];
   columnOrder: ColumnKey[];
@@ -28,12 +27,15 @@ export interface ToolbarProps {
   sort: SortState;
   onSort: (key: string, shiftKey?: boolean) => void;
   searchInputRef?: React.RefObject<HTMLInputElement | null>;
+  viewMode: "table" | "heatmap";
+  onViewModeChange: (mode: "table" | "heatmap") => void;
+  showHighlights: boolean;
+  onToggleHighlights: () => void;
 }
 
 export function Toolbar({
   query,
   onQueryChange,
-  resultCount,
   totalCount,
   columns,
   columnOrder,
@@ -49,6 +51,10 @@ export function Toolbar({
   sort,
   onSort,
   searchInputRef,
+  viewMode,
+  onViewModeChange,
+  showHighlights,
+  onToggleHighlights,
 }: ToolbarProps) {
   const [sortOpen, setSortOpen] = React.useState(false);
   const sortRef = React.useRef<HTMLDivElement>(null);
@@ -69,17 +75,53 @@ export function Toolbar({
         ref={searchInputRef}
         value={query}
         onValueChange={onQueryChange}
-        placeholder="Search ticker or name…"
+        placeholder={`Search ${totalCount.toLocaleString()} instruments…`}
         aria-label="Search companies (ticker or name)"
-        containerClassName="w-56"
+        containerClassName="w-72"
         debounceMs={150}
       />
-      <span className="text-small text-text-secondary num tabular-nums">
-        {resultCount.toLocaleString()}
-        <span className="text-text-tertiary"> / {totalCount.toLocaleString()}</span>
-      </span>
 
       <div className="flex-1" />
+
+      {/* Table / Heatmap */}
+      <div className="flex items-center rounded-sm border border-border p-0.5" role="radiogroup" aria-label="View mode">
+        <button
+          type="button"
+          role="radio"
+          aria-checked={viewMode === "table"}
+          onClick={() => onViewModeChange("table")}
+          className={cn(
+            "h-6 rounded-sm px-2.5 text-micro font-medium transition-colors",
+            viewMode === "table" ? "bg-bg-hover text-text-primary" : "text-text-tertiary hover:text-text-secondary"
+          )}
+        >
+          Table
+        </button>
+        <button
+          type="button"
+          role="radio"
+          aria-checked={viewMode === "heatmap"}
+          onClick={() => onViewModeChange("heatmap")}
+          className={cn(
+            "h-6 rounded-sm px-2.5 text-micro font-medium transition-colors",
+            viewMode === "heatmap" ? "bg-bg-hover text-text-primary" : "text-text-tertiary hover:text-text-secondary"
+          )}
+        >
+          Heatmap
+        </button>
+      </div>
+
+      <Button
+        variant="ghost"
+        size="sm"
+        className={cn("gap-1.5 text-micro", showHighlights && "text-accent")}
+        aria-pressed={showHighlights}
+        onClick={onToggleHighlights}
+        title="Toggle Most Volatile / Biggest IV Gap highlights"
+      >
+        <Sparkles size={13} />
+        Highlights
+      </Button>
 
       {/* Sort dropdown */}
       <div className="relative" ref={sortRef}>

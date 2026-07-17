@@ -24,7 +24,7 @@ function buildMostVolatile(companies: EnrichedCompany[]): TickerChip[] {
     .map((c) => ({
       ticker: c.ticker,
       price: Number(c.current_price),
-      metricValue: Number(c.volatility).toFixed(2),
+      metricValue: formatPct(Number(c.volatility)),
       metricLabel: "Vol",
     }));
 }

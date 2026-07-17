@@ -18,14 +18,16 @@ export interface ColumnManagerProps {
   onToggle: (key: ColumnKey) => void;
   onMove: (key: ColumnKey, direction: -1 | 1) => void;
   onReset: () => void;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
-export function ColumnManager({ columns, order, hidden, onToggle, onMove, onReset }: ColumnManagerProps) {
+export function ColumnManager({ columns, order, hidden, onToggle, onMove, onReset, open, onOpenChange }: ColumnManagerProps) {
   const byKey = new Map(columns.map((c) => [c.key, c]));
   const ordered = order.map((k) => byKey.get(k)).filter((c): c is ColumnDef => Boolean(c));
 
   return (
-    <DropdownMenu>
+    <DropdownMenu open={open} onOpenChange={onOpenChange}>
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" size="sm" className="gap-1.5" aria-label="Manage columns">
           <Columns3 size={14} />

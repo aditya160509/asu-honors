@@ -1,37 +1,37 @@
 "use client";
 
 import * as React from "react";
-import { X } from "lucide-react";
-import { toast } from "sonner";
-import { Toolbar } from "@/components/market/Toolbar";
-import { SavedScreensBar } from "@/components/market/SavedScreensBar";
-import { StatsBar } from "@/components/market/StatsBar";
-import { ColumnPresets, COLUMN_PRESETS } from "@/components/market/ColumnPresets";
+import { CommandLine } from "@/components/market/CommandLine";
+import { StatusLine } from "@/components/market/StatusLine";
+import { ScreenerToolbar } from "@/components/market/ScreenerToolbar";
+import { TopMoversBar } from "@/components/market/TopMoversBar";
+import { MarketTickerTape } from "@/components/market/MarketTickerTape";
+import { FilterOverlay } from "@/components/market/FilterOverlay";
+import { HelpOverlay } from "@/components/market/HelpOverlay";
+import { DetailPanel } from "@/components/market/DetailPanel";
+import { CompareDrawer } from "@/components/market/CompareDrawer";
+import { ColumnManager } from "@/components/market/ColumnManager";
 import { HeatmapView } from "@/components/market/HeatmapView";
-import { FilterRail } from "@/components/market/FilterRail";
 import { ExplorerTable, type SortState } from "@/components/market/ExplorerTable";
 import { ExplorerSkeleton, ExplorerErrorState, ExplorerEmptyFiltered, ExplorerEmptyUniverse } from "@/components/market/ExplorerStates";
-import { PreviewDrawer } from "@/components/market/PreviewDrawer";
-import { TopMoversBar } from "@/components/market/TopMoversBar";
-import { CompareDrawer } from "@/components/market/CompareDrawer";
-import { SectorBreakdown } from "@/components/market/SectorBreakdown";
-import { ComparisonOverlay } from "@/components/market/ComparisonOverlay";
-import { DistributionHistogram } from "@/components/market/DistributionHistogram";
-import { COLUMN_DEFS } from "@/lib/market/columns";
-import { applyFilters, boundsFor, emptyFilterState, enrichCompanies, industriesOf } from "@/lib/market/filters";
+import { COLUMN_DEFS, DEFAULT_HIDDEN_KEYS } from "@/lib/market/columns";
+import { activeFilterGroupCount, boundsFor, emptyFilterState, enrichCompanies, industriesOf } from "@/lib/market/filters";
+import {
+  filtersToCommandText,
+  parseCommandLine,
+  removeTokenFromText,
+  upsertTokensOfKey,
+} from "@/lib/market/commandGrammar";
+import { sectorToken } from "@/lib/market/sectorAbbrev";
 import { useColumnVisibility } from "@/lib/market/useColumnVisibility";
 import { useSavedScreens } from "@/lib/market/useSavedScreens";
 import { useWatchlistToggle } from "@/lib/market/useWatchlistToggle";
 import { useScreenerKeyboard } from "@/lib/market/useScreenerKeyboard";
 import { exportCompaniesCsv } from "@/lib/market/exportCsv";
-import { cn } from "@/lib/utils";
 import type { CompanyGridItem } from "@/lib/api/types";
-import type { ColumnKey, Density, EnrichedCompany, MarketFilterState } from "@/lib/market/types";
+import type { ColumnKey, Density, EnrichedCompany } from "@/lib/market/types";
 
-const MAX_COMPARE = 4;
-const PAGE_SIZE = 50;
 const DENSITY_KEY = "market-explorer:density";
-const RAIL_KEY = "market-explorer:rail-collapsed";
 
 function readLocal<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback;
@@ -53,7 +53,6 @@ function sortRows(rows: EnrichedCompany[], sort: SortState): EnrichedCompany[] {
       dir: sort.direction === "asc" ? 1 : -1,
     });
   }
-
   if (sort.secondary?.key && sort.secondary?.direction) {
     const col = COLUMN_DEFS.find((c) => c.key === sort.secondary!.key);
     comparators.push({
@@ -61,7 +60,6 @@ function sortRows(rows: EnrichedCompany[], sort: SortState): EnrichedCompany[] {
       dir: sort.secondary!.direction === "asc" ? 1 : -1,
     });
   }
-
   if (comparators.length === 0) return rows;
 
   return [...rows].sort((a, b) => {
@@ -112,98 +110,148 @@ export function MarketExplorer({ companies, loading, error, onRetry }: MarketExp
     prevPricesRef.current = map;
   }, [enriched]);
 
-  const [query, setQuery] = React.useState("");
-  const [filters, setFilters] = React.useState<MarketFilterState>(emptyFilterState());
+  const [commandText, setCommandText] = React.useState("");
   const [sort, setSort] = React.useState<SortState>({ key: null, direction: null });
   const [density, setDensity] = React.useState<Density>(() => readLocal(DENSITY_KEY, "compact" as Density));
-  const [railCollapsed, setRailCollapsed] = React.useState<boolean>(() => readLocal(RAIL_KEY, false));
   const [selectedTickers, setSelectedTickers] = React.useState<Set<string>>(new Set());
-  const [previewTicker, setPreviewTicker] = React.useState<string | null>(null);
-  const [compareOpen, setCompareOpen] = React.useState(false);
+  const [detailTicker, setDetailTicker] = React.useState<string | null>(null);
   const [viewMode, setViewMode] = React.useState<"table" | "heatmap">("table");
-  const [activePreset, setActivePreset] = React.useState<string | null>(null);
   const [focusedIndex, setFocusedIndex] = React.useState(0);
-  const [analyticsOpen, setAnalyticsOpen] = React.useState(false);
-  const [page, setPage] = React.useState(0);
+  const [filterOverlayOpen, setFilterOverlayOpen] = React.useState(false);
+  const [helpOpen, setHelpOpen] = React.useState(false);
+  const [columnManagerOpen, setColumnManagerOpen] = React.useState(false);
+  const [sortLetterMode, setSortLetterMode] = React.useState(false);
+  const [compareOpen, setCompareOpen] = React.useState(false);
+  const [toolbarQuery, setToolbarQuery] = React.useState("");
+  const [showHighlights, setShowHighlights] = React.useState(false);
 
   const savedScreens = useSavedScreens();
-  const columnState = useColumnVisibility(COLUMN_DEFS);
+  const columnState = useColumnVisibility(COLUMN_DEFS, DEFAULT_HIDDEN_KEYS);
   const watchlist = useWatchlistToggle();
 
   const searchInputRef = React.useRef<HTMLInputElement | null>(null);
-
-  function handlePresetChange(columns: ColumnKey[]) {
-    const preset = COLUMN_PRESETS.find((p) => {
-      const sortedA = [...p.columns].sort();
-      const sortedB = [...columns].sort();
-      return sortedA.length === sortedB.length && sortedA.every((k, i) => k === sortedB[i]);
-    });
-    setActivePreset(preset?.key ?? null);
-
-    for (const key of columnState.order) {
-      const shouldShow = columns.includes(key);
-      const isCurrentlyHidden = columnState.hidden.includes(key);
-      if (shouldShow && isCurrentlyHidden) columnState.toggle(key);
-      if (!shouldShow && !isCurrentlyHidden) columnState.toggle(key);
-    }
-  }
+  const toolbarSearchInputRef = React.useRef<HTMLInputElement | null>(null);
 
   React.useEffect(() => {
     localStorage.setItem(DENSITY_KEY, JSON.stringify(density));
   }, [density]);
-  React.useEffect(() => {
-    localStorage.setItem(RAIL_KEY, JSON.stringify(railCollapsed));
-  }, [railCollapsed]);
 
-  const filtered = React.useMemo(() => applyFilters(enriched, filters, query), [enriched, filters, query]);
+  // The command line's text is parsed live, but committing it to the table
+  // on every keystroke (a) never lets a `>command` in progress apply its
+  // (empty) "filters" and (b) briefly commits an empty filter set during the
+  // one render where the field is cleared right before typing the next `>`
+  // command — clobbering whatever was applied a moment earlier. A 150ms
+  // debounce (which the terminal spec asks for anyway, for the Filter
+  // Overlay) fixes both: a `>` landing within the window cancels the
+  // pending commit before it ever applies.
+  const parsed = React.useMemo(() => parseCommandLine(commandText, industries), [commandText, industries]);
+  const isCommandMode = commandText.trim().startsWith(">");
+  const [activeFilters, setActiveFilters] = React.useState(emptyFilterState());
+  const [freeText, setFreeText] = React.useState("");
+  const [activeTokens, setActiveTokens] = React.useState<typeof parsed.tokens>([]);
+
+  React.useEffect(() => {
+    if (isCommandMode) return;
+    const id = setTimeout(() => {
+      setActiveFilters(parsed.filters);
+      setFreeText(parsed.freeText);
+      setActiveTokens(parsed.tokens);
+    }, 150);
+    return () => clearTimeout(id);
+  }, [isCommandMode, parsed]);
+
+  const filtered = React.useMemo(() => {
+    const q = freeText.trim().toLowerCase();
+    const tq = toolbarQuery.trim().toLowerCase();
+    return enriched.filter((c) => {
+      if (q && !(c.ticker.toLowerCase().startsWith(q) || c.name.toLowerCase().includes(q))) return false;
+      if (tq && !(c.ticker.toLowerCase().startsWith(tq) || c.name.toLowerCase().includes(tq))) return false;
+      if (activeFilters.industries.length > 0 && !activeFilters.industries.includes(c.industry_name)) return false;
+      if (activeFilters.marketCapCategory.length > 0 && !activeFilters.marketCapCategory.includes(c.marketCapCategory)) return false;
+      const inRange = (value: number | null, range: { min: number; max: number } | null) =>
+        !range || (value != null && value >= range.min && value <= range.max);
+      if (!inRange(Number(c.current_price), activeFilters.price)) return false;
+      if (!inRange(c.market_cap == null ? null : Number(c.market_cap), activeFilters.marketCap)) return false;
+      if (!inRange(c.day_change_pct == null ? null : Number(c.day_change_pct), activeFilters.dayChangePct)) return false;
+      if (!inRange(c.volatility == null ? null : Number(c.volatility), activeFilters.volatility)) return false;
+      if (!inRange(c.ivGapPct, activeFilters.ivGapPct)) return false;
+      if (!inRange(c.intrinsic_value == null ? null : Number(c.intrinsic_value), activeFilters.iv)) return false;
+      if (!inRange(c.avg_volume_20d == null ? null : Number(c.avg_volume_20d), activeFilters.volume)) return false;
+      return true;
+    });
+  }, [enriched, activeFilters, freeText, toolbarQuery]);
+
   const sorted = React.useMemo(() => sortRows(filtered, sort), [filtered, sort]);
 
-  // Reset to first page whenever filters, search, or sort change
   React.useEffect(() => {
-    setPage(0);
-  }, [filtered.length, sort.key, sort.direction]);
+    setFocusedIndex((i) => Math.min(i, Math.max(sorted.length - 1, 0)));
+  }, [sorted.length]);
 
-  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
-  const safePage = Math.min(page, totalPages - 1);
-  const pageRows = React.useMemo(
-    () => sorted.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE),
-    [sorted, safePage]
-  );
+  const rowGetter = React.useCallback((index: number) => sorted[index] ?? null, [sorted]);
 
-  React.useEffect(() => {
-    setFocusedIndex((i) => Math.min(i, Math.max(pageRows.length - 1, 0)));
-  }, [pageRows.length]);
+  // Screen name / modified-dot in the status line.
+  const activeScreen = savedScreens.screens.find((s) => s.id === savedScreens.activeId) ?? savedScreens.screens[0];
+  const screenModified = React.useMemo(() => {
+    if (!activeScreen) return false;
+    if (sort.key !== (activeScreen.sortKey ?? null) || sort.direction !== (activeScreen.sortDirection ?? null)) return true;
+    return JSON.stringify(activeFilters) !== JSON.stringify(activeScreen.filters);
+  }, [activeScreen, activeFilters, sort]);
 
-  const rowGetter = React.useCallback(
-    (index: number) => pageRows[index] ?? null,
-    [pageRows]
-  );
+  function loadScreen(id: string) {
+    const screen = savedScreens.screens.find((s) => s.id === id);
+    if (!screen) return;
+    savedScreens.setActiveId(id);
+    setCommandText(filtersToCommandText(screen.filters));
+    setSort({ key: screen.sortKey ?? null, direction: screen.sortDirection ?? null });
+  }
 
-  useScreenerKeyboard({
-    focusedIndex,
-    setFocusedIndex,
-    totalRows: sorted.length,
-    onActivateRow: setPreviewTicker,
-    onToggleSelect: toggleSelect,
-    onToggleWatch: watchlist.toggle,
-    searchInputRef,
-    rowGetter,
-    onEsc: () => {
-      if (previewTicker) setPreviewTicker(null);
-    },
-    onSelectPreset: (index) => {
-      const preset = COLUMN_PRESETS[index];
-      if (preset) {
-        setActivePreset(preset.key);
-        columnState.reset();
-        for (const key of COLUMN_DEFS.map((c) => c.key)) {
-          if (!preset.columns.includes(key)) {
-            columnState.toggle(key);
-          }
-        }
+  function handleCommand(name: string, args: string) {
+    // Every command except `load` is a momentary action — the command line
+    // should snap back to whatever filters were actually active before the
+    // `>` was typed, not go blank (that would look like the screen reset).
+    // `load` is the one command that's *supposed* to change what's shown, so
+    // it sets its own text instead of falling through to the restore below.
+    switch (name) {
+      case "save":
+        if (args) savedScreens.saveScreen(args, activeFilters, sort.key, sort.direction);
+        break;
+      case "load": {
+        const target = savedScreens.screens.find((s) => s.name.toLowerCase() === args.toLowerCase());
+        if (target) loadScreen(target.id);
+        return;
       }
-    },
-  });
+      case "cols":
+        setColumnManagerOpen(true);
+        break;
+      case "export":
+        exportCompaniesCsv(sorted, columnState.orderedVisible);
+        break;
+      case "hmp":
+        setViewMode("heatmap");
+        break;
+      case "tbl":
+        setViewMode("table");
+        break;
+      case "dense":
+        setDensity((d) => (d === "compact" ? "comfortable" : "compact"));
+        break;
+      case "help":
+        setHelpOpen(true);
+        break;
+      default:
+        break;
+    }
+    setCommandText(filtersToCommandText(activeFilters));
+  }
+
+  function handleRemoveToken(raw: string) {
+    setCommandText((t) => removeTokenFromText(t, raw));
+  }
+
+  function handleSectorClick(industryName: string) {
+    if (activeFilters.industries.includes(industryName)) return;
+    setCommandText((t) => upsertTokensOfKey(t, "sector", [...activeFilters.industries, industryName].map((i) => `sector:${sectorToken(i)}`)));
+  }
 
   function toggleSort(key: string, shiftKey?: boolean) {
     setSort((prev) => {
@@ -224,78 +272,58 @@ export function MarketExplorer({ companies, loading, error, onRetry }: MarketExp
   function toggleSelect(ticker: string) {
     setSelectedTickers((prev) => {
       const next = new Set(prev);
-      if (next.has(ticker)) {
-        next.delete(ticker);
-      } else {
-        if (next.size >= MAX_COMPARE) {
-          toast.info(`You can compare up to ${MAX_COMPARE} companies at a time.`);
-          return prev;
-        }
-        next.add(ticker);
-      }
+      if (next.has(ticker)) next.delete(ticker);
+      else next.add(ticker);
       return next;
     });
   }
 
-  function handleSelectScreen(id: string) {
-    savedScreens.setActiveId(id);
-    const screen = savedScreens.screens.find((s) => s.id === id);
-    if (screen) {
-      setFilters(screen.filters);
-      setSort({ key: screen.sortKey ?? null, direction: screen.sortDirection ?? null });
+  // `s` then a column letter (A, B, C…) sorts by that column — a lightweight
+  // Bloomberg-menu-style two-key path, independent of clicking headers.
+  React.useEffect(() => {
+    function handleKey(e: KeyboardEvent) {
+      const target = e.target as HTMLElement;
+      const isInput = target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable;
+      if (isInput) return;
+      if (sortLetterMode) {
+        const letter = e.key.toUpperCase();
+        const idx = letter.charCodeAt(0) - 65;
+        const col = columnState.orderedVisible[idx];
+        if (col) toggleSort(col.key, e.shiftKey);
+        setSortLetterMode(false);
+        e.preventDefault();
+        return;
+      }
+      if (e.key.toLowerCase() === "s") {
+        setSortLetterMode(true);
+        e.preventDefault();
+      }
     }
-  }
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [sortLetterMode, columnState.orderedVisible]);
 
-  function handleResetFilters() {
-    setFilters(emptyFilterState());
-    savedScreens.setActiveId("__all");
-  }
-
-  function removeFilter(type: string, value?: string) {
-    setFilters((prev) => {
-      if (type === "industry" && value) {
-        return { ...prev, industries: prev.industries.filter((i) => i !== value) };
-      }
-      if (type === "capCategory" && value) {
-        return { ...prev, marketCapCategory: prev.marketCapCategory.filter((c) => c !== value) };
-      }
-      if (type === "price") return { ...prev, price: null };
-      if (type === "marketCap") return { ...prev, marketCap: null };
-      if (type === "dayChangePct") return { ...prev, dayChangePct: null };
-      if (type === "volatility") return { ...prev, volatility: null };
-      if (type === "ivGapPct") return { ...prev, ivGapPct: null };
-      if (type === "iv") return { ...prev, iv: null };
-      return prev;
-    });
-  }
-
-  // Build active filter chips
-  const filterChips: { label: string; type: string; value?: string }[] = [];
-  for (const ind of filters.industries) {
-    filterChips.push({ label: ind, type: "industry", value: ind });
-  }
-  for (const cat of filters.marketCapCategory) {
-    filterChips.push({ label: `${cat} Cap`, type: "capCategory", value: cat });
-  }
-  if (filters.price) {
-    filterChips.push({ label: `Price $${filters.price.min.toFixed(0)}–$${filters.price.max.toFixed(0)}`, type: "price" });
-  }
-  if (filters.ivGapPct && (filters.ivGapPct.min > bounds.ivGapPct.min || filters.ivGapPct.max < bounds.ivGapPct.max)) {
-    filterChips.push({ label: `IV Gap ${filters.ivGapPct.min >= 0 ? "+" : ""}${filters.ivGapPct.min.toFixed(1)}% to ${filters.ivGapPct.max >= 0 ? "+" : ""}${filters.ivGapPct.max.toFixed(1)}%`, type: "ivGapPct" });
-  }
-  if (filters.volatility && (filters.volatility.min > bounds.volatility.min || filters.volatility.max < bounds.volatility.max)) {
-    filterChips.push({ label: `Vol ${filters.volatility.min.toFixed(3)}–${filters.volatility.max.toFixed(3)}`, type: "volatility" });
-  }
-  if (filters.dayChangePct && (filters.dayChangePct.min > bounds.dayChangePct.min || filters.dayChangePct.max < bounds.dayChangePct.max)) {
-    filterChips.push({ label: `Day Chg ${filters.dayChangePct.min >= 0 ? "+" : ""}${filters.dayChangePct.min.toFixed(1)}% to ${filters.dayChangePct.max >= 0 ? "+" : ""}${filters.dayChangePct.max.toFixed(1)}%`, type: "dayChangePct" });
-  }
-  if (filters.iv && (filters.iv.min > bounds.iv.min || filters.iv.max < bounds.iv.max)) {
-    filterChips.push({ label: `IV $${filters.iv.min.toFixed(0)}–$${filters.iv.max.toFixed(0)}`, type: "iv" });
-  }
-  if (filters.marketCap && (filters.marketCap.min > bounds.marketCap.min || filters.marketCap.max < bounds.marketCap.max)) {
-    const fmtCap = (n: number) => n >= 1e9 ? `$${(n / 1e9).toFixed(1)}B` : `$${(n / 1e6).toFixed(0)}M`;
-    filterChips.push({ label: `Mkt Cap ${fmtCap(filters.marketCap.min)}–${fmtCap(filters.marketCap.max)}`, type: "marketCap" });
-  }
+  useScreenerKeyboard({
+    focusedIndex,
+    setFocusedIndex,
+    totalRows: sorted.length,
+    onActivateRow: setDetailTicker,
+    onToggleSelect: toggleSelect,
+    onToggleWatch: watchlist.toggle,
+    searchInputRef,
+    rowGetter,
+    onEsc: () => {
+      if (helpOpen) setHelpOpen(false);
+      else if (filterOverlayOpen) setFilterOverlayOpen(false);
+      else if (detailTicker) setDetailTicker(null);
+    },
+    onSelectScreenByFKey: (index) => {
+      const screen = savedScreens.screens[index];
+      if (screen) loadScreen(screen.id);
+    },
+    onToggleDensity: () => setDensity((d) => (d === "compact" ? "comfortable" : "compact")),
+    onToggleFilters: () => setFilterOverlayOpen((v) => !v),
+  });
 
   const visibleColumns = columnState.orderedVisible;
 
@@ -303,223 +331,120 @@ export function MarketExplorer({ companies, loading, error, onRetry }: MarketExp
   const showError = Boolean(error) && !loading;
   const isTrulyEmpty = !loading && !error && enriched.length === 0;
   const isFilteredEmpty = !loading && !error && enriched.length > 0 && sorted.length === 0;
-  const hasActiveFilters = filterChips.length > 0;
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden">
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-border bg-bg-secondary">
-        <Toolbar
-          query={query}
-          onQueryChange={setQuery}
-          resultCount={sorted.length}
-          totalCount={enriched.length}
-          columns={COLUMN_DEFS}
-          columnOrder={columnState.order}
-          hiddenColumns={columnState.hidden}
-          onToggleColumn={columnState.toggle}
-          onMoveColumn={columnState.move}
-          onResetColumns={columnState.reset}
-          density={density}
-          onDensityChange={setDensity}
-          onExport={() => exportCompaniesCsv(sorted, visibleColumns)}
-          compareCount={selectedTickers.size}
-          onOpenCompare={() => setCompareOpen(true)}
-          sort={sort}
-          onSort={toggleSort}
-          searchInputRef={searchInputRef}
-        />
-        <div className="flex items-center justify-between border-b border-border/60 px-3 py-1.5">
-          <ColumnPresets onPresetChange={handlePresetChange} activePreset={activePreset} />
-          <div className="flex items-center rounded-md border border-border p-0.5" role="radiogroup" aria-label="View mode">
-            <button
-              type="button"
-              role="radio"
-              aria-checked={viewMode === "table"}
-              onClick={() => setViewMode("table")}
-              className={cn(
-                "h-7 rounded px-3 text-xs font-medium transition-all",
-                viewMode === "table" ? "bg-bg-hover text-text-primary shadow-sm" : "text-text-tertiary hover:text-text-secondary"
-              )}
-            >
-              TABLE
-            </button>
-            <button
-              type="button"
-              role="radio"
-              aria-checked={viewMode === "heatmap"}
-              onClick={() => setViewMode("heatmap")}
-              className={cn(
-                "h-7 rounded px-3 text-xs font-medium transition-all",
-                viewMode === "heatmap" ? "bg-bg-hover text-text-primary shadow-sm" : "text-text-tertiary hover:text-text-secondary"
-              )}
-            >
-              HEATMAP
-            </button>
-          </div>
-        </div>
-        <TopMoversBar companies={enriched} onActivateRow={setPreviewTicker} />
-        <StatsBar companies={sorted} />
-        <SavedScreensBar
-          screens={savedScreens.screens}
-          activeId={savedScreens.activeId}
-          onSelect={handleSelectScreen}
-          onRemove={savedScreens.removeScreen}
-        />
+    <div className="mv-terminal relative flex flex-1 flex-col overflow-hidden bg-[var(--term-bg)]">
+      <CommandLine
+        value={commandText}
+        onChange={setCommandText}
+        onCommand={handleCommand}
+        industries={industries}
+        resultCount={sorted.length}
+        totalCount={enriched.length}
+        viewMode={viewMode}
+        onViewModeChange={setViewMode}
+        inputRef={searchInputRef}
+      />
+      <ScreenerToolbar
+        query={toolbarQuery}
+        onQueryChange={setToolbarQuery}
+        searchInputRef={toolbarSearchInputRef}
+        columns={COLUMN_DEFS}
+        columnOrder={columnState.order}
+        hiddenColumns={columnState.hidden}
+        onToggleColumn={columnState.toggle}
+        onMoveColumn={columnState.move}
+        onResetColumns={columnState.reset}
+        density={density}
+        onDensityChange={setDensity}
+        onExport={() => exportCompaniesCsv(sorted, columnState.orderedVisible)}
+        compareCount={selectedTickers.size}
+        onOpenCompare={() => setCompareOpen(true)}
+        sort={sort}
+        onSort={toggleSort}
+        showHighlights={showHighlights}
+        onToggleHighlights={() => setShowHighlights((v) => !v)}
+        filtersOpen={filterOverlayOpen}
+        onToggleFilters={() => setFilterOverlayOpen((v) => !v)}
+        activeFilterCount={activeFilterGroupCount(activeFilters, bounds)}
+      />
 
-        {/* Active filter chips */}
-        {hasActiveFilters && (
-          <div className="flex items-center gap-1.5 overflow-x-auto border-b border-border/60 px-3 py-1.5 scrollbar-none">
-            <span className="text-micro text-text-tertiary shrink-0">Filters:</span>
-            {filterChips.map((chip, i) => (
-              <button
-                key={`${chip.type}-${chip.value ?? i}`}
-                onClick={() => removeFilter(chip.type, chip.value)}
-                className="flex shrink-0 items-center gap-1 rounded bg-accent/10 px-1.5 py-0.5 text-micro text-accent hover:bg-accent/20 transition-colors"
-              >
-                {chip.label}
-                <X size={10} />
-              </button>
-            ))}
-            {filterChips.length > 1 && (
-              <button
-                onClick={handleResetFilters}
-                className="shrink-0 text-micro text-text-tertiary hover:text-negative transition-colors"
-              >
-                Clear all
-              </button>
-            )}
+      <StatusLine
+        tokens={activeTokens}
+        onRemoveToken={handleRemoveToken}
+        screenName={activeScreen?.name ?? "All"}
+        screenModified={screenModified}
+        companies={sorted}
+        compareCount={selectedTickers.size}
+        onOpenCompare={() => setCompareOpen(true)}
+      />
+
+      {showHighlights && (
+        <>
+          <MarketTickerTape companies={sorted} onActivateRow={setDetailTicker} />
+          <div className="border-b border-[var(--term-hairline)] bg-[var(--term-bg)] px-4 py-2">
+            <TopMoversBar companies={sorted} onActivateRow={setDetailTicker} />
           </div>
+        </>
+      )}
+
+      <div className="relative flex flex-1 overflow-hidden">
+        {filterOverlayOpen && (
+          <FilterOverlay
+            open={filterOverlayOpen}
+            onClose={() => setFilterOverlayOpen(false)}
+            industries={industries}
+            companies={enriched}
+            bounds={bounds}
+            filters={activeFilters}
+            commandText={commandText}
+            onCommandTextChange={setCommandText}
+          />
         )}
 
-        <div className="flex flex-1 overflow-hidden">
-          <FilterRail
-            industries={industries}
-            bounds={bounds}
-            filters={filters}
-            onChange={setFilters}
-            collapsed={railCollapsed}
-            onToggleCollapsed={() => setRailCollapsed((v) => !v)}
-          />
+        <div className="flex min-w-0 flex-1 overflow-hidden">
+          <div className={detailTicker ? "flex w-[55%] shrink-0 flex-col overflow-hidden" : "flex flex-1 flex-col overflow-hidden"}>
+            {showSkeleton ? (
+              <ExplorerSkeleton columns={visibleColumns} density={density} />
+            ) : showError ? (
+              <ExplorerErrorState onRetry={onRetry} />
+            ) : isTrulyEmpty ? (
+              <ExplorerEmptyUniverse />
+            ) : isFilteredEmpty ? (
+              <ExplorerEmptyFiltered onReset={() => setCommandText("")} />
+            ) : viewMode === "heatmap" ? (
+              <HeatmapView companies={sorted} onActivateRow={setDetailTicker} />
+            ) : (
+              <ExplorerTable
+                rows={sorted}
+                columns={visibleColumns}
+                density={density}
+                sort={sort}
+                onSort={toggleSort}
+                selectedTickers={selectedTickers}
+                onToggleSelect={toggleSelect}
+                watchedTickers={watchlist.watchedTickers}
+                onToggleWatch={watchlist.toggle}
+                onActivateRow={setDetailTicker}
+                changedTickers={changedTickers}
+                onSectorClick={handleSectorClick}
+              />
+            )}
+          </div>
 
-          {showSkeleton ? (
-            <ExplorerSkeleton columns={visibleColumns} density={density} />
-          ) : showError ? (
-            <ExplorerErrorState onRetry={onRetry} />
-          ) : isTrulyEmpty ? (
-            <ExplorerEmptyUniverse />
-          ) : isFilteredEmpty ? (
-            <ExplorerEmptyFiltered onReset={handleResetFilters} />
-          ) : viewMode === "heatmap" ? (
-            <HeatmapView companies={sorted} onActivateRow={setPreviewTicker} />
-          ) : (
-            <ExplorerTable
-              rows={pageRows}
-              columns={visibleColumns}
-              density={density}
-              sort={sort}
-              onSort={toggleSort}
-              selectedTickers={selectedTickers}
-              onToggleSelect={toggleSelect}
-              watchedTickers={watchlist.watchedTickers}
+          {detailTicker && (
+            <DetailPanel
+              ticker={detailTicker}
+              watched={watchlist.watchedTickers.has(detailTicker)}
               onToggleWatch={watchlist.toggle}
-              onActivateRow={setPreviewTicker}
-              changedTickers={changedTickers}
+              onClose={() => setDetailTicker(null)}
+              gridRow={enriched.find((c) => c.ticker === detailTicker)}
             />
           )}
         </div>
       </div>
 
-      {/* Pagination bar */}
-      {sorted.length > PAGE_SIZE && (
-        <div className="flex items-center justify-between px-3 py-1.5">
-          <span className="text-micro text-text-tertiary">
-            {safePage * PAGE_SIZE + 1}–{Math.min((safePage + 1) * PAGE_SIZE, sorted.length)} of {sorted.length}
-          </span>
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              disabled={safePage === 0}
-              onClick={() => setPage((p) => Math.max(0, p - 1))}
-              className="h-6 rounded px-2 text-micro font-medium text-text-secondary hover:bg-bg-hover disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-            >
-              Prev
-            </button>
-            {Array.from({ length: totalPages }, (_, i) => i)
-              .filter((i) => i === 0 || i === totalPages - 1 || Math.abs(i - safePage) <= 2)
-              .reduce<(number | "ellipsis")[]>((acc, i, idx, arr) => {
-                if (idx > 0 && i - (arr[idx - 1] as number) > 1) acc.push("ellipsis");
-                acc.push(i);
-                return acc;
-              }, [])
-              .map((item, idx) =>
-                item === "ellipsis" ? (
-                  <span key={`e${idx}`} className="px-1 text-text-tertiary">…</span>
-                ) : (
-                  <button
-                    key={item}
-                    type="button"
-                    onClick={() => setPage(item)}
-                    className={cn(
-                      "h-6 min-w-[24px] rounded px-1.5 text-micro font-medium transition-colors",
-                      item === safePage
-                        ? "bg-accent/15 text-accent"
-                        : "text-text-secondary hover:bg-bg-hover"
-                    )}
-                  >
-                    {item + 1}
-                  </button>
-                )
-              )}
-            <button
-              type="button"
-              disabled={safePage >= totalPages - 1}
-              onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
-              className="h-6 rounded px-2 text-micro font-medium text-text-secondary hover:bg-bg-hover disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-            >
-              Next
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Analytics toggle + collapsible panel */}
-      <div className="flex items-center justify-end px-1 pt-1">
-        <button
-          type="button"
-          onClick={() => setAnalyticsOpen((v) => !v)}
-          className="text-micro font-medium text-text-tertiary hover:text-text-secondary transition-colors"
-        >
-          {analyticsOpen ? "Hide Analytics" : "Show Analytics"}
-        </button>
-      </div>
-
-      {analyticsOpen && (
-        <div className="mt-1 space-y-3 rounded-md border border-border bg-bg-secondary p-3 pb-6">
-          {selectedTickers.size > 0 && (
-            <ComparisonOverlay
-              companies={enriched}
-              selectedTickers={Array.from(selectedTickers)}
-              onRemoveTicker={toggleSelect}
-            />
-          )}
-          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-            <SectorBreakdown companies={sorted} />
-            <DistributionHistogram companies={sorted} metric="price" />
-          </div>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <DistributionHistogram companies={sorted} metric="dayChange" height={150} />
-            <DistributionHistogram companies={sorted} metric="ivGap" height={150} />
-            <DistributionHistogram companies={sorted} metric="volatility" height={150} />
-          </div>
-        </div>
-      )}
-
-      <PreviewDrawer
-        ticker={previewTicker}
-        onClose={() => setPreviewTicker(null)}
-        watched={previewTicker ? watchlist.watchedTickers.has(previewTicker) : false}
-        onToggleWatch={watchlist.toggle}
-      />
+      <HelpOverlay open={helpOpen} onClose={() => setHelpOpen(false)} />
 
       <CompareDrawer
         open={compareOpen}
@@ -528,6 +453,19 @@ export function MarketExplorer({ companies, loading, error, onRetry }: MarketExp
         companies={enriched}
         onRemove={toggleSelect}
       />
+
+      <div className="pointer-events-none absolute right-4 top-[74px] opacity-0">
+        <ColumnManager
+          columns={COLUMN_DEFS}
+          order={columnState.order}
+          hidden={columnState.hidden}
+          onToggle={columnState.toggle}
+          onMove={columnState.move}
+          onReset={columnState.reset}
+          open={columnManagerOpen}
+          onOpenChange={setColumnManagerOpen}
+        />
+      </div>
     </div>
   );
 }

@@ -1,9 +1,10 @@
 "use client";
 
 import * as React from "react";
-import { ArrowDown, ArrowUp, ChevronRight, Minus, Star, TriangleAlert } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronRight, TriangleAlert } from "lucide-react";
 import { cn, formatLarge, formatPct, formatPrice } from "@/lib/utils";
 import { DEFAULT_ROW_HEIGHT, PINNED_COLUMN_WIDTH } from "@/lib/market/columns";
+import { sectorCode } from "@/lib/market/sectorAbbrev";
 import { RowExpandedContent } from "@/components/market/RowExpandedContent";
 import type { ColumnDef, Density, EnrichedCompany, SortEntry } from "@/lib/market/types";
 
@@ -26,128 +27,161 @@ export interface ExplorerTableProps {
   onActivateRow: (ticker: string) => void;
   changedTickers: Set<string>;
   onColumnResize?: (key: string, width: number) => void;
+  onSectorClick?: (industryName: string) => void;
 }
 
-function ChangeBar({ value, cap = 5 }: { value: number; cap?: number }) {
-  const normalized = Math.min(Math.abs(value) / cap, 1);
-  const pct = normalized * 50;
-  const positive = value >= 0;
-  return (
-    <div className="relative h-[3px] w-10 rounded-full bg-border/50 overflow-hidden">
-      <div
-        className={cn(
-          "absolute inset-y-0 rounded-full transition-all duration-300",
-          positive ? "left-1/2 bg-positive" : "right-1/2 bg-negative"
-        )}
-        style={{ width: `${pct}%` }}
-      />
-      <div className="absolute inset-y-0 left-1/2 w-px bg-border" />
-    </div>
-  );
-}
-
-function HeatBar({ value, min, max }: { value: number; min: number; max: number }) {
-  if (max === min) return null;
-  const normalized = (value - min) / (max - min);
-  const opacity = 0.06 + normalized * 0.18;
-  return (
-    <div
-      className="absolute inset-y-0 left-0 right-0 pointer-events-none bg-accent"
-      style={{ opacity }}
-    />
-  );
-}
+// Cap class is categorical, low-urgency metadata, not a signal — it doesn't
+// earn a hue. A monochrome tick whose height encodes tier order (ordinal,
+// honest) replaces the previous blue/purple/orange/amber rainbow.
+const CAP_TIERS: Record<string, number> = { Mega: 4, Large: 3, Mid: 2, Small: 1, Micro: 0 };
 
 function MarketCapBadge({ category }: { category: string }) {
-  const colors: Record<string, string> = {
-    Mega: "bg-accent/15 text-accent",
-    Large: "bg-blue-500/10 text-blue-400",
-    Mid: "bg-purple-500/10 text-purple-400",
-    Small: "bg-amber-500/10 text-amber-400",
-    Micro: "bg-orange-500/10 text-orange-400",
-    Unknown: "bg-border/30 text-text-tertiary",
-  };
+  const tier = CAP_TIERS[category];
   return (
-    <span className={cn("inline-flex items-center rounded px-1.5 py-0.5 text-micro font-medium", colors[category] ?? colors.Unknown)}>
+    <span className="inline-flex items-center gap-1.5 text-micro text-[color:var(--term-ink-secondary)]">
+      {tier != null && (
+        <span aria-hidden className="inline-block w-[3px] rounded-full bg-[color:var(--term-ink-tertiary)]" style={{ height: 6 + tier * 2 }} />
+      )}
       {category}
     </span>
   );
 }
 
-function CellContent({ col, row, minMax }: { col: ColumnDef; row: EnrichedCompany; minMax?: { price?: { min: number; max: number }; mktCap?: { min: number; max: number } } }) {
+/** Two real data points (prev close -> current), not a fabricated intraday
+ * series — this sim has exactly one price per day, so that's the only
+ * honest "spark" available per row without an extra per-company fetch. */
+function Spark({ prevClose, current, dim }: { prevClose: number | null; current: number | null; dim?: boolean }) {
+  const canvasRef = React.useRef<HTMLCanvasElement>(null);
+  const width = 72;
+  const height = 18;
+
+  React.useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || prevClose == null || current == null || prevClose <= 0) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, width, height);
+
+    const up = current >= prevClose;
+    const min = Math.min(prevClose, current);
+    const max = Math.max(prevClose, current);
+    const range = max - min || 1;
+    const y0 = height - ((prevClose - min) / range) * (height - 4) - 2;
+    const y1 = height - ((current - min) / range) * (height - 4) - 2;
+
+    ctx.strokeStyle = up ? "#3fbf85" : "#e85d68";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(2, y0);
+    ctx.lineTo(width - 4, y1);
+    ctx.stroke();
+
+    ctx.fillStyle = ctx.strokeStyle;
+    ctx.beginPath();
+    ctx.arc(width - 4, y1, 1.5, 0, Math.PI * 2);
+    ctx.fill();
+  }, [prevClose, current]);
+
+  if (prevClose == null || current == null) return <span className="text-[color:var(--term-ink-tertiary)]">—</span>;
+  return <canvas ref={canvasRef} style={{ width, height, display: "block", opacity: dim ? 0.5 : 1 }} className="ml-auto transition-opacity" />;
+}
+
+const OUTLIER_THRESHOLD = 15;
+
+function CellContent({
+  col,
+  row,
+  onSectorClick,
+  sparkDim,
+}: {
+  col: ColumnDef;
+  row: EnrichedCompany;
+  onSectorClick?: (industryName: string) => void;
+  sparkDim?: boolean;
+}) {
   switch (col.key) {
     case "industry":
-      return <span className="truncate text-text-secondary text-small">{row.industry_name}</span>;
+      return (
+        <button
+          type="button"
+          title={row.industry_name}
+          onClick={(e) => {
+            e.stopPropagation();
+            onSectorClick?.(row.industry_name);
+          }}
+          className="truncate text-left text-small text-[color:var(--term-ink-tertiary)] hover:text-[color:var(--term-accent)]"
+        >
+          {sectorCode(row.industry_name)}
+        </button>
+      );
     case "price":
-      return <span className="num block text-right font-medium text-small">{formatPrice(row.current_price)}</span>;
+      return <span className="num block text-right font-medium text-small text-[color:var(--term-ink)]">{formatPrice(row.current_price)}</span>;
     case "prevClose":
-      return <span className="num block text-right text-text-secondary text-small">{row.prev_close != null ? formatPrice(row.prev_close) : "—"}</span>;
+      return <span className="num block text-right text-small text-[color:var(--term-ink-secondary)]">{row.prev_close != null ? formatPrice(row.prev_close) : "—"}</span>;
     case "dayChange": {
-      if (row.day_change_pct == null) return <span className="num block text-right text-text-tertiary">—</span>;
+      if (row.day_change_pct == null) return <span className="num block text-right text-[color:var(--term-ink-tertiary)]">—</span>;
       const v = Number(row.day_change_pct);
       const positive = v >= 0;
-      const absV = Math.abs(v);
-      const intensity = Math.min(absV / 5, 1);
+      const isOutlier = Math.abs(v) >= OUTLIER_THRESHOLD;
       return (
-        <div className="flex items-center justify-end gap-1.5">
-          <ChangeBar value={v} />
-          <span
-            className={cn(
-              "num flex items-center gap-0.5 text-small font-medium tabular-nums",
-              positive ? "text-positive" : "text-negative"
-            )}
-            style={{ opacity: 0.5 + intensity * 0.5 }}
-          >
-            {absV < 0.01 ? <Minus size={9} /> : positive ? <ArrowUp size={9} /> : <ArrowDown size={9} />}
-            {formatPct(v)}
-          </span>
-        </div>
+        <span
+          className={cn(
+            "num flex items-center justify-end gap-0.5 text-small tabular-nums",
+            isOutlier && "font-bold",
+            positive ? "text-[color:var(--term-up)]" : "text-[color:var(--term-down)]"
+          )}
+        >
+          {positive ? "▲" : "▼"}
+          {formatPct(v)}
+          {isOutlier && "⚡"}
+        </span>
+      );
+    }
+    case "dayChangeAbs": {
+      if (row.day_change_pct == null || row.current_price == null) return <span className="num block text-right text-[color:var(--term-ink-tertiary)]">—</span>;
+      const cur = Number(row.current_price);
+      const pct = Number(row.day_change_pct);
+      const abs = cur - cur / (1 + pct / 100);
+      const positive = abs >= 0;
+      return (
+        <span className={cn("num block text-right text-small tabular-nums", positive ? "text-[color:var(--term-up)]" : "text-[color:var(--term-down)]")}>
+          {formatPrice(abs)}
+        </span>
       );
     }
     case "ivGap": {
-      if (row.ivGapPct == null) return <span className="num block text-right text-text-tertiary">—</span>;
-      const v = row.ivGapPct;
-      const absV = Math.abs(v);
-      const intensity = Math.min(absV / 10, 1);
-      const cls = v < -3 ? "text-positive" : v > 3 ? "text-negative" : "text-text-secondary";
-      return (
-        <span
-          className={cn("num block text-right text-small tabular-nums", cls)}
-          style={{ opacity: 0.5 + intensity * 0.5 }}
-        >
-          {formatPct(v)}
-        </span>
-      );
+      // IV Gap is a valuation distance (how far price sits from intrinsic
+      // value), not a directional move like Day Chg — coloring it market
+      // red/green off its sign reads as a false "up/down" signal and
+      // collides with the real Day Chg color right next to it.
+      if (row.ivGapPct == null) return <span className="num block text-right text-[color:var(--term-ink-tertiary)]">—</span>;
+      return <span className="num block text-right text-small tabular-nums text-[color:var(--term-ink-secondary)]">{formatPct(row.ivGapPct)}</span>;
     }
     case "iv": {
-      if (row.intrinsic_value == null) return <span className="num block text-right text-text-tertiary">—</span>;
-      return <span className="num block text-right text-text-secondary text-small tabular-nums">{formatPrice(row.intrinsic_value)}</span>;
+      if (row.intrinsic_value == null) return <span className="num block text-right text-[color:var(--term-ink-tertiary)]">—</span>;
+      return <span className="num block text-right text-[color:var(--term-ink-secondary)] text-small tabular-nums">{formatPrice(row.intrinsic_value)}</span>;
     }
     case "marketCap":
-      return <span className="num block text-right text-small tabular-nums">{formatLarge(row.market_cap)}</span>;
+      return <span className="num block text-right text-small tabular-nums text-[color:var(--term-ink)]">{formatLarge(row.market_cap)}</span>;
+    case "spark":
+      return <Spark prevClose={row.prev_close != null ? Number(row.prev_close) : null} current={row.current_price != null ? Number(row.current_price) : null} dim={sparkDim} />;
     case "marketCapCategory":
       return <MarketCapBadge category={row.marketCapCategory} />;
     case "volatility":
-      return <span className="num block text-right text-small tabular-nums">{row.volatility == null ? "—" : formatPct(Number(row.volatility))}</span>;
+      return <span className="num block text-right text-small tabular-nums text-[color:var(--term-ink-secondary)]">{row.volatility == null ? "—" : formatPct(Number(row.volatility))}</span>;
     case "volume":
-      return <span className="num block text-right text-small tabular-nums">{row.avg_volume_20d == null ? "—" : `Avg ${formatLarge(row.avg_volume_20d)}`}</span>;
+      return <span className="num block text-right text-small tabular-nums text-[color:var(--term-ink-secondary)]">{row.avg_volume_20d == null ? "—" : `Avg ${formatLarge(row.avg_volume_20d)}`}</span>;
     case "high52w":
-      return <span className="num block text-right text-small tabular-nums">{row.high_52w == null ? "—" : formatPrice(row.high_52w)}</span>;
+      return <span className="num block text-right text-small tabular-nums text-[color:var(--term-ink-secondary)]">{row.high_52w == null ? "—" : formatPrice(row.high_52w)}</span>;
     case "low52w":
-      return <span className="num block text-right text-small tabular-nums">{row.low_52w == null ? "—" : formatPrice(row.low_52w)}</span>;
+      return <span className="num block text-right text-small tabular-nums text-[color:var(--term-ink-secondary)]">{row.low_52w == null ? "—" : formatPrice(row.low_52w)}</span>;
     case "pctOffHigh": {
-      if (row.pctOffHigh == null) return <span className="num block text-right text-text-tertiary">—</span>;
-      const v = Number(row.pctOffHigh);
-      const absV = Math.abs(v);
-      const intensity = Math.min(absV / 10, 1);
-      return (
-        <span
-          className="num block text-right text-negative text-small tabular-nums"
-          style={{ opacity: 0.5 + intensity * 0.5 }}
-        >
-          {formatPct(v)}
-        </span>
-      );
+      if (row.pctOffHigh == null) return <span className="num block text-right text-[color:var(--term-ink-tertiary)]">—</span>;
+      return <span className="num block text-right text-small tabular-nums text-[color:var(--term-down)]">{formatPct(Number(row.pctOffHigh))}</span>;
     }
     default:
       return null;
@@ -167,8 +201,8 @@ interface RowProps {
   isExpanded: boolean;
   onActivate: () => void;
   onToggleSelect: () => void;
-  onToggleWatch: () => void;
   onExpand: () => void;
+  onSectorClick?: (industryName: string) => void;
   scrolledX: boolean;
 }
 
@@ -185,37 +219,38 @@ const ExplorerRow = React.memo(function ExplorerRow({
   isExpanded,
   onActivate,
   onToggleSelect,
-  onToggleWatch,
   onExpand,
+  onSectorClick,
   scrolledX,
 }: RowProps) {
+  const isTerminalDensity = rowHeight <= 24;
+  const isLedgerLine = (rank % 5 === 0) && !isExpanded;
+
   return (
     <div
       role="row"
       aria-selected={selected}
       data-row-ticker={row.ticker}
       className={cn(
-        "group absolute left-0 right-0 flex items-stretch border-b border-border/40 cursor-pointer",
-        "transition-[background-color,border-color] duration-150",
-        "hover:border-l-2 hover:border-l-accent/60",
-        selected ? "bg-accent/8 border-l-2 border-l-accent" : focused ? "bg-bg-hover border-l-2 border-l-accent/30" : "bg-transparent",
+        "group absolute left-0 right-0 flex items-stretch cursor-pointer",
+        isLedgerLine ? "border-b border-[var(--term-divider)]" : "border-b border-[var(--term-hairline)]",
+        !isTerminalDensity && "hover:bg-white/[0.03]",
+        focused && "bg-white/[0.04]",
+        selected && "bg-[color:var(--term-accent)]/10"
       )}
       style={{ height: rowHeight, top }}
       onClick={onActivate}
     >
-      <div
+      <span
         className={cn(
-          "sticky left-0 z-10 flex items-center gap-0.5 pl-0.5 pr-1.5",
-          selected ? "bg-accent/8" : "bg-bg-primary group-hover:bg-bg-hover"
+          "absolute inset-y-0 left-0 w-[2px]",
+          focused || selected ? "bg-[color:var(--term-accent)]" : "bg-transparent"
         )}
+      />
+      <div
+        className="sticky left-0 z-10 flex items-center gap-1 bg-[var(--term-bg)] pl-2 pr-1.5"
         style={{ width: PINNED_COLUMN_WIDTH, minWidth: PINNED_COLUMN_WIDTH }}
       >
-        <span
-          className={cn(
-            "absolute inset-y-0 left-0 w-[2px] transition-colors",
-            selected ? "bg-accent" : watched ? "bg-warning/50" : "bg-transparent"
-          )}
-        />
         <button
           type="button"
           aria-label={isExpanded ? `Collapse ${row.ticker} details` : `Expand ${row.ticker} details`}
@@ -224,10 +259,10 @@ const ExplorerRow = React.memo(function ExplorerRow({
             onExpand();
           }}
           className={cn(
-            "flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-sm transition-all",
+            "flex h-3.5 w-3.5 shrink-0 items-center justify-center transition-all",
             isExpanded
-              ? "text-accent opacity-100"
-              : "text-text-tertiary opacity-0 group-hover:opacity-60 hover:!opacity-100"
+              ? "text-[color:var(--term-accent)] opacity-100"
+              : "text-[color:var(--term-ink-tertiary)] opacity-0 group-hover:opacity-60 hover:!opacity-100"
           )}
         >
           <ChevronRight size={10} className={cn("transition-transform duration-150", isExpanded && "rotate-90")} />
@@ -242,38 +277,19 @@ const ExplorerRow = React.memo(function ExplorerRow({
             onToggleSelect();
           }}
           className={cn(
-            "h-3 w-3 shrink-0 rounded-sm border transition-all",
-            selected ? "border-accent bg-accent" : "border-border-light opacity-0 group-hover:opacity-60 hover:!opacity-100",
-            "flex items-center justify-center"
+            "h-3 w-3 shrink-0 border transition-all flex items-center justify-center",
+            selected ? "border-[color:var(--term-accent)] bg-[color:var(--term-accent)]" : "border-[color:var(--term-ink-tertiary)] opacity-0 group-hover:opacity-60 hover:!opacity-100"
           )}
         >
-          {selected && <span className="h-1.5 w-1.5 rounded-[1px] bg-white" />}
+          {selected && <span className="h-1.5 w-1.5 bg-white" />}
         </button>
-        <button
-          type="button"
-          aria-label={watched ? `Remove ${row.ticker} from watchlist` : `Add ${row.ticker} to watchlist`}
-          onClick={(e) => {
-            e.stopPropagation();
-            onToggleWatch();
-          }}
-          className={cn(
-            "shrink-0 transition-all",
-            watched ? "text-warning opacity-100" : "text-text-tertiary opacity-0 group-hover:opacity-60 hover:!opacity-100 hover:text-warning"
-          )}
-        >
-          <Star size={11} fill={watched ? "currentColor" : "none"} />
-        </button>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-baseline gap-1">
-            <span className="text-micro text-text-tertiary tabular-nums w-4 shrink-0 text-right">
-              {rank}
-            </span>
-            <span className={cn("num truncate font-bold uppercase tracking-tight text-small", changed && "cell-flash")}>
-              {row.ticker}
-            </span>
-          </div>
-          <div className="truncate text-micro text-text-tertiary leading-tight max-w-[140px]">{row.name}</div>
-        </div>
+        <span className={cn("num shrink-0 font-mono text-small font-semibold text-[color:var(--term-ink)]", changed && "cell-flash")} style={{ width: "6ch" }}>
+          {row.ticker}
+          {watched && <span className="text-[color:var(--term-amber)]"> ✓</span>}
+        </span>
+        <span className="truncate text-small text-[color:var(--term-ink-secondary)]" style={{ fontFamily: "var(--font-sans)" }}>
+          {row.name}
+        </span>
         {scrolledX && (
           <div className="pointer-events-none absolute inset-y-0 -right-3 w-3 bg-gradient-to-r from-black/20 to-transparent" />
         )}
@@ -288,7 +304,7 @@ const ExplorerRow = React.memo(function ExplorerRow({
           style={{ width: col.width, minWidth: col.width }}
         >
           <div className="relative z-10 w-full">
-            <CellContent col={col} row={row} />
+            <CellContent col={col} row={row} onSectorClick={onSectorClick} sparkDim={isTerminalDensity && !focused} />
           </div>
         </div>
       ))}
@@ -309,6 +325,7 @@ export function ExplorerTable({
   onActivateRow,
   changedTickers,
   onColumnResize,
+  onSectorClick,
 }: ExplorerTableProps) {
   const rowHeight = DEFAULT_ROW_HEIGHT[density];
   const EXPANDED_HEIGHT = 120;
@@ -446,6 +463,15 @@ export function ExplorerTable({
       e.preventDefault();
       const row = rows[focusedIndex];
       if (row) onToggleWatch(row.ticker);
+    } else if (e.key.toLowerCase() === "y") {
+      e.preventDefault();
+      const row = rows[focusedIndex];
+      if (row) {
+        const line = [row.ticker, row.name, row.industry_name, row.current_price, row.day_change_pct, row.ivGapPct, row.market_cap]
+          .map((v) => (v == null ? "" : String(v)))
+          .join("\t");
+        void navigator.clipboard?.writeText(line).catch(() => undefined);
+      }
     } else if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
       e.preventDefault();
       const row = rows[focusedIndex];
@@ -473,16 +499,16 @@ export function ExplorerTable({
     >
       <div style={{ minWidth: totalWidth }}>
         {/* Header */}
-        <div className="sticky top-0 z-20 flex border-b border-border bg-bg-secondary/95 backdrop-blur-sm" role="row">
+        <div className="sticky top-0 z-20 flex border-b border-[var(--term-divider)] bg-[var(--term-bg)]" role="row">
           <button
             type="button"
             onClick={() => onSort("ticker")}
-            className="sticky left-0 z-30 flex items-center gap-1 bg-bg-secondary pl-7 pr-2 text-micro font-semibold uppercase tracking-wider text-text-secondary hover:text-text-primary transition-colors"
-            style={{ width: PINNED_COLUMN_WIDTH, minWidth: PINNED_COLUMN_WIDTH, height: 30 }}
+            className="sticky left-0 z-30 flex items-center gap-1 bg-[var(--term-bg)] pl-2 pr-2 font-mono text-[11px] font-semibold uppercase tracking-[0.04em] text-[color:var(--term-amber)]/90 transition-colors"
+            style={{ width: PINNED_COLUMN_WIDTH, minWidth: PINNED_COLUMN_WIDTH, height: 28 }}
           >
-            Company
+            Tkr / Company
             {sort.key === "ticker" && (
-              <span className="text-accent">{sort.direction === "asc" ? <ArrowUp size={10} /> : <ArrowDown size={10} />}</span>
+              <span className="text-[color:var(--term-ink)]">{sort.direction === "asc" ? <ArrowUp size={10} /> : <ArrowDown size={10} />}</span>
             )}
           </button>
           {resolvedColumns.map((col, colIdx) => {
@@ -494,19 +520,16 @@ export function ExplorerTable({
                   type="button"
                   onClick={(e) => onSort(col.key, e.shiftKey)}
                   className={cn(
-                    "flex flex-1 items-center gap-1 px-2.5 text-micro font-semibold uppercase tracking-wider transition-colors",
-                    isSorted ? "text-accent" : "text-text-secondary hover:text-text-primary",
+                    "flex flex-1 items-center gap-1 px-2.5 font-mono text-[11px] font-semibold uppercase tracking-[0.04em] text-[color:var(--term-amber)]/90 transition-colors hover:text-[color:var(--term-amber)]",
                     col.align === "right" && "justify-end text-right"
                   )}
-                  style={{ height: 30 }}
+                  style={{ height: 28 }}
                 >
                   <span>{col.header}</span>
                   {isSorted && (
                     <>
-                      <span className="inline-flex h-3.5 min-w-[14px] items-center justify-center rounded-[3px] bg-accent/20 px-0.5 text-[8px] font-bold text-accent tabular-nums">
-                        {priority}
-                      </span>
-                      <span className="text-accent">
+                      <span className="text-[9px] text-[color:var(--term-ink-tertiary)]">{priority > 1 ? priority : ""}</span>
+                      <span className="text-[color:var(--term-ink)]">
                         {priority === 1
                           ? (sort.direction === "asc" ? <ArrowUp size={10} /> : <ArrowDown size={10} />)
                           : (sort.secondary?.direction === "asc" ? <ArrowUp size={10} /> : <ArrowDown size={10} />)}
@@ -552,8 +575,8 @@ export function ExplorerTable({
                     onActivateRow(row.ticker);
                   }}
                   onToggleSelect={() => onToggleSelect(row.ticker)}
-                  onToggleWatch={() => onToggleWatch(row.ticker)}
                   onExpand={() => toggleExpand(row.ticker)}
+                  onSectorClick={onSectorClick}
                   scrolledX={scrolledX}
                 />
                 {idx === expandedIdx && (

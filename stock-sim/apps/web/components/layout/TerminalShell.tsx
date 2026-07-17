@@ -8,6 +8,7 @@ import { StatusBar } from "@/components/layout/StatusBar";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { logActivity } from "@/lib/activity/useActivityLog";
 import { getPageLabel } from "@/lib/nav/routeLabels";
+import { cn } from "@/lib/utils";
 
 /**
  * Shared shell for all TERMINAL-surface authenticated routes: Sidebar +
@@ -20,17 +21,30 @@ import { getPageLabel } from "@/lib/nav/routeLabels";
  * moving every page file into a route group, which is out of scope for a
  * Global-Layout-only change. Flagged as a follow-up recommendation.
  */
-export function TerminalShell({ children }: { children: React.ReactNode }) {
+export function TerminalShell({
+  children,
+  noPadding = false,
+}: {
+  children: React.ReactNode;
+  /** Full-bleed mode for pages that manage their own internal scrolling and
+   * want to fill the viewport edge-to-edge (e.g. the Bloomberg-terminal
+   * screener) — skips the default max-width/padding/page-level scroll. */
+  noPadding?: boolean;
+}) {
   return (
     <ProtectedRoute>
       <SidebarProvider>
         <div className="mer-mesh-canvas flex h-screen flex-col">
           <div className="flex flex-1 overflow-hidden">
             <Sidebar />
-            <div className="flex flex-1 flex-col overflow-y-auto">
+            <div className={cn("flex flex-1 flex-col", noPadding ? "overflow-hidden" : "overflow-y-auto")}>
               <Header />
               <RouteFadeContent>
-                <main className="mx-auto w-full max-w-[1800px] px-5 py-5">{children}</main>
+                {noPadding ? (
+                  <main className="flex min-h-0 flex-1 flex-col overflow-hidden">{children}</main>
+                ) : (
+                  <main className="mx-auto w-full max-w-[1800px] px-5 py-5">{children}</main>
+                )}
               </RouteFadeContent>
             </div>
           </div>
@@ -48,5 +62,5 @@ function RouteFadeContent({ children }: { children: React.ReactNode }) {
     if (pathname) logActivity({ kind: "nav", label: `Visited ${getPageLabel(pathname)}` });
   }, [pathname]);
 
-  return <div>{children}</div>;
+  return <div className="flex min-h-0 flex-1 flex-col">{children}</div>;
 }

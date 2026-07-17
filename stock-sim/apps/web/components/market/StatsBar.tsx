@@ -61,14 +61,10 @@ export function StatsBar({ companies }: StatsBarProps) {
         {avgDayChange != null ? formatPct(avgDayChange) : "—"}
       </Stat>
       <Divider />
-      <Stat
-        label="Avg IV Gap"
-        className={cn(
-          avgIvGap != null && (avgIvGap >= 0 ? "text-negative" : "text-positive")
-        )}
-      >
-        {avgIvGap != null ? formatPct(avgIvGap) : "—"}
-      </Stat>
+      {/* IV Gap is a valuation distance, not a direction — unlike Day Chg, its
+          sign isn't "good/bad" the way price direction is, so it stays
+          neutral ink rather than reusing the market red/green pair. */}
+      <Stat label="Avg IV Gap">{avgIvGap != null ? formatPct(avgIvGap) : "—"}</Stat>
     </div>
   );
 }
