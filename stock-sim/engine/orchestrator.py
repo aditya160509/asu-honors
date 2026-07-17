@@ -1051,12 +1051,15 @@ def _generate_fake_quarterly_financials(
 ) -> dict[str, float]:
     """Generate plausible next-quarter financials from the most recent quarter."""
     # Check every table this function writes to, not just IncomeStatement --
-    # a request that crashed mid-tick can leave a partial write where some
-    # rows for this (company_id, fiscal_period) exist and others don't (e.g.
-    # BalanceSheet committed but IncomeStatement didn't). Gating solely on
-    # IncomeStatement let a retried advance fall through to the insert path
-    # below and hit uq_balance_sheets_company_period on the already-present
-    # BalanceSheet row.
+    # gating solely on IncomeStatement let a retried/re-crossed advance for
+    # this (company_id, fiscal_period) fall through to the insert path below
+    # and hit uq_balance_sheets_company_period on an already-present
+    # BalanceSheet row even though IncomeStatement looked absent (e.g. it was
+    # queried via a stale relationship cache). Only treat the quarter as
+    # already-refreshed when every row this function writes is present --
+    # a genuine transaction rollback removes all of them together, so a
+    # same-fiscal-period retry is either "none of these rows exist yet" or
+    # "all of them already do".
     existing_inc = session.query(IncomeStatement).filter_by(
         company_id=company.id, fiscal_period=fiscal_period
     ).first()
@@ -1066,11 +1069,11 @@ def _generate_fake_quarterly_financials(
     existing_cf = session.query(CashFlowStatement).filter_by(
         company_id=company.id, fiscal_period=fiscal_period
     ).first()
-    if existing_inc is not None or existing_bal is not None or existing_cf is not None:
-        # This company's quarter was already (at least partially) refreshed --
-        # reuse whatever rows exist instead of re-inserting and hitting a
-        # unique constraint. Missing rows are backfilled from the ones that
-        # are present rather than left null.
+    if existing_inc is not None and existing_bal is not None and existing_cf is not None:
+        # This company's quarter was already refreshed (e.g. a retried advance
+        # call re-crossing the same boundary) -- reuse the existing rows
+        # instead of inserting a second row for the same (company_id,
+        # fiscal_period) and hitting the unique constraint.
         prior_incs = session.query(IncomeStatement).filter_by(
             company_id=company.id
         ).order_by(IncomeStatement.fiscal_period.asc()).all()
