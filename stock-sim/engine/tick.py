@@ -36,6 +36,7 @@ class TickState:
     sim_day: int
     market_factor_return: float
     companies: tuple[CompanyTickInput, ...] = field(default_factory=tuple)
+    pressure_scale: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -50,7 +51,14 @@ def run_tick(state: TickState) -> TickResult:
     if n == 0:
         return TickResult(sim_day=state.sim_day + 1, outputs=())
 
-    price_pressures = np.array(
+    # composite_price_pressure sums 7 drivers each clamped to [-1, 1], so it can
+    # reach magnitude ~1.0 -- far larger than a plausible single-day return.
+    # pressure_scale converts that composite score into an actual daily log-return
+    # contribution; without it, whenever several drivers align (e.g. every
+    # company during the same cycle phase) the raw move overshoots the circuit
+    # breaker's r_cap and gets clipped identically for every company, producing
+    # lockstep price action regardless of company-specific fundamentals.
+    price_pressures = state.pressure_scale * np.array(
         [composite_price_pressure(c.driver_values, c.driver_weights) for c in state.companies]
     )
     y = np.array([c.y for c in state.companies])

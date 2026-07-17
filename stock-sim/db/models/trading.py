@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Optional
 
 from sqlalchemy import CheckConstraint, Date, DateTime, ForeignKey, Integer, Numeric, String, UniqueConstraint
@@ -24,7 +25,7 @@ class User(Base, TimestampMixin):
     hashed_password: Mapped[str] = mapped_column(String, nullable=False)
     display_name: Mapped[str] = mapped_column(String(120), nullable=False)
     role: Mapped[str] = mapped_column(String(20), default="user", nullable=False)
-    starting_cash: Mapped[float] = mapped_column(Numeric, nullable=False)
+    starting_cash: Mapped[Decimal] = mapped_column(Numeric, nullable=False)
     email_verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
     __table_args__ = (
@@ -38,8 +39,8 @@ class Portfolio(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     timeline_id: Mapped[int] = mapped_column(ForeignKey("timelines.id", ondelete="CASCADE"), nullable=False)
-    cash_balance: Mapped[float] = mapped_column(Numeric, nullable=False)
-    total_value: Mapped[float] = mapped_column(Numeric, default=0.0)
+    cash_balance: Mapped[Decimal] = mapped_column(Numeric, nullable=False)
+    total_value: Mapped[Decimal] = mapped_column(Numeric, default=Decimal("0"))
 
     __table_args__ = (
         UniqueConstraint("user_id", "timeline_id", name="uq_portfolios_user_timeline"),
@@ -52,8 +53,8 @@ class Holding(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(primary_key=True)
     portfolio_id: Mapped[int] = mapped_column(ForeignKey("portfolios.id", ondelete="CASCADE"), nullable=False)
     company_id: Mapped[int] = mapped_column(ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
-    quantity: Mapped[float] = mapped_column(Numeric, nullable=False)
-    avg_cost_basis: Mapped[float] = mapped_column(Numeric, nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric, nullable=False)
+    avg_cost_basis: Mapped[Decimal] = mapped_column(Numeric, nullable=False)
 
     __table_args__ = (
         UniqueConstraint("portfolio_id", "company_id", name="uq_holdings_portfolio_company"),
@@ -76,12 +77,12 @@ class Order(Base, TimestampMixin):
     sim_date: Mapped[date] = mapped_column(Date, nullable=False)
     side: Mapped[str] = mapped_column(String(10), nullable=False)
     order_type: Mapped[str] = mapped_column(String(10), nullable=False, default="market")
-    quantity: Mapped[float] = mapped_column(Numeric, nullable=False)
-    limit_price: Mapped[Optional[float]] = mapped_column(Numeric)
+    quantity: Mapped[Decimal] = mapped_column(Numeric, nullable=False)
+    limit_price: Mapped[Optional[Decimal]] = mapped_column(Numeric)
     status: Mapped[str] = mapped_column(String(12), nullable=False, default="open")
-    filled_quantity: Mapped[float] = mapped_column(Numeric, nullable=False, default=0)
-    avg_fill_price: Mapped[Optional[float]] = mapped_column(Numeric)
-    fees: Mapped[Optional[float]] = mapped_column(Numeric)
+    filled_quantity: Mapped[Decimal] = mapped_column(Numeric, nullable=False, default=Decimal("0"))
+    avg_fill_price: Mapped[Optional[Decimal]] = mapped_column(Numeric)
+    fees: Mapped[Optional[Decimal]] = mapped_column(Numeric)
     filled_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     cancelled_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
@@ -102,11 +103,11 @@ class Transaction(Base, TimestampMixin):
     order_id: Mapped[Optional[int]] = mapped_column(ForeignKey("orders.id", ondelete="SET NULL"))
     sim_date: Mapped[date] = mapped_column(Date, nullable=False)
     side: Mapped[str] = mapped_column(String(10), nullable=False)
-    quantity: Mapped[float] = mapped_column(Numeric, nullable=False)
-    price: Mapped[float] = mapped_column(Numeric, nullable=False)
-    fees: Mapped[float] = mapped_column(Numeric, nullable=False)
-    impact_applied: Mapped[float] = mapped_column(Numeric, nullable=False)
-    realized_pnl: Mapped[Optional[float]] = mapped_column(Numeric)
+    quantity: Mapped[Decimal] = mapped_column(Numeric, nullable=False)
+    price: Mapped[Decimal] = mapped_column(Numeric, nullable=False)
+    fees: Mapped[Decimal] = mapped_column(Numeric, nullable=False)
+    impact_applied: Mapped[Decimal] = mapped_column(Numeric, nullable=False)
+    realized_pnl: Mapped[Optional[Decimal]] = mapped_column(Numeric)
 
     __table_args__ = (
         CheckConstraint("side in ('buy', 'sell')", name="ck_transactions_side"),

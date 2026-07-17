@@ -2,7 +2,7 @@
 
 from datetime import date
 
-from db.models import MoatSubscore, FactorDefinition, IndustryPillarWeight, MarketEvent
+from db.models import MoatSubscore, FactorDefinition, IndustryPillarWeight, MarketEvent, PriceHistory
 from db.models.financials import BalanceSheet, CashFlowStatement, ConsensusEstimate, IncomeStatement
 
 
@@ -43,6 +43,28 @@ def test_advance_ticks(client, test_db, test_company, test_timeline, base_config
     body = resp.json()
     assert body["ticks_executed"] == 5
     assert body["tick_count"] == 5
+
+
+def test_advance_ticks_past_seeded_baseline_day(client, test_db, test_company, test_timeline, base_config, auth_headers):
+    """Regression test for the seed/orchestrator deadlock: db/seeds/seed_initial_prices.py
+    writes a PriceHistory row for SimulationState.current_sim_date as the day-0 baseline
+    close (tick_count stays 0, since that's a seed, not a completed tick). Reproduce that
+    here -- without the fix, run_ticks finds this row and treats current_sim_date as
+    "already executed" on every call, so tick_count is permanently stuck at 0.
+    """
+    _seed_tickable(test_db, test_company, test_timeline)
+    test_db.add(PriceHistory(
+        timeline_id=1, company_id=test_company.id, sim_date=date(2026, 1, 2),
+        open=10.0, high=10.5, low=9.5, close=10.0, volume=1000,
+        intrinsic_value=10.0, order_imbalance=0.0,
+    ))
+    test_db.commit()
+
+    resp = client.post("/api/v1/sim/advance", json={"timeline_id": 1, "days": 1}, headers=auth_headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ticks_executed"] == 1
+    assert body["tick_count"] == 1
 
 
 def test_advance_idempotent(client, test_db, test_company, test_timeline, base_config, auth_headers):

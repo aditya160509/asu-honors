@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Optional
 
 from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Numeric, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
@@ -21,6 +22,17 @@ class CompanyFactorScore(Base, TimestampMixin):
     fair_pe: Mapped[float] = mapped_column(Numeric, nullable=False)
     intrinsic_value: Mapped[float] = mapped_column(Numeric, nullable=False)
     computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+    # Snapshot of {field} as of the last quarterly refresh, never touched by
+    # event effects. management_quality/growth_potential/fcf_quality have no
+    # other source of truth to re-derive from (unlike moat_score/
+    # financial_quality, which are always recomputed fresh from MoatSubscore/
+    # FinancialQualitySubscore), so event-driven deltas are computed against
+    # this base each tick rather than compounding on the mutated effective
+    # column -- see engine.orchestrator._apply_factor_effects_to_company.
+    management_quality_base: Mapped[Optional[float]] = mapped_column(Numeric, nullable=True)
+    growth_potential_base: Mapped[Optional[float]] = mapped_column(Numeric, nullable=True)
+    fcf_quality_base: Mapped[Optional[float]] = mapped_column(Numeric, nullable=True)
 
     __table_args__ = (
         UniqueConstraint("company_id", "fiscal_period", name="uq_company_factor_scores_company_period"),
@@ -46,6 +58,9 @@ class MoatSubscore(Base, TimestampMixin):
     company_id: Mapped[int] = mapped_column(ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
     subfactor_key: Mapped[str] = mapped_column(String(80), nullable=False)
     score: Mapped[float] = mapped_column(Numeric, nullable=False)
+    # Undecayed value as of seed time / last explicit reset, never touched by
+    # event effects -- see CompanyFactorScore's *_base columns for the same pattern.
+    score_base: Mapped[Optional[float]] = mapped_column(Numeric, nullable=True)
 
     __table_args__ = (
         UniqueConstraint("company_id", "subfactor_key", name="uq_moat_subscores_company_subfactor"),

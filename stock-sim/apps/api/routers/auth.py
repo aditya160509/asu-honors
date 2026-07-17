@@ -2,6 +2,7 @@
 
 import logging
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -32,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/auth", tags=["Auth"])
 
-DEFAULT_STARTING_CASH = 100_000.0
+DEFAULT_STARTING_CASH = Decimal("100000")
 
 REFRESH_COOKIE = "mv_refresh"
 SESSION_FLAG_COOKIE = "mv_session"  # non-httpOnly indicator read by Next.js middleware

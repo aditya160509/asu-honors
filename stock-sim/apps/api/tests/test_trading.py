@@ -1,6 +1,8 @@
 """Tests for /api/v1/portfolio, /api/v1/orders, /api/v1/watchlist endpoints."""
 
-from db.models import Holding
+from decimal import Decimal
+
+from db.models import Holding, Portfolio
 
 
 def test_get_portfolio_no_auth(client, test_db, test_portfolio):
@@ -507,3 +509,74 @@ def test_check_and_fill_limit_orders_fills_when_price_crosses(test_db, test_comp
     holding = test_db.query(Holding).filter_by(portfolio_id=test_portfolio.id, company_id=1).first()
     assert holding is not None
     assert float(holding.quantity) == 10
+
+
+def test_many_trades_do_not_accumulate_float_rounding_drift(test_db, test_company, test_portfolio, test_user):
+    """Regression test: Portfolio.cash_balance/Holding.avg_cost_basis/.quantity are
+    Decimal-backed columns computed in Decimal throughout _execute_buy/_execute_sell,
+    with no float(...) round-trip on write. Reconstruct the expected cash balance
+    independently from each order's own recorded (Decimal) avg_fill_price/fees/
+    quantity -- i.e. verify portfolio state is exactly internally consistent with
+    its own transaction ledger after many trades, rather than re-deriving the
+    Kyle-lambda impact pricing model."""
+    from db.models import Order
+    from apps.api.schemas import OrderRequest
+    from apps.api.services.trade_service import place_order
+
+    test_company.current_price = 33.33
+    test_db.commit()
+
+    starting_cash = Decimal(str(test_portfolio.cash_balance))
+    expected_cash = starting_cash
+    expected_qty = Decimal(0)
+
+    for _ in range(25):
+        resp = place_order(
+            test_db, test_user,
+            OrderRequest(ticker="TST", side="buy", order_type="market", quantity=7, timeline_id=1),
+        )
+        test_db.commit()
+        order = test_db.query(Order).filter_by(id=resp.id).first()
+        cost = Decimal(str(order.filled_quantity)) * Decimal(str(order.avg_fill_price))
+        expected_cash -= cost + Decimal(str(order.fees))
+        expected_qty += Decimal(str(order.filled_quantity))
+
+    test_db.refresh(test_portfolio)
+    holding = test_db.query(Holding).filter_by(portfolio_id=test_portfolio.id, company_id=1).first()
+
+    # Compare to 4 decimal places (this app's money precision, matching
+    # _compute_fees' quantize) rather than exact equality: SQLite's untyped
+    # NUMERIC affinity (used by this in-memory test DB) can drop precision
+    # below that on round-trip in a way Postgres's arbitrary-precision NUMERIC
+    # (the real production column type) would not -- a test-storage-engine
+    # artifact, unrelated to the float-rounding bug this test targets.
+    cash_diff = abs(Decimal(str(test_portfolio.cash_balance)) - expected_cash)
+    assert cash_diff < Decimal("0.0001"), f"cash_balance drifted by {cash_diff}"
+    assert Decimal(str(holding.quantity)) == expected_qty
+
+
+def test_execute_buy_writes_decimal_not_float(test_db, test_company, test_portfolio, test_user):
+    """Regression test: assert the actual Python type written to Portfolio.cash_balance/
+    Holding.quantity/.avg_cost_basis is Decimal, not float. A single float(...) round-trip
+    only loses ~1e-12 relative precision -- far too small to show up as a cent-level
+    assertion failure even after many trades (see the accumulation test above), so the
+    only reliable way to catch a reintroduced float(...) cast is to check the type
+    directly, not wait for drift to become visible."""
+    from apps.api.services.trade_service import _execute_buy
+    from db.models import Company
+
+    company = test_db.query(Company).filter_by(id=1).first()
+    _execute_buy(
+        test_db, test_portfolio, None, company,
+        quantity=10, price=Decimal("33.3300"), fees=Decimal("0.3333"),
+    )
+    test_db.flush()
+
+    assert isinstance(test_portfolio.cash_balance, Decimal), (
+        f"cash_balance is {type(test_portfolio.cash_balance).__name__}, expected Decimal -- "
+        f"a float(...) cast was likely reintroduced in _execute_buy"
+    )
+
+    holding = test_db.query(Holding).filter_by(portfolio_id=test_portfolio.id, company_id=1).first()
+    assert isinstance(holding.quantity, Decimal)
+    assert isinstance(holding.avg_cost_basis, Decimal)
