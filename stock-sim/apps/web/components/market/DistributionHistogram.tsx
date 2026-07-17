@@ -2,7 +2,6 @@
 
 import * as React from "react";
 import { ChartSurface } from "@/lib/charts/core/ChartSurface";
-import { cn } from "@/lib/utils";
 import type { EnrichedCompany } from "@/lib/market/types";
 
 export interface DistributionHistogramProps {
@@ -18,6 +17,9 @@ interface Bucket {
   count: number;
   avgIVGap?: number;
 }
+
+const PADDING = { top: 8, right: 16, bottom: 36, left: 40 };
+const BAR_GAP = 2;
 
 function buildBuckets(companies: EnrichedCompany[], metric: string): Bucket[] {
   const values = companies
@@ -110,9 +112,6 @@ export function DistributionHistogram({ companies, metric, height = 180 }: Distr
   const [hoveredIdx, setHoveredIdx] = React.useState<number | null>(null);
 
   const maxCount = React.useMemo(() => Math.max(...buckets.map((b) => b.count), 1), [buckets]);
-
-  const PADDING = React.useMemo(() => ({ top: 8, right: 16, bottom: 36, left: 40 }), []);
-  const BAR_GAP = 2;
 
   const metricLabels: Record<string, string> = {
     price: "Price Distribution",

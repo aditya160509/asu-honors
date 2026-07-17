@@ -2,7 +2,6 @@
 
 import * as React from "react";
 import { LiveDot } from "@/components/dashboard/primitives/LiveDot";
-import { MER_HAIRLINE } from "@/components/dashboard/primitives/tokens";
 import { usePortfolio, usePortfolioAnalytics, useTransactions } from "@/lib/api/hooks/usePortfolio";
 import { useSimState } from "@/lib/api/hooks/useSimulation";
 import { usePortfolioHeader } from "@/components/portfolio/PortfolioHeaderContext";
@@ -10,13 +9,66 @@ import { useAnimatedCounter } from "@/lib/motion";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn, formatPrice } from "@/lib/utils";
 
-/**
- * C0 identity bar: eyebrow → display-xl mono net value → delta line → session
- * badge. Range-aware: the Performance tab publishes its selected range's delta
- * via PortfolioHeaderContext; every other tab shows since-inception.
- * A brand-new account (no holdings, no transactions) omits the delta line
- * entirely rather than showing a meaningless +0.00%.
- */
+const barStyle: React.CSSProperties = {
+  background: "linear-gradient(135deg, var(--mer-surface-2) 0%, var(--mer-surface-3) 100%)",
+  borderBottom: "1px solid var(--mer-stroke-hairline)",
+};
+
+const glowStyle: React.CSSProperties = {
+  textShadow: "0 0 40px rgba(62, 111, 224, 0.15), 0 0 80px rgba(62, 111, 224, 0.06)",
+};
+
+const pillBase: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: "6px",
+  borderRadius: "9999px",
+  padding: "4px 12px",
+  fontSize: "var(--fs-small)",
+  fontWeight: 600,
+  lineHeight: "1rem",
+  letterSpacing: "0.02em",
+};
+
+const pillPositive: React.CSSProperties = {
+  ...pillBase,
+  backgroundColor: "rgba(34, 197, 94, 0.12)",
+  color: "var(--positive)",
+  border: "1px solid rgba(34, 197, 94, 0.2)",
+};
+
+const pillNegative: React.CSSProperties = {
+  ...pillBase,
+  backgroundColor: "rgba(239, 68, 68, 0.12)",
+  color: "var(--negative)",
+  border: "1px solid rgba(239, 68, 68, 0.2)",
+};
+
+const marketBadge: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: "8px",
+  borderRadius: "var(--mer-radius-sm)",
+  border: "1px solid var(--mer-stroke-hairline)",
+  backgroundColor: "var(--mer-surface-3)",
+  color: "var(--mer-ink-secondary)",
+  padding: "6px 14px",
+  fontSize: "var(--fs-micro)",
+  fontWeight: 600,
+  textTransform: "uppercase" as const,
+  letterSpacing: "0.06em",
+};
+
+const secondaryStat: React.CSSProperties = {
+  display: "flex",
+  alignItems: "baseline",
+  gap: "12px",
+  fontSize: "var(--fs-small)",
+  fontFamily: "var(--font-mono)",
+  color: "var(--mer-ink-secondary)",
+  marginTop: "2px",
+};
+
 export function PortfolioIdentityBar() {
   const portfolio = usePortfolio();
   const analytics = usePortfolioAnalytics();
@@ -39,36 +91,64 @@ export function PortfolioIdentityBar() {
   };
   const deltaPositive = delta.deltaPct >= 0;
 
+  const totalReturnPct = analytics.data?.total_return_pct ?? 0;
+  const totalReturnPositive = totalReturnPct >= 0;
+
   return (
-    <div className={cn("flex flex-wrap items-end justify-between gap-4 border-b pb-4", MER_HAIRLINE)}>
-      <div className="flex flex-col gap-1">
-        <span className="text-micro font-medium uppercase tracking-wide text-mer-ink-tertiary">Portfolio</span>
+    <div style={barStyle} className="flex flex-wrap items-end justify-between gap-6 pb-5 pt-1">
+      <div className="flex flex-col gap-1.5">
+        <span
+          className="font-medium uppercase tracking-wide"
+          style={{ fontSize: "var(--fs-micro)", color: "var(--mer-ink-tertiary)", letterSpacing: "0.1em" }}
+        >
+          Portfolio
+        </span>
+
         {portfolio.isLoading ? (
-          <Skeleton width={280} height={44} />
+          <Skeleton width={320} height={52} />
         ) : (
-          <span className="num text-[2.5rem] font-semibold leading-[1.1] text-mer-ink-primary">{display}</span>
-        )}
-        {!portfolio.isLoading && !isBrandNew && analytics.data && (
-          <span className="flex items-baseline gap-2">
-            <span className={cn("num text-small font-medium", deltaPositive ? "text-positive" : "text-negative")}>
-              {deltaPositive ? "▲" : "▼"} {deltaPositive ? "+" : "−"}
-              {formatPrice(Math.abs(delta.deltaValue))} ({deltaPositive ? "+" : "−"}
-              {Math.abs(delta.deltaPct).toFixed(2)}%)
-            </span>
-            <span className="text-micro text-mer-ink-tertiary">{delta.label}</span>
+          <span
+            className="num font-semibold leading-none"
+            style={{
+              fontSize: "clamp(2.5rem, 4vw, 3.5rem)",
+              color: "var(--mer-ink-primary)",
+              fontFamily: "var(--font-mono)",
+              ...glowStyle,
+            }}
+          >
+            {display}
           </span>
+        )}
+
+        {!portfolio.isLoading && !isBrandNew && analytics.data && (
+          <div style={secondaryStat}>
+            <span style={{ color: deltaPositive ? "var(--positive)" : "var(--negative)" }}>
+              <span style={{ fontSize: "0.65em", marginRight: "2px" }}>{deltaPositive ? "▲" : "▼"}</span>
+              {deltaPositive ? "+" : "−"}
+              {formatPrice(Math.abs(delta.deltaValue))}
+              <span style={{ opacity: 0.7, marginLeft: "4px" }}>
+                ({deltaPositive ? "+" : "−"}{Math.abs(delta.deltaPct).toFixed(2)}%)
+              </span>
+            </span>
+            <span style={{ color: "var(--mer-ink-tertiary)", fontFamily: "var(--font-sans)", fontWeight: 400 }}>
+              {delta.label}
+            </span>
+
+            {!isBrandNew && totalReturnPct !== 0 && rangeDelta == null && (
+              <>
+                <span style={{ color: "var(--mer-stroke-emphasis)", fontWeight: 300 }}>|</span>
+                <span style={{ color: totalReturnPositive ? "var(--positive)" : "var(--negative)", opacity: 0.8 }}>
+                  Total: {totalReturnPositive ? "+" : "−"}{Math.abs(totalReturnPct).toFixed(2)}%
+                </span>
+              </>
+            )}
+          </div>
         )}
       </div>
 
-      <div className="flex items-center gap-2 pb-1">
-        <span
-          className={cn(
-            "flex items-center gap-1.5 rounded-mer-xs border px-2 py-1 text-micro font-medium uppercase tracking-wide",
-            MER_HAIRLINE,
-            "bg-mer-surface-3 text-mer-ink-secondary"
-          )}
-        >
-          {sim.data?.is_running && <LiveDot />}
+      <div className="flex items-center gap-3 pb-1.5">
+        <span style={marketBadge}>
+          <LiveDot color={sim.data?.is_running ? "positive" : "warning"} />
           {sim.data?.is_running ? "Market Live" : "Market Paused"}
         </span>
       </div>
@@ -76,7 +156,6 @@ export function PortfolioIdentityBar() {
   );
 }
 
-/** Back out the inception base from (total, return%) so the $ delta matches the % the API reports. */
 function totalReturnBase(totalValue: number | string, returnPct: number): number {
   const total = Number(totalValue);
   if (returnPct === -100) return total;

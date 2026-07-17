@@ -34,6 +34,10 @@ const BAR_COLORS = [
   "rgba(132,204,22,0.75)",
 ];
 
+const PADDING = { top: 12, right: 16, bottom: 28, left: 140 };
+const BAR_HEIGHT = 22;
+const BAR_GAP = 5;
+
 function aggregateSector(companies: EnrichedCompany[]): SectorData[] {
   const map = new Map<string, EnrichedCompany[]>();
   for (const c of companies) {
@@ -71,10 +75,6 @@ export function SectorBreakdown({ companies, height = 280 }: SectorBreakdownProp
 
   const totalCap = React.useMemo(() => sectors.reduce((s, sec) => s + sec.totalCap, 0), [sectors]);
   const maxCap = React.useMemo(() => Math.max(...sectors.map((s) => s.totalCap)), [sectors]);
-
-  const PADDING = React.useMemo(() => ({ top: 12, right: 16, bottom: 28, left: 140 }), []);
-  const BAR_HEIGHT = 22;
-  const BAR_GAP = 5;
 
   const render = React.useCallback(
     ({ ctx, width, height: h }: { ctx: CanvasRenderingContext2D; width: number; height: number; dpr: number }) => {

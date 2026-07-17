@@ -1,6 +1,7 @@
 """Section 6.N — Event lifecycle management and news generation."""
 
 import random
+import re
 from datetime import date, timedelta
 from typing import Optional
 
@@ -175,10 +176,16 @@ def generate_news(
         headline = headline.replace(key, val)
         body = body.replace(key, val)
 
+    # Strip any remaining unreplaced {placeholder} tokens
+    headline = re.sub(r"\{[a-z_]+\}", "N/A", headline)
+    body = re.sub(r"\{[a-z_]+\}", "N/A", body)
+
     company_id = event_instance.scope_ref if event_instance.scope_type == "company" else None
     industry_id = event_instance.scope_ref if event_instance.scope_type == "industry" else None
     if company_id is None and industry_id is None:
         return None
+
+    news_type = event.news_type if event else "both"
 
     news = NewsFeed(
         timeline_id=timeline_id,
@@ -189,6 +196,7 @@ def generate_news(
         body=body,
         sentiment=sentiment,
         severity=severity,
+        news_type=news_type,
         source_event_instance_id=event_instance.id,
     )
     session.add(news)
