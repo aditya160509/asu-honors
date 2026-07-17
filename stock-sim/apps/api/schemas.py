@@ -418,6 +418,7 @@ class NewsItem(BaseModel):
     body: str
     sentiment: str
     severity: float
+    news_type: str = "both"
     company_name: Optional[str] = None
     industry_name: Optional[str] = None
 

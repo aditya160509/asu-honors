@@ -144,7 +144,27 @@ def run_ticks(
             timeline_id=timeline_id, sim_date=sim_date
         ).first()
         if existing is not None:
-            results.append({"status": "skipped", "reason": "already_executed", "sim_date": sim_date})
+            # A PriceHistory row for `sim_date` already exists — either the seed's
+            # day-0 baseline close (seed_initial_prices.py writes one for
+            # FIRST_SIM_DATE up front; _resolve_tick_target_date already shifts
+            # sim_date past that specific case using is_running, so this branch
+            # mainly guards a genuine duplicate/retried call for a day that's
+            # already been fully ticked) or some other collision. Either way that
+            # day's close is legitimately already computed, so still advance the
+            # pointer instead of leaving current_sim_date frozen forever — a bare
+            # "skip and continue without advancing" would make every subsequent
+            # Advance call re-check the same day and never make progress.
+            next_date = sim_date + timedelta(days=1)
+            sim_state.current_sim_date = next_date
+            sim_state.tick_count = sim_state.tick_count + 1
+            session.flush()
+            results.append({
+                "status": "skipped",
+                "reason": "already_executed",
+                "sim_date": sim_date,
+                "next_date": next_date,
+                "tick_count": sim_state.tick_count,
+            })
             continue
 
         state = _load_tick_state(session, timeline_id, sim_date)
@@ -567,7 +587,19 @@ def _compute_drivers(
 
     if active_events:
         for event_data in active_events:
-            effect_profile = event_data.get("effect_profile", {})
+            # Event templates (db/seeds/seed_events.py) intentionally mix daily
+            # price-driver keys (news_severity, guidance, ...) with long-term
+            # factor-score keys (financial_quality, moat_score, ...) in one
+            # effect_profile — a single event affects both. apply_effect_to_drivers
+            # must only ever see the driver-domain subset: passing the raw
+            # profile through corrupted driver_values with keys drv_weights has
+            # no entry for (e.g. "financial_quality"), crashing
+            # composite_price_pressure with a KeyError on any tick where such an
+            # event is active. The factor-score keys are separately consumed by
+            # apply_effect_to_factor_scores at the quarter-boundary refresh.
+            effect_profile = {
+                k: v for k, v in event_data.get("effect_profile", {}).items() if k in DRIVER_KEYS
+            }
             if effect_profile:
                 severity = event_data.get("severity", 0.0)
                 decay_rate = event_data.get("decay_rate", 0.1)
@@ -757,6 +789,12 @@ def _execute_events(
     fired_events = select_and_fire_events(
         session, timeline_id, sim_date, state.rng, company_ids_list, industry_ids_list,
     )
+    # The app's session factory runs with autoflush=False (apps/api/database.py),
+    # so the newly session.add()-ed EventInstance rows above are not yet visible
+    # to a plain query. Without this flush, every re-query below (here and in
+    # _apply_event_factor_effects) silently returns empty — no news ever
+    # generated, no event effects ever applied to factor scores/IV, despite
+    # events firing correctly.
     session.flush()
     for ev in fired_events:
         event_instances = session.query(EventInstance).filter_by(
@@ -765,16 +803,28 @@ def _execute_events(
         for ei in event_instances:
             company_name = None
             industry_name = None
+            extra_replacements: dict[str, str] = {}
             if ei.scope_type == "company":
                 comp = session.query(Company).filter_by(id=ei.scope_ref).first()
                 if comp:
                     company_name = comp.name
+                # "{eps}"/"{consensus}" in the earnings templates need real
+                # figures, not the literal placeholder text — reuse the same
+                # latest_inc/latest_ce lookups _compute_drivers already does.
+                if ev.category == "earnings":
+                    latest_inc = state.latest_inc.get(ei.scope_ref)
+                    latest_ce = state.latest_ce.get(ei.scope_ref)
+                    if latest_inc is not None:
+                        extra_replacements["{eps}"] = f"${float(latest_inc.eps):.2f}"
+                    if latest_ce is not None:
+                        extra_replacements["{consensus}"] = f"${float(latest_ce.consensus_eps):.2f}"
             elif ei.scope_type == "industry":
                 ind = session.query(Industry).filter_by(id=ei.scope_ref).first()
                 if ind:
                     industry_name = ind.name
             generate_news(session, timeline_id, sim_date, ei, state.rng,
-                          company_name=company_name, industry_name=industry_name)
+                          company_name=company_name, industry_name=industry_name,
+                          extra_replacements=extra_replacements)
 
     _apply_event_factor_effects(
         session, companies, sim_date, timeline_id,
@@ -925,27 +975,38 @@ def _refresh_fundamentals(
             iscore, growth_base, company.industry_id, neutral_industry_pegs, params, eps_val,
         )
 
-        cfs = CompanyFactorScore(
-            company_id=company.id,
-            fiscal_period=latest_period,
-            management_quality=round(mgmt_base, 4),
-            moat_score=round(moat_val, 4),
-            financial_quality=round(fq, 4),
-            fcf_quality=round(fcfq_base, 4),
-            growth_potential=round(growth_base, 4),
-            management_quality_base=round(mgmt_base, 4),
-            growth_potential_base=round(growth_base, 4),
-            fcf_quality_base=round(fcfq_base, 4),
-            intrinsic_score=round(iscore, 4),
-            fair_pe=round(fpe, 4),
-            intrinsic_value=round(iv, 4),
-            computed_at=now,
-        )
-        session.add(cfs)
-
         company.intrinsic_value = round(iv, 4)
         company.intrinsic_score = round(iscore, 4)
         company.fair_pe = round(fpe, 4)
+
+        # Idempotency guards against re-crossing the same quarter boundary
+        # (a retried advance call, or — as found live — leftover partial data
+        # from a request that crashed for an unrelated reason after some but
+        # not all rows for this period were flushed): check each row
+        # individually rather than gating on a single "already has this
+        # period" signal, since a prior partial write can leave some rows for
+        # a (company_id, fiscal_period) present without others.
+        existing_cfs = session.query(CompanyFactorScore).filter_by(
+            company_id=company.id, fiscal_period=latest_period
+        ).first()
+        if existing_cfs is None:
+            cfs = CompanyFactorScore(
+                company_id=company.id,
+                fiscal_period=latest_period,
+                management_quality=round(mgmt_base, 4),
+                moat_score=round(moat_val, 4),
+                financial_quality=round(fq, 4),
+                fcf_quality=round(fcfq_base, 4),
+                growth_potential=round(growth_base, 4),
+                management_quality_base=round(mgmt_base, 4),
+                growth_potential_base=round(growth_base, 4),
+                fcf_quality_base=round(fcfq_base, 4),
+                intrinsic_score=round(iscore, 4),
+                fair_pe=round(fpe, 4),
+                intrinsic_value=round(iv, 4),
+                computed_at=now,
+            )
+            session.add(cfs)
 
         for sub_key, sub_score in r["fq_subscores"].items():
             pillar = subfactor_pillar[sub_key]
@@ -954,15 +1015,19 @@ def _refresh_fundamentals(
             applied_w = pw_val / n_in_pillar
             # Use per-company percentile from the stored dict
             peer_pct = r["fq_percentiles"].get(sub_key, 50.0)
-            session.add(FinancialQualitySubscore(
-                company_id=company.id,
-                fiscal_period=latest_period,
-                subfactor_key=sub_key,
-                raw_metric_value=_safe_finite(r["raw"].get(sub_key, 0.0)),
-                peer_percentile=peer_pct,
-                subscore=sub_score,
-                applied_weight=applied_w,
-            ))
+            existing_fq = session.query(FinancialQualitySubscore).filter_by(
+                company_id=company.id, fiscal_period=latest_period, subfactor_key=sub_key
+            ).first()
+            if existing_fq is None:
+                session.add(FinancialQualitySubscore(
+                    company_id=company.id,
+                    fiscal_period=latest_period,
+                    subfactor_key=sub_key,
+                    raw_metric_value=_safe_finite(r["raw"].get(sub_key, 0.0)),
+                    peer_percentile=peer_pct,
+                    subscore=sub_score,
+                    applied_weight=applied_w,
+                ))
 
 
 def _generate_fake_quarterly_financials(
@@ -972,6 +1037,30 @@ def _generate_fake_quarterly_financials(
     rng: random.Random,
 ) -> dict[str, float]:
     """Generate plausible next-quarter financials from the most recent quarter."""
+    existing_inc = session.query(IncomeStatement).filter_by(
+        company_id=company.id, fiscal_period=fiscal_period
+    ).first()
+    if existing_inc is not None:
+        # This company's quarter was already refreshed (e.g. a retried advance
+        # call re-crossing the same boundary) -- reuse the existing rows
+        # instead of inserting a second row for the same (company_id,
+        # fiscal_period) and hitting the unique constraint.
+        existing_bal = session.query(BalanceSheet).filter_by(
+            company_id=company.id, fiscal_period=fiscal_period
+        ).first()
+        existing_cf = session.query(CashFlowStatement).filter_by(
+            company_id=company.id, fiscal_period=fiscal_period
+        ).first()
+        prior_incs = session.query(IncomeStatement).filter_by(
+            company_id=company.id
+        ).order_by(IncomeStatement.fiscal_period.asc()).all()
+        eps_history = [float(i.eps) for i in prior_incs]
+        revenue_history = [float(i.revenue) for i in prior_incs]
+        ind = session.query(Industry).filter_by(id=company.industry_id).first()
+        if (ind.subfactor_set if ind else "standard") == "financials":
+            return _compute_banking_raw(existing_inc, existing_bal)
+        return _compute_standard_raw(existing_inc, existing_bal, existing_cf, eps_history, revenue_history)
+
     # Full statement history (queried before this quarter's new rows are
     # added below) so earnings_stability/revenue_consistency have real
     # multi-period series instead of the seed's neutral 50.0 placeholders.

@@ -133,6 +133,7 @@ def generate_news(
     rng: random.Random,
     company_name: Optional[str] = None,
     industry_name: Optional[str] = None,
+    extra_replacements: Optional[dict[str, str]] = None,
 ) -> Optional[NewsFeed]:
     """Section 6.N — generate a NewsFeed row from an EventInstance + NewsTemplate.
 
@@ -152,7 +153,13 @@ def generate_news(
     template = rng.choice(templates)
     severity = float(event_instance.resolved_severity)
 
-    sentiment = "positive" if severity > 0 else "negative" if severity < 0 else "neutral"
+    # MarketEvent.sentiment is the correctly-authored positive/negative/neutral
+    # label for this event type (e.g. "Earnings Miss" -> "negative"). Deriving
+    # sentiment from resolved_severity's sign instead was always wrong: every
+    # severity_range in seed_events.py is a positive-only magnitude ("15..50"),
+    # so resolved_severity is never negative and every news item was
+    # unconditionally labeled "positive", even for bad news.
+    sentiment = event.sentiment
 
     headline = template.template_text
     body = template.template_text
@@ -163,6 +170,8 @@ def generate_news(
         replacements["{company_name}"] = company_name
     if industry_name:
         replacements["{industry}"] = industry_name
+    if extra_replacements:
+        replacements.update(extra_replacements)
     for key, val in replacements.items():
         headline = headline.replace(key, val)
         body = body.replace(key, val)
@@ -176,6 +185,8 @@ def generate_news(
     if company_id is None and industry_id is None:
         return None
 
+    news_type = event.news_type if event else "both"
+
     news = NewsFeed(
         timeline_id=timeline_id,
         sim_date=sim_date,
@@ -185,6 +196,7 @@ def generate_news(
         body=body,
         sentiment=sentiment,
         severity=severity,
+        news_type=news_type,
         source_event_instance_id=event_instance.id,
     )
     session.add(news)
@@ -192,12 +204,20 @@ def generate_news(
 
 
 def _parse_range(range_str: str) -> tuple[float, float]:
-    """Parse severity range strings like '(10, 50)', '(10..50)', or '10..50'."""
+    """Parse '(-0.3, 0.3)' -> (-0.3, 0.3), or the plain '10..40' form every
+    event template in db/seeds/seed_events.py actually uses -> (10.0, 40.0).
+
+    Only handling the comma form here silently defaulted every event's
+    resolved_severity to rng.uniform(0.0, 0.0) == 0.0 (the malformed-input
+    fallback below), since real seed data never uses commas — meaning no
+    event has ever had a nonzero severity, so none has ever affected prices,
+    driver values, or company fundamentals.
+    """
     cleaned = range_str.strip().strip("()").strip("[]")
-    if ".." in cleaned:
-        parts = cleaned.split("..")
-    else:
-        parts = cleaned.split(",")
+    parts = cleaned.split("..") if ".." in cleaned else cleaned.split(",")
     if len(parts) < 2:
         return (0.0, 0.0)
-    return float(parts[0].strip()), float(parts[1].strip())
+    try:
+        return float(parts[0].strip()), float(parts[1].strip())
+    except ValueError:
+        return (0.0, 0.0)
