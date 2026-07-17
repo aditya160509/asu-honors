@@ -170,9 +170,11 @@ def run_ticks(
         # -- IV drift -------------------------------------------------------
         for company in companies:
             if company.intrinsic_value is not None:
-                expected_growth = float(state.params.get("expected_annual_growth", 0.08))
+                cfs = state.latest_cfs.get(company.id)
+                growth_potential = float(cfs.growth_potential) if cfs else 50.0
+                growth_rate = growth_score_to_rate(growth_potential)
                 company.intrinsic_value = float(drift_iv(
-                    float(company.intrinsic_value), expected_growth, TRADING_DAYS_PER_YEAR,
+                    float(company.intrinsic_value), growth_rate, TRADING_DAYS_PER_YEAR,
                 ))
 
         # -- Compute drivers per company ------------------------------------
@@ -368,6 +370,12 @@ def _load_tick_state(session: Session, timeline_id: int) -> SimpleNamespace:
         if ce.company_id not in latest_ce:
             latest_ce[ce.company_id] = ce
 
+    all_cfs = session.query(CompanyFactorScore).order_by(CompanyFactorScore.fiscal_period.desc()).all()
+    latest_cfs: dict[int, CompanyFactorScore] = {}
+    for cfs_row in all_cfs:
+        if cfs_row.company_id not in latest_cfs:
+            latest_cfs[cfs_row.company_id] = cfs_row
+
     # Trailing closes for the technical_momentum moving average, batch-loaded
     # so _compute_drivers doesn't issue N queries per company per tick.
     ma_window = int(params.get("ma_window", 20))
@@ -420,6 +428,7 @@ def _load_tick_state(session: Session, timeline_id: int) -> SimpleNamespace:
         latest_bal=latest_bal,
         latest_inc=latest_inc,
         latest_ce=latest_ce,
+        latest_cfs=latest_cfs,
         recent_closes=recent_closes,
         prev_ns=prev_ns,
         is_quarter_boundary=is_quarter_boundary,
@@ -620,7 +629,7 @@ def _update_prices_and_ohlc(
         ns_delta = abs(ns_now - ns_prev)
         is_earnings_day = False
         if tick_count > 5:
-            is_earnings_day = (tick_count % QUARTER_LENGTH) <= 5
+            is_earnings_day = (tick_count % QUARTER_LENGTH) == 0
 
         vol = compute_volume_prd(
             market_cap=mcap,
@@ -685,6 +694,8 @@ def _write_tick_results(
         total_pressure = composite_price_pressure(inp.driver_values, inp.driver_weights)
         for drv_key, drv_val in inp.driver_values.items():
             drv_w = inp.driver_weights.get(drv_key, 0.0)
+            raw_contribution = drv_w * drv_val / max(abs(total_pressure), 1e-10)
+            contribution = round(max(-1.0, min(1.0, raw_contribution)), 6)
             session.add(PriceDriverScore(
                 timeline_id=timeline_id,
                 company_id=cid,
@@ -692,7 +703,7 @@ def _write_tick_results(
                 driver_key=drv_key,
                 value=round(drv_val, 6),
                 weight=round(drv_w, 6),
-                contribution=round(drv_w * drv_val / max(abs(total_pressure), 1e-10), 6),
+                contribution=contribution,
             ))
 
 

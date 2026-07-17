@@ -10,6 +10,7 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
   React.useEffect(() => {
     if (isDefinitivelyUnauthenticated) {
+      document.cookie = "mv_session=; path=/; max-age=0";
       router.replace("/login");
     }
   }, [isDefinitivelyUnauthenticated, router]);

@@ -12,39 +12,10 @@ export function marketCapCategory(marketCap: number | null): string {
 
 const CAP_CATEGORIES = ["Mega", "Large", "Mid", "Small", "Micro"];
 
-/**
- * Seeded hash so the same ticker always gets the same fake day-change.
- * This keeps the demo visually stable across renders without needing DB data.
- */
-function tickerHash(ticker: string): number {
-  let h = 0;
-  for (let i = 0; i < ticker.length; i++) {
-    h = ((h << 5) - h + ticker.charCodeAt(i)) | 0;
-  }
-  return h;
-}
-
-/**
- * DEMO-ONLY: Deterministic fake day-change per ticker so the heatmap and table
- * have color at tick 0 (no prev_close in DB yet). Remove this and the
- * day_change_pct fallback below once the seed script is re-run or the engine
- * produces real daily deltas.
- */
-function demoDayChange(ticker: string): number {
-  const h = tickerHash(ticker);
-  return ((h % 1000) / 100) - 5;
-}
-
 export function enrichCompanies(companies: CompanyGridItem[]): EnrichedCompany[] {
   return companies.map((c) => ({
     ...c,
-    // DEMO FALLBACK: uses fake day-change when real data is absent (tick 0).
-    // TODO: remove this fallback once seed_initial_prices.py is re-run or
-    // the orchestrator produces at least two days of price_history.
-    day_change_pct:
-      c.day_change_pct != null
-        ? c.day_change_pct
-        : demoDayChange(c.ticker),
+    day_change_pct: c.day_change_pct,
     ivGapPct:
       c.intrinsic_value && Number(c.intrinsic_value) > 0
         ? ((Number(c.current_price) - Number(c.intrinsic_value)) / Number(c.intrinsic_value)) * 100
@@ -84,7 +55,7 @@ export function boundsFor(companies: EnrichedCompany[]): FilterBounds {
   return {
     price: boundsOf(companies.map((c) => Number(c.current_price)).filter((n) => !Number.isNaN(n))),
     marketCap: boundsOf(companies.map((c) => Number(c.market_cap)).filter((n) => !Number.isNaN(n))),
-    dayChangePct: boundsOf(companies.map((c) => Number(c.day_change_pct)).filter((n) => !Number.isNaN(n))),
+    dayChangePct: boundsOf(companies.map((c) => c.day_change_pct).filter((n): n is number => n != null)),
     volatility: boundsOf(companies.map((c) => Number(c.volatility)).filter((n) => !Number.isNaN(n))),
     ivGapPct: boundsOf(companies.map((c) => c.ivGapPct).filter((n): n is number => n != null)),
     iv: boundsOf(companies.map((c) => Number(c.intrinsic_value)).filter((n) => !Number.isNaN(n) && n > 0)),

@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from apps.api.database import engine as db_engine
 from apps.api.exceptions import add_exception_handlers
-from apps.api.rate_limiter import InMemoryRateLimiter
+
 from apps.api.routers import auth, health, leaderboard, market, news, portfolio, simulation, trading
 
 logging.basicConfig(level=logging.INFO)
@@ -39,14 +39,6 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-
-    # 60/60s (the original value) is far below real single-user SPA traffic: a
-    # single page load fires 5-10 parallel GETs, plus a 5s polling interval on
-    # the Trading Desk's open-orders panel. That volume tripped 429s on/auth/me
-    # itself during ordinary navigation, which the frontend misread as a logged-
-    # out session (see AuthContext.tsx). 300/60s still bounds abuse per IP while
-    # giving a real user's browser session realistic headroom.
-    application.add_middleware(InMemoryRateLimiter, max_requests=300, window_seconds=60)
 
     application.include_router(health.router)
     application.include_router(auth.router)
