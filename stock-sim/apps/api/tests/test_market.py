@@ -149,6 +149,37 @@ def test_get_cycle_state(client, test_db, test_timeline):
 
 
 def test_get_market_grid_day_change(client, test_db, test_company, test_timeline):
+    # get_market_grid's prev_close only reflects a genuine prior PriceHistory row
+    # (no fallback to company.current_price for a single-day-old company) -- two
+    # rows are required here to exercise day-change calculation at all.
+    test_db.add(
+        PriceHistory(
+            timeline_id=1, company_id=1,
+            sim_date=date(2026, 1, 1),
+            open=95.0, high=101.0, low=94.0, close=95.0,
+            volume=10000, intrinsic_value=100.0, order_imbalance=0.0,
+        )
+    )
+    test_db.add(
+        PriceHistory(
+            timeline_id=1, company_id=1,
+            sim_date=date(2026, 1, 2),
+            open=100.0, high=105.0, low=99.0, close=100.0,
+            volume=10000, intrinsic_value=100.0, order_imbalance=0.0,
+        )
+    )
+    test_db.commit()
+    resp = client.get("/api/v1/market")
+    assert resp.status_code == 200
+    company = resp.json()["companies"][0]
+    assert company["prev_close"] is not None
+    assert company["day_change_pct"] is not None
+
+
+def test_get_market_grid_single_price_row_has_no_prev_close(client, test_db, test_company, test_timeline):
+    """A company with only one PriceHistory row (its first tick ever) has no
+    real previous close to compare against -- prev_close/day_change_pct must
+    be None, not fall back to comparing current_price against itself."""
     test_db.add(
         PriceHistory(
             timeline_id=1, company_id=1,
@@ -161,8 +192,8 @@ def test_get_market_grid_day_change(client, test_db, test_company, test_timeline
     resp = client.get("/api/v1/market")
     assert resp.status_code == 200
     company = resp.json()["companies"][0]
-    assert company["prev_close"] is not None
-    assert company["day_change_pct"] is not None
+    assert company["prev_close"] is None
+    assert company["day_change_pct"] is None
 
 
 def test_get_company_detail_with_drivers_and_pe(client, test_db, test_company, test_timeline):

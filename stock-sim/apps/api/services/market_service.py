@@ -1,6 +1,7 @@
 """Read-only business logic for market data endpoints."""
 
 from datetime import date
+from decimal import Decimal
 from typing import Optional
 
 from sqlalchemy import and_, func
@@ -33,7 +34,7 @@ from db.models import (
 
 def _prev_closes_by_company(
     db: Session, timeline_id: int, sim_date: date,
-) -> dict[int, float]:
+) -> dict[int, Decimal]:
     """One company's most recent close strictly before sim_date, batched for all companies."""
     latest_subq = (
         db.query(
@@ -55,7 +56,7 @@ def _prev_closes_by_company(
         )
         .all()
     )
-    return {r.company_id: float(r.close) for r in rows}
+    return {r.company_id: r.close for r in rows}
 
 
 def _price_52w_stats(
@@ -88,9 +89,9 @@ def _price_52w_stats(
     )
     return {
         r.company_id: {
-            "avg_volume_20d": int(round(float(r.avg_vol))) if r.avg_vol is not None else None,
-            "high_52w": float(r.high_52w) if r.high_52w is not None else None,
-            "low_52w": float(r.low_52w) if r.low_52w is not None else None,
+            "avg_volume_20d": int(round(r.avg_vol)) if r.avg_vol is not None else None,
+            "high_52w": r.high_52w if r.high_52w is not None else None,
+            "low_52w": r.low_52w if r.low_52w is not None else None,
         }
         for r in rows
     }
@@ -98,7 +99,7 @@ def _price_52w_stats(
 
 def _last_two_closes_by_company(
     db: Session, timeline_id: int,
-) -> dict[int, tuple[float, float]]:
+) -> dict[int, tuple[Decimal, Optional[Decimal]]]:
     """Get the two most recent close prices for each company: (latest, previous).
 
     Returns a dict mapping company_id -> (latest_close, prev_close).
@@ -122,12 +123,12 @@ def _last_two_closes_by_company(
     )
     rows = db.query(subq).filter(subq.c.rn <= 2).all()
 
-    result: dict[int, dict[int, float]] = {}
+    result: dict[int, dict[int, Decimal]] = {}
     for r in rows:
         cid = r.company_id
         if cid not in result:
             result[cid] = {}
-        result[cid][r.rn] = float(r.close)
+        result[cid][r.rn] = r.close
 
     return {
         cid: (dates[1], dates.get(2))
@@ -156,13 +157,11 @@ def get_market_grid(db: Session, timeline_id: int) -> MarketGridResponse:
     for company in companies:
         industry = industries.get(company.industry_id)
         closes = last_two.get(company.id)
-        current_price = closes[0] if closes else (float(company.current_price) if company.current_price else 0)
-        prev_close = closes[1] if closes and closes[1] is not None else (
-            float(company.current_price) if closes and company.current_price else None
-        )
+        current_price = closes[0] if closes else (company.current_price if company.current_price else Decimal(0))
+        prev_close = closes[1] if closes and closes[1] is not None else None
         day_change_pct = None
         if prev_close is not None and prev_close > 0:
-            day_change_pct = (current_price - prev_close) / prev_close * 100.0
+            day_change_pct = float((current_price - prev_close) / prev_close * Decimal("100"))
         stats = price_stats.get(company.id, {})
         items.append(
             CompanyGridItem(
@@ -215,8 +214,18 @@ def get_company_detail(db: Session, ticker: str, timeline_id: int) -> CompanyDet
             for r in rows
         ]
 
+    latest_price_row = (
+        db.query(PriceHistory.close)
+        .filter_by(company_id=company.id, timeline_id=timeline_id)
+        .order_by(PriceHistory.sim_date.desc())
+        .first()
+    )
+    latest_price = float(latest_price_row[0]) if latest_price_row else (
+        float(company.current_price) if company.current_price else None
+    )
+
     pe_ratio = None
-    if company.current_price and company.fair_pe:
+    if latest_price and company.fair_pe:
         latest_inc = (
             db.query(IncomeStatement)
             .filter_by(company_id=company.id)
@@ -224,7 +233,7 @@ def get_company_detail(db: Session, ticker: str, timeline_id: int) -> CompanyDet
             .first()
         )
         if latest_inc and float(latest_inc.eps) != 0:
-            pe_ratio = float(company.current_price) / float(latest_inc.eps)
+            pe_ratio = latest_price / float(latest_inc.eps)
 
     return CompanyDetail(
         id=company.id,
@@ -235,7 +244,7 @@ def get_company_detail(db: Session, ticker: str, timeline_id: int) -> CompanyDet
         logo_url=company.logo_url,
         shares_outstanding=company.shares_outstanding,
         free_float_pct=float(company.free_float_pct),
-        latest_price=company.current_price,
+        latest_price=latest_price,
         latest_iv=company.intrinsic_value,
         pe_ratio=pe_ratio,
         market_cap=company.market_cap,

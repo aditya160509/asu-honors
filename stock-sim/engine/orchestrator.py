@@ -191,6 +191,12 @@ def run_ticks(
             if company.intrinsic_value is not None:
                 cfs = state.latest_cfs.get(company.id)
                 growth_potential = float(cfs.growth_potential) if cfs else 50.0
+                # growth_score_to_rate returns a percentage (e.g. 18.0 for 18%, per
+                # docs/price-value-engine.md's scale note); drift_iv expects a
+                # fraction (0.08 for 8%), so this must be divided by 100 before
+                # being passed in -- confirmed against drift_iv's daily_growth
+                # formula, which computes (1+g)**(1/252)-1 and would produce an
+                # absurd compounding rate if fed a raw percentage directly.
                 growth_rate_pct = growth_score_to_rate(growth_potential, growth_rate_min, growth_rate_max)
                 company.intrinsic_value = float(drift_iv(
                     float(company.intrinsic_value), growth_rate_pct / 100.0, TRADING_DAYS_PER_YEAR,
@@ -419,11 +425,16 @@ def _load_tick_state(session: Session, timeline_id: int, sim_date: date) -> Simp
         if ce.company_id not in latest_ce:
             latest_ce[ce.company_id] = ce
 
-    all_cfs = session.query(CompanyFactorScore).order_by(CompanyFactorScore.id.desc()).all()
+    # Sort by fiscal_period (not id) for consistency with the other latest_*
+    # lookups above (BalanceSheet/IncomeStatement/ConsensusEstimate all sort by
+    # fiscal_period.desc()) -- id.desc() happens to coincide with fiscal-period
+    # order for a normal forward-only simulation, but isn't guaranteed to if a
+    # row is ever backfilled or re-inserted out of chronological order.
+    all_cfs = session.query(CompanyFactorScore).order_by(CompanyFactorScore.fiscal_period.desc()).all()
     latest_cfs: dict[int, CompanyFactorScore] = {}
-    for cfs in all_cfs:
-        if cfs.company_id not in latest_cfs:
-            latest_cfs[cfs.company_id] = cfs
+    for cfs_row in all_cfs:
+        if cfs_row.company_id not in latest_cfs:
+            latest_cfs[cfs_row.company_id] = cfs_row
 
     # Trailing closes for the technical_momentum moving average, batch-loaded
     # so _compute_drivers doesn't issue N queries per company per tick.
@@ -678,7 +689,7 @@ def _update_prices_and_ohlc(
         ns_delta = abs(ns_now - ns_prev)
         is_earnings_day = False
         if tick_count > 5:
-            is_earnings_day = (tick_count % QUARTER_LENGTH) <= 5
+            is_earnings_day = (tick_count % QUARTER_LENGTH) == 0
 
         vol = compute_volume_prd(
             market_cap=mcap,
@@ -743,6 +754,8 @@ def _write_tick_results(
         total_pressure = composite_price_pressure(inp.driver_values, inp.driver_weights)
         for drv_key, drv_val in inp.driver_values.items():
             drv_w = inp.driver_weights.get(drv_key, 0.0)
+            raw_contribution = drv_w * drv_val / max(abs(total_pressure), 1e-10)
+            contribution = round(max(-1.0, min(1.0, raw_contribution)), 6)
             session.add(PriceDriverScore(
                 timeline_id=timeline_id,
                 company_id=cid,
@@ -750,7 +763,7 @@ def _write_tick_results(
                 driver_key=drv_key,
                 value=round(drv_val, 6),
                 weight=round(drv_w, 6),
-                contribution=round(drv_w * drv_val / max(abs(total_pressure), 1e-10), 6),
+                contribution=contribution,
             ))
 
 
