@@ -493,8 +493,13 @@ def test_event_effect_profile_applied_to_drivers(session):
     session.add(ei)
     session.commit()
 
-    from engine.orchestrator import _get_active_events_for_company
-    active = _get_active_events_for_company(session, timeline_id, 1, 1, date(2026, 1, 2), date(2026, 1, 1))
+    from engine.orchestrator import _get_active_events_for_company, _load_active_events
+    market_events, industry_events, company_events, event_defs = _load_active_events(
+        session, timeline_id, date(2026, 1, 2),
+    )
+    active = _get_active_events_for_company(
+        market_events, industry_events, company_events, event_defs, 1, 1, date(2026, 1, 1),
+    )
     assert len(active) == 1
     assert "effect_profile" in active[0]
 
@@ -529,8 +534,13 @@ def test_active_events_multiple_scope_types(session):
         ))
     session.commit()
 
-    from engine.orchestrator import _get_active_events_for_company
-    active = _get_active_events_for_company(session, timeline_id, 1, 1, date(2026, 1, 2), date(2026, 1, 1))
+    from engine.orchestrator import _get_active_events_for_company, _load_active_events
+    market_events, industry_events, company_events, event_defs = _load_active_events(
+        session, timeline_id, date(2026, 1, 2),
+    )
+    active = _get_active_events_for_company(
+        market_events, industry_events, company_events, event_defs, 1, 1, date(2026, 1, 1),
+    )
     assert len(active) == 2
 
 

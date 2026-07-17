@@ -12,7 +12,7 @@ from types import SimpleNamespace
 from typing import Optional
 
 import numpy as np
-from sqlalchemy import and_, or_
+from sqlalchemy import insert
 from sqlalchemy.orm import Session
 
 from db.models import (
@@ -133,6 +133,7 @@ def run_ticks(
         sim_date = state.sim_date
         tick_count = state.tick_count
         companies = state.companies
+        company_by_id = {c.id: c for c in companies}
 
         existing = session.query(PriceHistory).filter_by(
             timeline_id=timeline_id, sim_date=sim_date
@@ -186,7 +187,7 @@ def run_ticks(
         company_ns: dict[int, float] = {}
 
         for company in companies:
-            result = _compute_drivers(session, company, state, timeline_id, sim_date, tick_count)
+            result = _compute_drivers(company, state, tick_count)
             if result is None:
                 continue
             pricing_data["company_ids"].append(result["company_id"])
@@ -238,18 +239,18 @@ def run_ticks(
 
         # -- Circuit breaker + OHLC + volume --------------------------------
         ohlc_results, volume_results, imbalance_results = _update_prices_and_ohlc(
-            companies, tick_result, state.params, state.prev_ns, company_ns, state.rng, tick_count,
+            companies, company_by_id, tick_result, state.params, state.prev_ns, company_ns, state.rng, tick_count,
         )
 
         # -- Write DB rows --------------------------------------------------
         _write_tick_results(
-            session, timeline_id, sim_date, companies, tick_inputs, tick_result,
+            session, timeline_id, sim_date, company_by_id, tick_inputs, tick_result,
             ohlc_results, volume_results, imbalance_results,
         )
 
         # -- Update denormalized Company fields -----------------------------
         _update_denormalized_fields(
-            companies, ohlc_results, volume_results, tick_result,
+            company_by_id, ohlc_results, volume_results, tick_result,
         )
 
         # -- Mark to market -------------------------------------------------
@@ -399,6 +400,14 @@ def _load_tick_state(session: Session, timeline_id: int) -> SimpleNamespace:
         for ps in prev_scores:
             prev_ns[ps.company_id] = float(ps.value)
 
+    # Batch-load every active EventInstance (+ its MarketEvent) once per
+    # tick, instead of _compute_drivers issuing 2 queries per company per
+    # tick (this was the dominant cost of Advance — ~2s/tick with 150
+    # companies, almost entirely DB round-trips here).
+    market_events, industry_events, company_events, event_defs = _load_active_events(
+        session, timeline_id, sim_date,
+    )
+
     is_quarter_boundary = tick_count > 0 and tick_count % QUARTER_LENGTH == 0
 
     return SimpleNamespace(
@@ -422,16 +431,49 @@ def _load_tick_state(session: Session, timeline_id: int) -> SimpleNamespace:
         latest_ce=latest_ce,
         recent_closes=recent_closes,
         prev_ns=prev_ns,
+        market_events=market_events,
+        industry_events=industry_events,
+        company_events=company_events,
+        event_defs=event_defs,
         is_quarter_boundary=is_quarter_boundary,
     )
 
 
+def _load_active_events(
+    session: Session, timeline_id: int, sim_date: date,
+) -> tuple[list[EventInstance], dict[int, list[EventInstance]], dict[int, list[EventInstance]], dict[int, MarketEvent]]:
+    """Batch-load every EventInstance active on `sim_date` (+ the MarketEvent
+    rows they reference) in two queries total, grouped by scope so
+    `_get_active_events_for_company` can look a company up in memory instead
+    of re-querying per company."""
+    instances = session.query(EventInstance).filter(
+        EventInstance.timeline_id == timeline_id,
+        EventInstance.expires_on >= sim_date,
+    ).all()
+
+    market_events: list[EventInstance] = []
+    industry_events: dict[int, list[EventInstance]] = {}
+    company_events: dict[int, list[EventInstance]] = {}
+    for inst in instances:
+        if inst.scope_type == "market":
+            market_events.append(inst)
+        elif inst.scope_type == "industry":
+            industry_events.setdefault(inst.scope_ref, []).append(inst)
+        elif inst.scope_type == "company":
+            company_events.setdefault(inst.scope_ref, []).append(inst)
+
+    event_ids = {inst.event_id for inst in instances}
+    event_defs: dict[int, MarketEvent] = {}
+    if event_ids:
+        for me in session.query(MarketEvent).filter(MarketEvent.id.in_(event_ids)).all():
+            event_defs[me.id] = me
+
+    return market_events, industry_events, company_events, event_defs
+
+
 def _compute_drivers(
-    session: Session,
     company: Company,
     state: SimpleNamespace,
-    timeline_id: int,
-    sim_date: date,
     tick_count: int,
 ) -> Optional[dict]:
     """Compute all 7 driver values and OU pricing inputs for one company.
@@ -512,7 +554,8 @@ def _compute_drivers(
 
     ns = 0.0
     active_events = _get_active_events_for_company(
-        session, timeline_id, company.id, ind.id, sim_date, state.epoch_start,
+        state.market_events, state.industry_events, state.company_events, state.event_defs,
+        company.id, ind.id, state.epoch_start,
     )
     if active_events:
         ns = news_severity(active_events, tick_count, float(state.params.get("rho_news", 0.1)))
@@ -581,6 +624,7 @@ def _compute_drivers(
 
 def _update_prices_and_ohlc(
     companies: list[Company],
+    company_by_id: dict[int, Company],
     tick_result: TickResult,
     params: dict[str, float],
     prev_ns: dict[int, float],
@@ -610,7 +654,7 @@ def _update_prices_and_ohlc(
         cb_price = apply_circuit_breaker(raw_price, prev_close, r_cap=r_cap)
         ohlc = synthesize_ohlc(prev_close, cb_price, rng)
 
-        company = next((c for c in companies if c.id == cid), None)
+        company = company_by_id.get(cid)
         free_float = float(company.free_float_pct) if company else 0.5
         mcap = float(company.market_cap or 1e9)
 
@@ -652,22 +696,35 @@ def _write_tick_results(
     session: Session,
     timeline_id: int,
     sim_date: date,
-    companies: list[Company],
+    company_by_id: dict[int, Company],
     tick_inputs: tuple[CompanyTickInput, ...],
     tick_result: TickResult,
     ohlc_results: dict[int, dict],
     volume_results: dict[int, int],
     imbalance_results: dict[int, float],
 ) -> None:
-    """Write PriceHistory and PriceDriverScore rows for all companies."""
+    """Write PriceHistory and PriceDriverScore rows for all companies.
+
+    Bulk-inserted via two `session.execute(insert(...), rows)` calls instead
+    of one ORM `session.add()` per row (previously ~150 PriceHistory +
+    ~1,050 PriceDriverScore individually-tracked inserts per tick) — these
+    are pure append-only historical facts, never re-read later in the same
+    tick, so per-object ORM identity tracking buys nothing here and was a
+    meaningful share of a tick's cost at 150 companies.
+    """
+    tick_input_by_id = {inp.company_id: inp for inp in tick_inputs}
+
+    price_history_rows: list[dict] = []
+    driver_score_rows: list[dict] = []
+
     for out in tick_result.outputs:
         cid = out.company_id
         ohlc = ohlc_results[cid]
         vol_val = volume_results[cid]
         imb = imbalance_results[cid]
-        iv = float(next(c.intrinsic_value for c in companies if c.id == cid))
+        iv = float(company_by_id[cid].intrinsic_value)
 
-        ph = PriceHistory(
+        price_history_rows.append(dict(
             timeline_id=timeline_id,
             company_id=cid,
             sim_date=sim_date,
@@ -678,14 +735,13 @@ def _write_tick_results(
             volume=vol_val,
             intrinsic_value=iv,
             order_imbalance=imb,
-        )
-        session.add(ph)
+        ))
 
-        inp = next(c for c in tick_inputs if c.company_id == cid)
+        inp = tick_input_by_id[cid]
         total_pressure = composite_price_pressure(inp.driver_values, inp.driver_weights)
         for drv_key, drv_val in inp.driver_values.items():
             drv_w = inp.driver_weights.get(drv_key, 0.0)
-            session.add(PriceDriverScore(
+            driver_score_rows.append(dict(
                 timeline_id=timeline_id,
                 company_id=cid,
                 sim_date=sim_date,
@@ -695,9 +751,14 @@ def _write_tick_results(
                 contribution=round(drv_w * drv_val / max(abs(total_pressure), 1e-10), 6),
             ))
 
+    if price_history_rows:
+        session.execute(insert(PriceHistory), price_history_rows)
+    if driver_score_rows:
+        session.execute(insert(PriceDriverScore), driver_score_rows)
+
 
 def _update_denormalized_fields(
-    companies: list[Company],
+    company_by_id: dict[int, Company],
     ohlc_results: dict[int, dict],
     volume_results: dict[int, int],
     tick_result: TickResult,
@@ -707,7 +768,7 @@ def _update_denormalized_fields(
         cid = out.company_id
         ohlc = ohlc_results[cid]
         vol_val = volume_results[cid]
-        company = next(c for c in companies if c.id == cid)
+        company = company_by_id[cid]
         iv = float(company.intrinsic_value)
         company.current_price = round(ohlc["close"], 4)
         company.intrinsic_value = round(iv, 4)
@@ -1197,36 +1258,32 @@ def _safe_finite(v: float) -> float:
 
 
 def _get_active_events_for_company(
-    session: Session,
-    timeline_id: int,
+    market_events: list[EventInstance],
+    industry_events: dict[int, list[EventInstance]],
+    company_events: dict[int, list[EventInstance]],
+    event_defs: dict[int, MarketEvent],
     company_id: int,
     industry_id: int,
-    sim_date: date,
     epoch_start: date,
 ) -> list[dict]:
-    """Return active EventInstance data for driver computation."""
-    instances = session.query(EventInstance).filter(
-        EventInstance.timeline_id == timeline_id,
-        EventInstance.expires_on >= sim_date,
-        or_(
-            EventInstance.scope_type == "market",
-            and_(EventInstance.scope_type == "company", EventInstance.scope_ref == company_id),
-            and_(EventInstance.scope_type == "industry", EventInstance.scope_ref == industry_id),
-        ),
-    ).all()
+    """Return active EventInstance data for driver computation, from the
+    per-tick batch load in `_load_active_events` — no DB access here."""
+    instances = (
+        company_events.get(company_id, [])
+        + industry_events.get(industry_id, [])
+        + market_events
+    )
 
     result = []
     for inst in instances:
-        severity = float(inst.resolved_severity)
-        event = session.query(MarketEvent).filter_by(id=inst.event_id).first()
+        event = event_defs.get(inst.event_id)
         if event is None:  # pragma: no cover — blocked by FK constraint
             continue  # pragma: no cover
-        rho = float(event.decay_rate)
         result.append({
-            "severity": severity,
+            "severity": float(inst.resolved_severity),
             "start_day": (inst.sim_date - epoch_start).days,
             "effect_profile": inst.applied_effects,
-            "decay_rate": rho,
+            "decay_rate": float(event.decay_rate),
         })
     return result
 
@@ -1289,6 +1346,17 @@ def _apply_event_factor_effects(
     company_map = {c.id: c for c in companies}
     affected_company_ids: set[int] = set()
 
+    # First pass: figure out every (target_cids, effects, severity, rho) this
+    # tick needs, without touching any per-company table yet. A single
+    # market- or industry-scope factor event can target every company (or a
+    # whole sector) — previously each one ran 7 separate queries per company
+    # via _apply_factor_effects_to_company, so one market-wide event could
+    # mean 150 companies x 7 queries in a single tick. Batching below turns
+    # that into a handful of queries total, regardless of how many companies
+    # are targeted.
+    pending: list[tuple[list[int], dict[str, float], float, float]] = []
+    all_target_cids: set[int] = set()
+
     for ev in fired_events:
         event_instances = session.query(EventInstance).filter_by(
             event_id=ev.id, timeline_id=timeline_id, sim_date=sim_date
@@ -1305,23 +1373,91 @@ def _apply_event_factor_effects(
             if not target_cids:
                 continue
 
-            days_elapsed = 0
-            severity = float(ei.resolved_severity)
-            event = session.query(MarketEvent).filter_by(id=ei.event_id).first()
-            rho = float(event.decay_rate) if event else 0.1
+            # ei.event_id == ev.id by construction (event_instances was
+            # filtered on it above) -- ev already has decay_rate, no need to
+            # re-query MarketEvent by id here.
+            pending.append((target_cids, {k: profile[k] for k in factor_keys}, float(ei.resolved_severity), float(ev.decay_rate)))
+            all_target_cids.update(target_cids)
 
-            for cid in target_cids:
-                _apply_factor_effects_to_company(
-                    session, cid, company_map, industries, params, neutral_industry_pegs,
-                    {k: profile[k] for k in factor_keys}, severity, rho, days_elapsed,
-                )
-                affected_company_ids.add(cid)
+    if not pending:
+        return affected_company_ids
+
+    batch = _load_factor_effect_batch(session, all_target_cids)
+
+    for target_cids, effects, severity, rho in pending:
+        for cid in target_cids:
+            _apply_factor_effects_to_company(
+                cid, company_map, industries, params, neutral_industry_pegs,
+                effects, severity, rho, 0, batch,
+            )
+            affected_company_ids.add(cid)
 
     return affected_company_ids
 
 
+def _load_factor_effect_batch(session: Session, cids: set[int]) -> SimpleNamespace:
+    """Batch-load everything `_apply_factor_effects_to_company` needs for a
+    set of companies in a handful of queries, instead of 7 queries per
+    company (3 of which -- IndustryPillarWeight/fq_sub/moat_sub definitions
+    -- don't even vary by company and were being re-fetched every time)."""
+    pw_rows = session.query(IndustryPillarWeight).all()
+    industry_pw: dict[int, dict[str, float]] = {}
+    for pw in pw_rows:
+        industry_pw.setdefault(pw.industry_id, {})[pw.pillar] = float(pw.weight)
+
+    fq_defs = session.query(FactorDefinition).filter_by(factor_type="fq_sub").all()
+    subfactor_pillar = {fd.key: fd.pillar for fd in fq_defs}
+
+    moat_defs = session.query(FactorDefinition).filter_by(factor_type="moat_sub").all()
+    moat_weights = {md.key: float(md.default_weight) for md in moat_defs if md.default_weight}
+
+    moat_rows_by_company: dict[int, list[MoatSubscore]] = {}
+    for ms in session.query(MoatSubscore).filter(MoatSubscore.company_id.in_(cids)).all():
+        moat_rows_by_company.setdefault(ms.company_id, []).append(ms)
+
+    latest_cfs_by_company: dict[int, CompanyFactorScore] = {}
+    for cfs in (
+        session.query(CompanyFactorScore)
+        .filter(CompanyFactorScore.company_id.in_(cids))
+        .order_by(CompanyFactorScore.company_id, CompanyFactorScore.fiscal_period.desc())
+        .all()
+    ):
+        if cfs.company_id not in latest_cfs_by_company:
+            latest_cfs_by_company[cfs.company_id] = cfs
+
+    # Full per-company list (fiscal_period desc), not deduplicated to the
+    # latest row -- matches the prior per-company query's exact semantics.
+    fq_subs_by_company: dict[int, list[FinancialQualitySubscore]] = {}
+    for fs in (
+        session.query(FinancialQualitySubscore)
+        .filter(FinancialQualitySubscore.company_id.in_(cids))
+        .order_by(FinancialQualitySubscore.company_id, FinancialQualitySubscore.fiscal_period.desc())
+        .all()
+    ):
+        fq_subs_by_company.setdefault(fs.company_id, []).append(fs)
+
+    latest_inc_by_company: dict[int, IncomeStatement] = {}
+    for inc in (
+        session.query(IncomeStatement)
+        .filter(IncomeStatement.company_id.in_(cids))
+        .order_by(IncomeStatement.company_id, IncomeStatement.fiscal_period.desc())
+        .all()
+    ):
+        if inc.company_id not in latest_inc_by_company:
+            latest_inc_by_company[inc.company_id] = inc
+
+    return SimpleNamespace(
+        industry_pw=industry_pw,
+        subfactor_pillar=subfactor_pillar,
+        moat_weights=moat_weights,
+        moat_rows_by_company=moat_rows_by_company,
+        latest_cfs_by_company=latest_cfs_by_company,
+        fq_subs_by_company=fq_subs_by_company,
+        latest_inc_by_company=latest_inc_by_company,
+    )
+
+
 def _apply_factor_effects_to_company(
-    session: Session,
     cid: int,
     company_map: dict[int, Company],
     industries: dict[int, object],
@@ -1331,6 +1467,7 @@ def _apply_factor_effects_to_company(
     severity: float,
     rho: float,
     days_elapsed: int,
+    batch: SimpleNamespace,
 ) -> None:
     """Apply one event's factor-score effects to a single company and recompute IV.
 
@@ -1339,11 +1476,12 @@ def _apply_factor_effects_to_company(
     individual MoatSubscore sub-factor keys. A direct "moat_score" effect
     nudges the composite after sub-factor aggregation, distinct from
     sub-factor keys like "innovation" which feed into the composite itself.
+
+    `batch` is the pre-loaded `_load_factor_effect_batch` result shared
+    across every company touched this tick, in place of per-company queries.
     """
-    moat_rows = session.query(MoatSubscore).filter_by(company_id=cid).all()
-    latest_cfs = session.query(CompanyFactorScore).filter_by(
-        company_id=cid
-    ).order_by(CompanyFactorScore.fiscal_period.desc()).first()
+    moat_rows = batch.moat_rows_by_company.get(cid, [])
+    latest_cfs = batch.latest_cfs_by_company.get(cid)
     if latest_cfs is None:
         return
 
@@ -1362,30 +1500,20 @@ def _apply_factor_effects_to_company(
         if ms.subfactor_key in updated and ms.subfactor_key not in top_level_keys:
             ms.score = round(updated[ms.subfactor_key], 4)
 
-    pw_rows = session.query(IndustryPillarWeight).all()
-    industry_pw: dict[int, dict[str, float]] = {}
-    for pw in pw_rows:
-        industry_pw.setdefault(pw.industry_id, {})[pw.pillar] = float(pw.weight)
-
-    fq_defs = session.query(FactorDefinition).filter_by(factor_type="fq_sub").all()
-    subfactor_pillar = {fd.key: fd.pillar for fd in fq_defs}
-
-    ind_pw = industry_pw.get(company_map[cid].industry_id, {})
+    ind_pw = batch.industry_pw.get(company_map[cid].industry_id, {})
+    subfactor_pillar = batch.subfactor_pillar
 
     # financial_quality is normally re-derived each fiscal period from
     # FinancialQualitySubscore rows; an event's direct delta on it is a
     # temporary override on top of that base, not replaced by a fresh
     # recompute (otherwise the effect would always be silently discarded).
-    latest_fq_subs = session.query(FinancialQualitySubscore).filter_by(
-        company_id=cid
-    ).order_by(FinancialQualitySubscore.fiscal_period.desc()).all()
+    latest_fq_subs = batch.fq_subs_by_company.get(cid, [])
     fq_subs = {fs.subfactor_key: float(fs.subscore) for fs in latest_fq_subs}
     base_fq = financial_quality_composite(fq_subs, ind_pw, subfactor_pillar) if fq_subs else float(latest_cfs.financial_quality)
     fq_delta = updated["financial_quality"] - factor_scores["financial_quality"]
     fq = max(0.0, min(100.0, base_fq + fq_delta))
 
-    moat_defs = session.query(FactorDefinition).filter_by(factor_type="moat_sub").all()
-    moat_weights = {md.key: float(md.default_weight) for md in moat_defs if md.default_weight}
+    moat_weights = batch.moat_weights
     # moat_composite requires every subfactor key to have a matching weight;
     # only pass sub-factors that are actually weighted (seed data may have
     # MoatSubscore rows with no corresponding moat_sub FactorDefinition yet).
@@ -1407,9 +1535,7 @@ def _apply_factor_effects_to_company(
 
     ind_id = company_map[cid].industry_id
     eps_val = 0.0
-    latest_inc = session.query(IncomeStatement).filter_by(
-        company_id=cid
-    ).order_by(IncomeStatement.fiscal_period.desc()).first()
+    latest_inc = batch.latest_inc_by_company.get(cid)
     if latest_inc:
         eps_val = float(latest_inc.eps)
     fpe, iv = _recompute_valuation(iscore, growth, ind_id, neutral_industry_pegs, params, eps_val)
