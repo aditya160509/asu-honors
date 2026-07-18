@@ -55,6 +55,10 @@ const PANE_INDICATOR_IDS = new Set<IndicatorType>([
   "atr",
 ]);
 
+function sameRange(a: VisibleRange, b: VisibleRange): boolean {
+  return a.from === b.from && a.to === b.to;
+}
+
 function toNumber(value: number | string | null | undefined, fallback = 0): number {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : fallback;
@@ -158,6 +162,9 @@ export function SimulationTradingView() {
   const chartContainerRef = React.useRef<HTMLDivElement>(null);
   const [chartHeight, setChartHeight] = React.useState(500);
   const [chartRange, setChartRange] = React.useState<VisibleRange>({ from: 0, to: 0 });
+  const updateChartRange = React.useCallback((next: VisibleRange) => {
+    setChartRange((current) => (sameRange(current, next) ? current : next));
+  }, []);
 
   const timeRange = useTimeControlStore((s) => s.timeRange);
   const customRange = useTimeControlStore((s) => s.customRange);
@@ -215,11 +222,11 @@ export function SimulationTradingView() {
     if (priceHistory && priceHistory.length > 0) {
       const lastTick = priceHistory.length - 1;
       setTotalTicks(lastTick);
-      if (!replayMode) {
+      if (!replayMode && currentTick !== lastTick) {
         goToTick(lastTick);
       }
     }
-  }, [goToTick, priceHistory, replayMode, setTotalTicks]);
+  }, [currentTick, goToTick, priceHistory, replayMode, setTotalTicks]);
 
   const filteredData = React.useMemo(() => {
     if (!priceHistory || priceHistory.length === 0) return [];
@@ -251,8 +258,8 @@ export function SimulationTradingView() {
   }, [priceHistory, timeRange, customRange, replayMode, currentTick]);
 
   React.useEffect(() => {
-    setChartRange({ from: 0, to: 0 });
-  }, [customRange, filteredData.length, selectedTicker, timeRange]);
+    updateChartRange({ from: 0, to: 0 });
+  }, [customRange, filteredData.length, selectedTicker, timeRange, updateChartRange]);
 
   // Recent OHLC for header
   const latestPrice = priceHistory && priceHistory.length > 0 ? priceHistory[priceHistory.length - 1] : null;
@@ -580,7 +587,7 @@ export function SimulationTradingView() {
               drawingManager={drawingManager}
               activeDrawingTool={activeDrawingTool}
               externalRange={chartRange.to > chartRange.from ? chartRange : undefined}
-              onRangeChange={setChartRange}
+              onRangeChange={updateChartRange}
             />
           </div>
           {paneIndicators.length > 0 && (
@@ -608,7 +615,7 @@ export function SimulationTradingView() {
                     data={filteredData}
                     height={96}
                     range={chartRange.to > chartRange.from ? chartRange : { from: Math.max(0, filteredData.length - 200), to: filteredData.length }}
-                    onRangeChange={setChartRange}
+                    onRangeChange={updateChartRange}
                   />
                 </div>
               ))}
