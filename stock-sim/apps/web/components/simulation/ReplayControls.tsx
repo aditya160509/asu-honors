@@ -8,7 +8,17 @@ import { formatDateFull } from "@/lib/utils";
 
 const MIN_LIVE_TICK_GAP_MS = 180;
 
-export function ReplayControls() {
+interface ReplayControlsProps {
+  replayPickMode?: boolean;
+  onRequestReplayPick?: () => void;
+  onCancelReplayPick?: () => void;
+}
+
+export function ReplayControls({
+  replayPickMode = false,
+  onRequestReplayPick,
+  onCancelReplayPick,
+}: ReplayControlsProps) {
   const simState = useSimState();
   const advance = useAdvance();
   const isPlaying = useTimeControlStore((s) => s.isPlaying);
@@ -39,10 +49,15 @@ export function ReplayControls() {
   }, [goToTick, pause, setReplayMode, totalTicks]);
 
   const handleTogglePlay = React.useCallback(() => {
+    if (replayMode) {
+      if (isPlaying) pause();
+      else play();
+      return;
+    }
     setReplayMode(false);
     if (isPlaying) pause();
     else play();
-  }, [isPlaying, pause, play, setReplayMode]);
+  }, [isPlaying, pause, play, replayMode, setReplayMode]);
 
   const handleStepForward = React.useCallback(() => {
     setReplayMode(true);
@@ -80,9 +95,12 @@ export function ReplayControls() {
       advanceRef.current.mutate(
         { timeline_id: timelineId, days: 1 },
         {
-          onSettled: () => {
+          onSuccess: () => {
             const intervalMs = Math.max(MIN_LIVE_TICK_GAP_MS, 1200 / useTimeControlStore.getState().speed);
             if (!cancelled) timeoutId = setTimeout(fireNext, intervalMs);
+          },
+          onError: () => {
+            useTimeControlStore.getState().pause();
           },
         }
       );
@@ -144,7 +162,7 @@ export function ReplayControls() {
   }
 
   const progress = totalTicks > 0 ? (currentTick / totalTicks) * 100 : 0;
-  const liveBlocked = !timelineId || advance.isPending;
+  const liveBlocked = !timelineId || (!replayMode && advance.isPending);
 
   return (
     <div
@@ -226,8 +244,8 @@ export function ReplayControls() {
         <button
           type="button"
           onClick={handleTogglePlay}
-          disabled={!timelineId && !replayMode}
-          title={isPlaying ? "Stop simulation" : "Start simulation"}
+          disabled={(!timelineId && !replayMode) || (!replayMode && advance.isPending)}
+          title={replayMode ? (isPlaying ? "Pause replay" : "Play replay") : isPlaying ? "Stop simulation" : "Start simulation"}
           style={{
             ...transportBtnStyle,
             width: 34,
@@ -236,7 +254,8 @@ export function ReplayControls() {
             border: "1px solid var(--mer-stroke-accent)",
             background: isPlaying ? "rgba(239, 68, 68, 0.16)" : "rgba(62, 111, 224, 0.18)",
             color: isPlaying ? "var(--negative)" : "var(--mer-accent-300)",
-            opacity: !timelineId && !replayMode ? 0.55 : 1,
+            cursor: (!timelineId && !replayMode) || (!replayMode && advance.isPending) ? "not-allowed" : "pointer",
+            opacity: (!timelineId && !replayMode) || (!replayMode && advance.isPending) ? 0.55 : 1,
           }}
         >
           {isPlaying ? <StopIcon /> : <PlayIcon />}
@@ -258,6 +277,30 @@ export function ReplayControls() {
           style={transportBtnStyle}
         >
           <SkipToEndIcon />
+        </button>
+
+        <div style={{ width: 1, height: 20, background: "var(--mer-stroke-hairline)", margin: "0 4px" }} />
+
+        <button
+          type="button"
+          onClick={() => (replayPickMode ? onCancelReplayPick?.() : onRequestReplayPick?.())}
+          title={replayPickMode ? "Cancel replay point selection" : "Pick a chart point to replay from"}
+          style={{
+            height: 28,
+            padding: "0 10px",
+            border: "1px solid",
+            borderColor: replayPickMode ? "var(--mer-stroke-accent)" : "var(--mer-stroke-hairline)",
+            borderRadius: "var(--mer-radius-sm)",
+            background: replayPickMode ? "rgba(62, 111, 224, 0.18)" : "var(--mer-surface-2)",
+            color: replayPickMode ? "var(--mer-accent-300)" : "var(--mer-ink-secondary)",
+            fontSize: "var(--fs-micro)",
+            fontWeight: 800,
+            letterSpacing: "0.05em",
+            textTransform: "uppercase",
+            cursor: "pointer",
+          }}
+        >
+          Replay
         </button>
 
         <div style={{ width: 1, height: 20, background: "var(--mer-stroke-hairline)", margin: "0 4px" }} />
@@ -316,8 +359,8 @@ function StatusPill({
   replayMode: boolean;
   blocked: boolean;
 }) {
-  const label = replayMode ? "Replay" : active ? "Running" : busy ? "Advancing" : blocked ? "Offline" : "Ready";
-  const color = active ? "var(--positive)" : busy ? "var(--mer-accent-300)" : blocked ? "var(--negative)" : "var(--mer-ink-secondary)";
+  const label = replayMode ? (active ? "Replaying" : "Replay") : active ? "Running" : busy ? "Advancing" : blocked ? "Offline" : "Ready";
+  const color = replayMode ? "var(--mer-accent-300)" : active ? "var(--positive)" : busy ? "var(--mer-accent-300)" : blocked ? "var(--negative)" : "var(--mer-ink-secondary)";
   return (
     <span
       style={{

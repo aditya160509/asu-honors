@@ -3,7 +3,7 @@
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from apps.api.auth import get_current_user, require_admin
@@ -35,7 +35,11 @@ def advance(
     db: Session = Depends(get_db),
     _user: User = Depends(get_current_user),
 ) -> AdvanceResponse:
-    result = sim_service.advance_simulation(db, request.timeline_id, request.days)
+    try:
+        result = sim_service.advance_simulation(db, request.timeline_id, request.days)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     db.commit()
     return result
 

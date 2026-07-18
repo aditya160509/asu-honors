@@ -65,6 +65,9 @@ export interface PriceChartProps {
   externalRange?: VisibleRange;
   /** Emits viewport changes so lower panes can stay aligned. */
   onRangeChange?: (range: VisibleRange) => void;
+  /** When enabled, next chart click selects a replay start candle instead of panning/drawing. */
+  replayPickMode?: boolean;
+  onReplayPointSelect?: (localIndex: number, item: PriceHistoryItem) => void;
 }
 
 const PADDING = { top: 8, right: 56, bottom: 24, left: 8 };
@@ -103,6 +106,8 @@ export function PriceChart({
   events = [],
   externalRange,
   onRangeChange,
+  replayPickMode = false,
+  onReplayPointSelect,
 }: PriceChartProps) {
   const ohlc = React.useMemo(() => toOHLC(data), [data]);
   const [range, setRange] = React.useState<VisibleRange>(() => defaultRange(ohlc.length));
@@ -519,6 +524,21 @@ export function PriceChart({
   }
 
   function handlePointerDown(x: number, y: number, shiftKey: boolean) {
+    if (replayPickMode && onReplayPointSelect) {
+      const pricePadding = { ...PADDING, bottom: PADDING.bottom + VOLUME_HEIGHT };
+      const visibleCount = Math.max(1, range.to - range.from);
+      const candleWidth = Math.min(12, (widthRef.current - pricePadding.left - pricePadding.right) / visibleCount);
+      const localIndex = Math.max(
+        0,
+        Math.min(ohlc.length - 1, Math.round((x - pricePadding.left) / candleWidth + range.from - 0.5))
+      );
+      const item = data[localIndex];
+      if (item) {
+        onReplayPointSelect(localIndex, item);
+      }
+      return;
+    }
+
     if (activeDrawingTool && drawingManager) {
       const priceAreaHeight = height - PADDING.bottom - PADDING.top - VOLUME_HEIGHT;
       const pricePadding = { ...PADDING, bottom: PADDING.bottom + VOLUME_HEIGHT };
@@ -650,6 +670,17 @@ export function PriceChart({
       >
         {render}
       </ChartSurface>
+      {replayPickMode && (
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            pointerEvents: "none",
+            border: "1px solid rgba(62,111,224,0.65)",
+            background: "linear-gradient(180deg, rgba(62,111,224,0.08), rgba(62,111,224,0.02))",
+          }}
+        />
+      )}
       {hoveredEvent && hoveredEventPos && (
         <EventMarkerTooltip event={hoveredEvent} x={hoveredEventPos.x} y={hoveredEventPos.y} />
       )}

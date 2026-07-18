@@ -172,6 +172,9 @@ export function SimulationTradingView() {
   const currentTick = useTimeControlStore((s) => s.currentTick);
   const setTotalTicks = useTimeControlStore((s) => s.setTotalTicks);
   const goToTick = useTimeControlStore((s) => s.goToTick);
+  const pause = useTimeControlStore((s) => s.pause);
+  const play = useTimeControlStore((s) => s.play);
+  const setReplayMode = useTimeControlStore((s) => s.setReplayMode);
 
   const timelineId = simState?.timeline_id;
 
@@ -186,6 +189,7 @@ export function SimulationTradingView() {
   const [activeOverlays, setActiveOverlays] = React.useState<IndicatorType[]>(["sma20"]);
   const [drawingManager] = React.useState(() => new DrawingManager());
   const [activeDrawingTool, setActiveDrawingTool] = React.useState<DrawingToolType | null>(null);
+  const [replayPickMode, setReplayPickMode] = React.useState(false);
   const sentimentHistoryRef = React.useRef<number[]>([]);
 
   function toggleOverlay(type: IndicatorType) {
@@ -356,6 +360,21 @@ export function SimulationTradingView() {
   const priceIndicators = React.useMemo(
     () => activeOverlays.filter((type): type is IndicatorKey => PRICE_OVERLAY_IDS.has(type)),
     [activeOverlays]
+  );
+
+  const handleReplayPointSelect = React.useCallback(
+    (_localIndex: number, item: PriceHistoryItem) => {
+      if (!priceHistory || priceHistory.length === 0) return;
+      const fullIndex = priceHistory.findIndex((point) => point.sim_date === item.sim_date);
+      const tick = fullIndex >= 0 ? fullIndex : _localIndex;
+      pause();
+      setReplayMode(true);
+      goToTick(tick);
+      play();
+      setReplayPickMode(false);
+      updateChartRange({ from: 0, to: 0 });
+    },
+    [goToTick, pause, play, priceHistory, setReplayMode, updateChartRange]
   );
   const paneIndicators = React.useMemo(
     () => activeOverlays.filter((type) => PANE_INDICATOR_IDS.has(type)).slice(0, 3),
@@ -588,7 +607,12 @@ export function SimulationTradingView() {
               activeDrawingTool={activeDrawingTool}
               externalRange={chartRange.to > chartRange.from ? chartRange : undefined}
               onRangeChange={updateChartRange}
+              replayPickMode={replayPickMode}
+              onReplayPointSelect={handleReplayPointSelect}
             />
+            {replayPickMode && (
+              <ReplayPickPrompt onCancel={() => setReplayPickMode(false)} />
+            )}
           </div>
           {paneIndicators.length > 0 && (
             <div
@@ -734,7 +758,14 @@ export function SimulationTradingView() {
       </div>
 
       {/* Replay Controls */}
-      <ReplayControls />
+      <ReplayControls
+        replayPickMode={replayPickMode}
+        onRequestReplayPick={() => {
+          pause();
+          setReplayPickMode(true);
+        }}
+        onCancelReplayPick={() => setReplayPickMode(false)}
+      />
     </div>
   );
 }
@@ -763,6 +794,59 @@ function OhlcBadge({ label, value }: { label: string; value: number | string | n
       >
         {Number.isFinite(numericValue) ? numericValue.toFixed(2) : "--"}
       </span>
+    </div>
+  );
+}
+
+function ReplayPickPrompt({ onCancel }: { onCancel: () => void }) {
+  return (
+    <div
+      style={{
+        position: "absolute",
+        top: 14,
+        left: "50%",
+        transform: "translateX(-50%)",
+        zIndex: 30,
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        padding: "8px 10px",
+        border: "1px solid var(--mer-stroke-accent)",
+        borderRadius: 8,
+        background: "rgba(10, 14, 22, 0.94)",
+        boxShadow: "var(--mer-shadow-overlay)",
+        color: "var(--mer-ink-primary)",
+        fontSize: "var(--fs-small)",
+        backdropFilter: "blur(12px)",
+      }}
+    >
+      <span
+        style={{
+          width: 7,
+          height: 7,
+          borderRadius: "50%",
+          background: "var(--mer-accent-300)",
+          boxShadow: "0 0 12px rgba(62,111,224,0.9)",
+        }}
+      />
+      <span>Click any candle to replay from that point.</span>
+      <button
+        type="button"
+        onClick={onCancel}
+        style={{
+          height: 24,
+          padding: "0 8px",
+          border: "1px solid var(--mer-stroke-hairline)",
+          borderRadius: "var(--mer-radius-sm)",
+          background: "var(--mer-surface-2)",
+          color: "var(--mer-ink-secondary)",
+          fontSize: "var(--fs-micro)",
+          fontWeight: 700,
+          cursor: "pointer",
+        }}
+      >
+        Cancel
+      </button>
     </div>
   );
 }
