@@ -20,7 +20,7 @@ USER_DEFS = [
 
 
 def seed(session: Session) -> None:
-    password_hash = bcrypt.hashpw(b"demo", b"$2b$04$0123456789abcdefghijklmnopqr").decode()
+    password_hash = bcrypt.hashpw(b"demo", bcrypt.gensalt(rounds=4)).decode()
     for ud in USER_DEFS:
         existing = session.query(User).filter_by(email=ud["email"]).first()
         if existing is None:
