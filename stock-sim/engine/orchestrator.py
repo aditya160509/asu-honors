@@ -1429,10 +1429,11 @@ def _load_concall_guidance_signal(
         return neutral
 
     try:
-        rows = session.query(ConCall).filter(
-            ConCall.company_id.in_(company_ids),
-            ConCall.fiscal_period < current_period,
-        ).order_by(ConCall.company_id.asc(), ConCall.fiscal_period.desc()).all()
+        with session.begin_nested():
+            rows = session.query(ConCall).filter(
+                ConCall.company_id.in_(company_ids),
+                ConCall.fiscal_period < current_period,
+            ).order_by(ConCall.company_id.asc(), ConCall.fiscal_period.desc()).all()
     except Exception:
         return neutral
 
@@ -1895,67 +1896,76 @@ def _generate_concalls_for_quarter(
     """
     latest_period = _compute_fiscal_period(tick_count)
 
-    fresh_cfs_by_company: dict[int, CompanyFactorScore] = {
-        row.company_id: row
-        for row in session.query(CompanyFactorScore).filter_by(fiscal_period=latest_period).all()
-    }
+    try:
+        with session.begin_nested():
+            fresh_cfs_by_company: dict[int, CompanyFactorScore] = {
+                row.company_id: row
+                for row in session.query(CompanyFactorScore).filter_by(fiscal_period=latest_period).all()
+            }
 
-    existing_calls = {
-        row.company_id
-        for row in session.query(ConCall.company_id).filter_by(fiscal_period=latest_period).all()
-    }
+            existing_calls = {
+                row.company_id
+                for row in session.query(ConCall.company_id).filter_by(fiscal_period=latest_period).all()
+            }
 
-    quarter_start = sim_date - timedelta(days=QUARTER_LENGTH)
-    market_performance_by_company = _quarter_market_performance(
-        session, timeline_id, [c.id for c in companies], quarter_start, sim_date,
-    )
+            quarter_start = sim_date - timedelta(days=QUARTER_LENGTH)
+            market_performance_by_company = _quarter_market_performance(
+                session, timeline_id, [c.id for c in companies], quarter_start, sim_date,
+            )
 
-    for company in companies:
-        if company.id in existing_calls:
-            continue  # already generated for this (company, fiscal_period) -- retried advance
+            for company in companies:
+                if company.id in existing_calls:
+                    continue  # already generated for this (company, fiscal_period) -- retried advance
 
-        income_stmt = session.query(IncomeStatement).filter_by(
-            company_id=company.id, fiscal_period=latest_period
-        ).first()
-        if income_stmt is None:
-            continue  # this company's financials weren't refreshed this boundary; nothing to report on
+                income_stmt = session.query(IncomeStatement).filter_by(
+                    company_id=company.id, fiscal_period=latest_period
+                ).first()
+                if income_stmt is None:
+                    continue  # this company's financials weren't refreshed this boundary; nothing to report on
 
-        prior_income_stmt = session.query(IncomeStatement).filter(
-            IncomeStatement.company_id == company.id,
-            IncomeStatement.fiscal_period < latest_period,
-        ).order_by(IncomeStatement.fiscal_period.desc()).first()
+                prior_income_stmt = session.query(IncomeStatement).filter(
+                    IncomeStatement.company_id == company.id,
+                    IncomeStatement.fiscal_period < latest_period,
+                ).order_by(IncomeStatement.fiscal_period.desc()).first()
 
-        consensus = session.query(ConsensusEstimate).filter_by(
-            company_id=company.id, fiscal_period=latest_period
-        ).first()
-        balance_sheet = session.query(BalanceSheet).filter_by(
-            company_id=company.id, fiscal_period=latest_period
-        ).first()
-        cash_flow = session.query(CashFlowStatement).filter_by(
-            company_id=company.id, fiscal_period=latest_period
-        ).first()
+                consensus = session.query(ConsensusEstimate).filter_by(
+                    company_id=company.id, fiscal_period=latest_period
+                ).first()
+                balance_sheet = session.query(BalanceSheet).filter_by(
+                    company_id=company.id, fiscal_period=latest_period
+                ).first()
+                cash_flow = session.query(CashFlowStatement).filter_by(
+                    company_id=company.id, fiscal_period=latest_period
+                ).first()
 
-        cfs = fresh_cfs_by_company.get(company.id) or stale_latest_cfs.get(company.id)
-        management_quality = float(cfs.management_quality) if cfs else 50.0
-        growth_potential = float(cfs.growth_potential) if cfs else 50.0
-        moat_score = float(cfs.moat_score) if cfs else None
+                cfs = fresh_cfs_by_company.get(company.id) or stale_latest_cfs.get(company.id)
+                management_quality = float(cfs.management_quality) if cfs else 50.0
+                growth_potential = float(cfs.growth_potential) if cfs else 50.0
+                moat_score = float(cfs.moat_score) if cfs else None
 
-        concall = generate_concall(
-            company=company,
-            income_stmt=income_stmt,
-            prior_income_stmt=prior_income_stmt,
-            consensus=consensus,
-            management_quality=management_quality,
-            growth_potential=growth_potential,
-            fiscal_period=latest_period,
-            call_date=sim_date,
-            rng=rng,
-            balance_sheet=balance_sheet,
-            cash_flow=cash_flow,
-            moat_score=moat_score,
-            market_performance=market_performance_by_company.get(company.id),
-        )
-        session.add(concall)
+                concall = generate_concall(
+                    company=company,
+                    income_stmt=income_stmt,
+                    prior_income_stmt=prior_income_stmt,
+                    consensus=consensus,
+                    management_quality=management_quality,
+                    growth_potential=growth_potential,
+                    fiscal_period=latest_period,
+                    call_date=sim_date,
+                    rng=rng,
+                    balance_sheet=balance_sheet,
+                    cash_flow=cash_flow,
+                    moat_score=moat_score,
+                    market_performance=market_performance_by_company.get(company.id),
+                )
+                session.add(concall)
+
+            session.flush()
+    except Exception:
+        # Con-call generation is an optional narrative layer. Local/dev
+        # databases may not have the con_calls migration yet; never let that
+        # block the market simulation tick.
+        return
 
 
 def _safe_finite(v: float) -> float:
