@@ -127,24 +127,29 @@ export function PriceChart({
   const [hoveredEventPos, setHoveredEventPos] = React.useState<{ x: number; y: number } | null>(null);
   const [, forceUpdate] = React.useReducer((x: number) => x + 1, 0);
 
+  const updateRange = React.useCallback((next: VisibleRange | ((prev: VisibleRange) => VisibleRange)) => {
+    setRange((prev) => {
+      const resolved = typeof next === "function" ? next(prev) : next;
+      if (prev.from === resolved.from && prev.to === resolved.to) return prev;
+      onRangeChange?.(resolved);
+      return resolved;
+    });
+  }, [onRangeChange]);
+
   React.useEffect(() => {
     if (!drawingManager) return;
     return drawingManager.subscribe(() => forceUpdate());
   }, [drawingManager]);
 
   React.useEffect(() => {
-    onRangeChange?.(range);
-  }, [onRangeChange, range]);
-
-  React.useEffect(() => {
     if (!externalRange) return;
     if (externalRange.to <= externalRange.from) return;
-    setRange((current) => (
+    updateRange((current) => (
       current.from === externalRange.from && current.to === externalRange.to
         ? current
         : externalRange
     ));
-  }, [externalRange]);
+  }, [externalRange, updateRange]);
 
   React.useEffect(() => {
     setPlacingPoints([]);
@@ -159,7 +164,7 @@ export function PriceChart({
 
     if (tickerChanged || prevLen === 0) {
       // New instrument (or first load) — nothing to preserve, show the default window.
-      setRange(defaultRange(ohlc.length));
+      updateRange(defaultRange(ohlc.length));
       return;
     }
     if (ohlc.length === prevLen) return;
@@ -174,9 +179,9 @@ export function PriceChart({
       const span = rangeRef.current.to - rangeRef.current.from;
       const to = ohlc.length;
       const from = Math.max(0, to - span);
-      setRange({ from, to });
+      updateRange({ from, to });
     }
-  }, [ohlc.length, ticker]);
+  }, [ohlc.length, ticker, updateRange]);
 
   // Computed once per data/indicator-selection change, not per render frame —
   // `time` stays a true index into `ohlc` even after null-filtering, so
@@ -520,7 +525,7 @@ export function PriceChart({
   function handleWheel(deltaY: number, x: number) {
     const plotW = Math.max(1, widthRef.current - PADDING.left - PADDING.right);
     const frac = Math.max(0, Math.min(1, (x - PADDING.left) / plotW));
-    setRange((prev) => zoomRange(prev, ohlc.length, deltaY > 0 ? 1.1 : 1 / 1.1, frac));
+    updateRange((prev) => zoomRange(prev, ohlc.length, deltaY > 0 ? 1.1 : 1 / 1.1, frac));
   }
 
   function handlePointerDown(x: number, y: number, shiftKey: boolean) {
@@ -643,7 +648,7 @@ export function PriceChart({
       const span = panStartRange.current.to - panStartRange.current.from;
       const plotW = Math.max(1, widthRef.current - PADDING.left - PADDING.right);
       const deltaCandles = Math.round(((panStartX.current - x) / plotW) * span);
-      setRange(panRange(panStartRange.current, ohlc.length, deltaCandles));
+      updateRange(panRange(panStartRange.current, ohlc.length, deltaCandles));
     }
   }
 
@@ -666,7 +671,7 @@ export function PriceChart({
         }}
         onPointerDown={handlePointerDown}
         onPointerUp={() => (isPanning.current = false)}
-        onDoubleClick={() => setRange(defaultRange(ohlc.length))}
+        onDoubleClick={() => updateRange(defaultRange(ohlc.length))}
       >
         {render}
       </ChartSurface>

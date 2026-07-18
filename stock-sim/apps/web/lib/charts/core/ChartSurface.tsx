@@ -34,6 +34,8 @@ export function ChartSurface({
   const containerRef = React.useRef<HTMLDivElement>(null);
   const [width, setWidth] = React.useState(0);
   const rafRef = React.useRef<number | undefined>(undefined);
+  const onWheelRef = React.useRef(onWheel);
+  onWheelRef.current = onWheel;
 
   React.useEffect(() => {
     const el = containerRef.current;
@@ -75,12 +77,19 @@ export function ChartSurface({
     onPointerMove(e.clientX - rect.left, e.clientY - rect.top);
   }
 
-  function handleWheel(e: React.WheelEvent<HTMLCanvasElement>) {
-    if (!onWheel) return;
-    e.preventDefault();
-    const rect = e.currentTarget.getBoundingClientRect();
-    onWheel(e.deltaY, e.clientX - rect.left);
-  }
+  React.useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    function handleWheel(e: WheelEvent) {
+      const wheel = onWheelRef.current;
+      if (!wheel || !canvas) return;
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      wheel(e.deltaY, e.clientX - rect.left);
+    }
+    canvas.addEventListener("wheel", handleWheel, { passive: false });
+    return () => canvas.removeEventListener("wheel", handleWheel);
+  }, []);
 
   function handlePointerDown(e: React.PointerEvent<HTMLCanvasElement>) {
     if (!onPointerDown) return;
@@ -94,7 +103,6 @@ export function ChartSurface({
         ref={canvasRef}
         onPointerMove={handlePointerMove}
         onPointerLeave={onPointerLeave}
-        onWheel={handleWheel}
         onPointerDown={handlePointerDown}
         onPointerUp={onPointerUp}
         onDoubleClick={onDoubleClick}
