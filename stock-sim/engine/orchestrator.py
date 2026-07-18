@@ -932,6 +932,7 @@ def _execute_events(
     industry_ids_list = [ind.id for ind in state.industries.values()]
     fired_events = select_and_fire_events(
         session, timeline_id, sim_date, state.rng, company_ids_list, industry_ids_list,
+        is_quarter_boundary=state.is_quarter_boundary,
     )
     # The app's session factory runs with autoflush=False (apps/api/database.py),
     # so the newly session.add()-ed EventInstance rows above are not yet visible

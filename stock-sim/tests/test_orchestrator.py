@@ -254,16 +254,16 @@ def test_run_tick_events_fired(session):
 def test_run_tick_news_generated(session):
     timeline_id = _seed_minimal(session)
     me = MarketEvent(
-        id=2, name="News Event", category="earnings",
+        id=2, name="News Event", category="product",
         scope="company", severity_range="(0.1, 0.3)",
         sentiment="positive", effect_profile='{"value_opportunity": 0.1}',
         duration_days=5, decay_rate=0.1, probability_weight=1.0,
     )
     session.add(me)
     nt = NewsTemplate(
-        category="earnings", template_text="Breaking: Test Corp reports strong quarter",
+        category="product", template_text="Breaking: Test Corp launches strong product",
         sentiment="positive", severity_band="low",
-        linked_event_category="earnings", linked_driver="value_opportunity",
+        linked_event_category="product", linked_driver="value_opportunity",
     )
     session.add(nt)
     session.commit()
