@@ -3,6 +3,9 @@
 import { Chip } from "@/components/ui/chip";
 import { cn } from "@/lib/utils";
 import type { IndicatorKey } from "@/components/charts/PriceChart";
+import type { ChartType } from "@/lib/charts/types";
+import { ChartTypePicker } from "@/components/ui/ChartTypePicker";
+import { OverlayPicker } from "@/components/ui/OverlayPicker";
 
 export type TimeframeKey = "1M" | "3M" | "6M" | "1Y" | "ALL";
 
@@ -20,6 +23,11 @@ export interface ChartControlsProps {
   onToggleIndicator: (key: IndicatorKey) => void;
   showVolumeProfile: boolean;
   onToggleVolumeProfile: () => void;
+  chartType: ChartType;
+  onChartTypeChange: (type: ChartType) => void;
+  activeOverlays: string[];
+  onToggleOverlay: (id: string) => void;
+  onClearOverlays: () => void;
 }
 
 /** Timeframe pills + indicator/volume-profile toggle chips above the company PriceChart. */
@@ -30,6 +38,11 @@ export function ChartControls({
   onToggleIndicator,
   showVolumeProfile,
   onToggleVolumeProfile,
+  chartType,
+  onChartTypeChange,
+  activeOverlays,
+  onToggleOverlay,
+  onClearOverlays,
 }: ChartControlsProps) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-2 pb-3">
@@ -51,6 +64,8 @@ export function ChartControls({
         ))}
       </div>
       <div className="flex flex-wrap items-center gap-1.5">
+        <ChartTypePicker value={chartType} onChange={onChartTypeChange} />
+        <OverlayPicker activeIds={activeOverlays} onToggle={onToggleOverlay} onClearAll={onClearOverlays} />
         {INDICATORS.map((ind) => (
           <Chip
             key={ind.key}

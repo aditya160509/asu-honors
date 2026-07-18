@@ -71,14 +71,14 @@ export function SimControlPanel() {
         height: "100%",
         background: "var(--mer-surface-1)",
         border: "1px solid var(--mer-stroke-hairline)",
-        borderRadius: "var(--mer-radius-md)",
+        borderRadius: 0,
         overflow: "hidden",
       }}
     >
       {/* Header */}
       <div
         style={{
-          padding: "12px 14px",
+          padding: "8px 10px",
           borderBottom: "1px solid var(--mer-stroke-hairline)",
           background: "var(--mer-surface-2)",
           display: "flex",
@@ -128,7 +128,7 @@ export function SimControlPanel() {
       </div>
 
       {/* Date & Tick */}
-      <div style={{ padding: "14px" }}>
+      <div style={{ padding: "10px" }}>
         {simState.isLoading ? (
           <div
             style={{
@@ -144,7 +144,7 @@ export function SimControlPanel() {
               <div
                 className="num"
                 style={{
-                  fontSize: "var(--fs-h2)",
+                  fontSize: "var(--fs-h3)",
                   fontWeight: 700,
                   color: "var(--mer-ink-primary)",
                   lineHeight: 1.2,
@@ -187,7 +187,7 @@ export function SimControlPanel() {
       {cycle.data && (
         <div
           style={{
-            padding: "0 14px 14px",
+            padding: "0 10px 10px",
             display: "flex",
             alignItems: "center",
             gap: 8,
@@ -203,7 +203,7 @@ export function SimControlPanel() {
       {/* Advance Buttons */}
       <div
         style={{
-          padding: "0 14px 14px",
+          padding: "0 10px 10px",
           display: "flex",
           flexDirection: "column",
           gap: 6,
@@ -234,7 +234,7 @@ export function SimControlPanel() {
               }
               style={{
                 flex: 1,
-                height: 32,
+                height: 28,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -276,7 +276,7 @@ export function SimControlPanel() {
       </div>
 
       {/* Divider */}
-      <div style={{ height: 1, background: "var(--mer-stroke-hairline)", margin: "0 14px" }} />
+      <div style={{ height: 1, background: "var(--mer-stroke-hairline)", margin: "0 10px" }} />
 
       {/* News Feed */}
       <div
@@ -289,7 +289,7 @@ export function SimControlPanel() {
       >
         <div
           style={{
-            padding: "10px 14px",
+            padding: "8px 10px",
             borderBottom: "1px solid var(--mer-stroke-hairline)",
           }}
         >
@@ -319,8 +319,8 @@ export function SimControlPanel() {
                 <div
                   key={i}
                   style={{
-                    height: 44,
-                    marginBottom: 8,
+                  height: 34,
+                  marginBottom: 6,
                     background: "var(--mer-surface-2)",
                     borderRadius: "var(--mer-radius-sm)",
                   }}
@@ -333,7 +333,7 @@ export function SimControlPanel() {
           ) : (
             <div
               style={{
-                padding: "16px 14px",
+                padding: "12px 10px",
                 fontSize: "var(--fs-small)",
                 color: "var(--mer-ink-tertiary)",
                 textAlign: "center",
@@ -358,7 +358,7 @@ function NewsItemRow({ item }: { item: NewsItem }) {
   return (
     <div
       style={{
-        padding: "8px 14px",
+        padding: "7px 10px",
         borderBottom: "1px solid var(--mer-stroke-hairline)",
         cursor: "pointer",
         transition: "background 100ms",
@@ -384,7 +384,7 @@ function NewsItemRow({ item }: { item: NewsItem }) {
         <div style={{ flex: 1, minWidth: 0 }}>
           <div
             style={{
-              fontSize: "var(--fs-small)",
+              fontSize: "var(--fs-micro)",
               color: "var(--mer-ink-primary)",
               lineHeight: 1.4,
               display: "-webkit-box",

@@ -360,6 +360,7 @@ export interface NewsItem {
   body: string;
   sentiment: string;
   severity: number;
+  news_type: string;
   company_name: string | null;
   industry_name: string | null;
 }

@@ -4,7 +4,7 @@ import * as React from "react";
 import { useMe } from "@/lib/api/hooks/useAuth";
 import { ApiError, post } from "@/lib/api/client";
 import { logActivity } from "@/lib/activity/useActivityLog";
-import type { UserResponse } from "@/lib/api/types";
+import type { TokenResponse, UserResponse } from "@/lib/api/types";
 
 interface AuthContextValue {
   user: UserResponse | undefined;
@@ -29,8 +29,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [tokenChecked, setTokenChecked] = React.useState(false);
 
   React.useEffect(() => {
-    setHasToken(Boolean(localStorage.getItem("token")));
-    setTokenChecked(true);
+    const existing = localStorage.getItem("token");
+    if (existing) {
+      setHasToken(true);
+      setTokenChecked(true);
+    } else if (process.env.NODE_ENV === "development") {
+      post<TokenResponse>("/auth/login", {
+        email: "alice@example.com",
+        password: "demo",
+      }).then((data) => {
+        localStorage.setItem("token", data.access_token);
+        setHasToken(true);
+        setTokenChecked(true);
+      }).catch(() => {
+        setTokenChecked(true);
+      });
+    } else {
+      setTokenChecked(true);
+    }
   }, []);
 
   const { data: user, isLoading: isMeLoading, error: meError } = useMe(hasToken);

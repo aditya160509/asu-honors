@@ -8,6 +8,7 @@ import { CompanyHeader, CompanyHeaderSkeleton } from "@/components/companies/Com
 import { ExecutiveTearSheet } from "@/components/companies/ExecutiveTearSheet";
 import { PriceChart, type IndicatorKey } from "@/components/charts/PriceChart";
 import { ChartControls, sliceByTimeframe, type TimeframeKey } from "@/components/companies/ChartControls";
+import type { ChartType } from "@/lib/charts/types";
 import { DriverChart } from "@/components/charts/DriverChart";
 import { ValuationCard } from "@/components/companies/ValuationCard";
 import { FinancialTabs } from "@/components/companies/FinancialTabs";
@@ -28,9 +29,19 @@ export default function CompanyDetailPage() {
   const [timeframe, setTimeframe] = React.useState<TimeframeKey>("ALL");
   const [indicators, setIndicators] = React.useState<IndicatorKey[]>([]);
   const [showVolumeProfile, setShowVolumeProfile] = React.useState(false);
+  const [chartType, setChartType] = React.useState<ChartType>("candlestick");
+  const [activeOverlays, setActiveOverlays] = React.useState<string[]>([]);
 
   function toggleIndicator(key: IndicatorKey) {
     setIndicators((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
+  }
+
+  function toggleOverlay(id: string) {
+    setActiveOverlays((prev) => (prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]));
+  }
+
+  function clearOverlays() {
+    setActiveOverlays([]);
   }
 
   const company = useCompany(ticker);
@@ -97,6 +108,11 @@ export default function CompanyDetailPage() {
                 onToggleIndicator={toggleIndicator}
                 showVolumeProfile={showVolumeProfile}
                 onToggleVolumeProfile={() => setShowVolumeProfile((v) => !v)}
+                chartType={chartType}
+                onChartTypeChange={setChartType}
+                activeOverlays={activeOverlays}
+                onToggleOverlay={toggleOverlay}
+                onClearOverlays={clearOverlays}
               />
               <PriceChart
                 data={sliceByTimeframe(history.data ?? [], timeframe)}
@@ -106,6 +122,7 @@ export default function CompanyDetailPage() {
                 ticker={ticker}
                 indicators={indicators}
                 showVolumeProfile={showVolumeProfile}
+                chartType={chartType}
               />
             </DashboardPanel>
 

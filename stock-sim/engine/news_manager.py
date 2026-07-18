@@ -168,6 +168,9 @@ def generate_news(
     if company_name:
         replacements["{company}"] = company_name
         replacements["{company_name}"] = company_name
+    elif industry_name:
+        replacements["{company}"] = f"a {industry_name} firm"
+        replacements["{company_name}"] = f"a {industry_name} firm"
     if industry_name:
         replacements["{industry}"] = industry_name
     if extra_replacements:
@@ -176,9 +179,112 @@ def generate_news(
         headline = headline.replace(key, val)
         body = body.replace(key, val)
 
-    # Strip any remaining unreplaced {placeholder} tokens
-    headline = re.sub(r"\{[a-z_]+\}", "N/A", headline)
-    body = re.sub(r"\{[a-z_]+\}", "N/A", body)
+    # Fill remaining unreplaced {placeholder} tokens with realistic, varied defaults
+    first_names = ["James", "Sarah", "Michael", "Emma", "Robert", "Emily", "David", "Jessica",
+                    "Thomas", "Amanda", "Christopher", "Laura", "Daniel", "Rachel", "Andrew"]
+    last_names = ["Mitchell", "Patel", "Anderson", "Rodriguez", "Thompson", "Chen", "Williams",
+                   "Kumar", "O'Brien", "Suzuki", "Johnson", "Al-Farsi", "Mueller"]
+    ceo_first = rng.choice(first_names)
+    ceo_last = rng.choice(last_names)
+    ceo_name = f"{ceo_first} {ceo_last}"
+
+    company_word = (company_name or "").split()[0] if company_name else "industry"
+    product_name = rng.choice([
+        f"{company_word}Pro", f"{company_word}Max", f"{company_word}Next",
+        f"{company_word}Prime", f"{company_word}Edge",
+    ]) if company_name else rng.choice(["NovaLine", "OptimaSuite", "VertexCore", "ApexFlow", "PulseSystem"])
+
+    resignation_reasons = [
+        "a strategic disagreement with the board",
+        "a personal health matter",
+        "a mutual decision with the board",
+        "an SEC investigation into past practices",
+        "pressure from activist investors",
+        "a disagreement over company direction",
+        "an ethics complaint filed by shareholders",
+    ]
+    defect_types = [
+        "a potential safety hazard", "a manufacturing defect",
+        "a software vulnerability", "a quality control failure",
+        "a regulatory compliance issue",
+    ]
+    allegations = [
+        "breach of fiduciary duty", "accounting irregularities",
+        "insider trading allegations", "securities fraud",
+        "anti-competitive practices", "violation of SEC regulations",
+        "false advertising claims",
+    ]
+    tech_names = [
+        "next-gen AI algorithms", "quantum-resistant encryption",
+        "biometric authentication", "autonomous navigation",
+        "blockchain verification", "edge computing infrastructure",
+        "carbon-capture technology",
+    ]
+    indicators = [
+        "the manufacturing PMI", "consumer confidence index",
+        "housing starts data", "weekly jobless claims",
+        "durable goods orders", "retail sales figures",
+    ]
+    competitor_names = [
+        f"{rng.choice(first_names)} {rng.choice(last_names)}'s startup",
+        f"Nex{ceo_last[:4]}", f"{ceo_last}Tech",
+        rng.choice(["Apex", "Nova", "Prime", "Vertex", "Quantum"]) + rng.choice(["Works", "Corp", "Global", "Systems"]),
+    ]
+
+    pct_val = str(round(abs(severity) * rng.uniform(0.5, 1.5), 1))
+    amount_val = f"${abs(severity) * rng.uniform(0.01, 0.05):.2f}"
+    bps_val = str(int(abs(severity) * rng.uniform(1.0, 3.0)))
+
+    field_def = {
+        "{name}": None,
+        "{product_name}": None,
+        "{defect}": None,
+        "{pct}": None,
+        "{amount}": None,
+        "{bps}": None,
+        "{reason}": None,
+        "{allegation}": None,
+        "{technology}": None,
+        "{indicator}": None,
+        "{competitor}": None,
+    }
+    present = {k for k in field_def if k in headline or k in body}
+
+    token_repl = {}
+    if "{name}" in present:
+        if event.category in ("leadership",):
+            token_repl["{name}"] = ceo_name
+        elif event.category in ("competition",):
+            token_repl["{name}"] = rng.choice(competitor_names)
+        else:
+            token_repl["{name}"] = ceo_name
+    if "{product_name}" in present:
+        token_repl["{product_name}"] = product_name
+    if "{defect}" in present:
+        token_repl["{defect}"] = rng.choice(defect_types)
+    if "{pct}" in present:
+        token_repl["{pct}"] = pct_val
+    if "{amount}" in present:
+        token_repl["{amount}"] = amount_val
+    if "{bps}" in present:
+        token_repl["{bps}"] = bps_val
+    if "{reason}" in present:
+        token_repl["{reason}"] = rng.choice(resignation_reasons)
+    if "{allegation}" in present:
+        token_repl["{allegation}"] = rng.choice(allegations)
+    if "{technology}" in present:
+        token_repl["{technology}"] = rng.choice(tech_names)
+    if "{indicator}" in present:
+        token_repl["{indicator}"] = rng.choice(indicators)
+    if "{competitor}" in present:
+        token_repl["{competitor}"] = rng.choice(competitor_names)
+
+    for key, val in token_repl.items():
+        headline = headline.replace(key, val)
+        body = body.replace(key, val)
+    # Last resort: strip any other unknown tokens
+    headline = re.sub(r"\{[a-z_]+\}", "", headline)
+    body = re.sub(r"\{[a-z_]+\}", "", body)
 
     company_id = event_instance.scope_ref if event_instance.scope_type == "company" else None
     industry_id = event_instance.scope_ref if event_instance.scope_type == "industry" else None

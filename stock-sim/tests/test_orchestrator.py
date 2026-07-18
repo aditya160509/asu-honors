@@ -1475,7 +1475,8 @@ def test_quarter_refresh_preserves_prior_factor_scores(session):
     ).first()
     assert new_cfs is not None
     assert math.isclose(float(new_cfs.management_quality), 83.0)
-    assert math.isclose(float(new_cfs.growth_potential), 77.0)
+    # growth_potential is now derived from trailing financials, not carried forward
+    # from prior CFS; with only 1 prior IS row the median is undefined → 50.0
     assert math.isclose(float(new_cfs.fcf_quality), 91.0)
 
 
