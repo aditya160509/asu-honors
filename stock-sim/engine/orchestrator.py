@@ -202,7 +202,7 @@ def run_ticks(
                 # absurd compounding rate if fed a raw percentage directly.
                 growth_rate_pct = growth_score_to_rate(growth_potential, growth_rate_min, growth_rate_max)
                 company.intrinsic_value = float(drift_iv(
-                    float(company.intrinsic_value), growth_rate_pct / 100.0, TRADING_DAYS_PER_YEAR,
+                    float(company.intrinsic_value), growth_rate_pct, TRADING_DAYS_PER_YEAR,
                 ))
 
         # -- Compute drivers per company ------------------------------------
@@ -904,6 +904,12 @@ def _execute_events(
                 ind = session.query(Industry).filter_by(id=ei.scope_ref).first()
                 if ind:
                     industry_name = ind.name
+                # Industry-scope templates sometimes reference {company}. Use
+                # a representative company from that industry as the fallback.
+                if company_name is None:
+                    rep_co = session.query(Company).filter_by(industry_id=ei.scope_ref).first()
+                    if rep_co:
+                        company_name = rep_co.name
             generate_news(session, timeline_id, sim_date, ei, state.rng,
                           company_name=company_name, industry_name=industry_name,
                           extra_replacements=extra_replacements)
@@ -1175,26 +1181,86 @@ def _generate_fake_quarterly_financials(
         company_id=company.id
     ).order_by(BalanceSheet.fiscal_period.desc()).first()
 
+    # Load latest factor scores for fundamentals-based adjustments
+    latest_cfs = session.query(CompanyFactorScore).filter_by(
+        company_id=company.id
+    ).order_by(CompanyFactorScore.fiscal_period.desc()).first()
+    growth_pot = float(latest_cfs.growth_potential) if latest_cfs else 50.0
+    moat_score = float(latest_cfs.moat_score) if latest_cfs else 50.0
+    fin_qual = float(latest_cfs.financial_quality) if latest_cfs else 50.0
+    mgmt_qual = float(latest_cfs.management_quality) if latest_cfs else 50.0
+
+    # Revenue growth from growth_potential: map 0-100 score to 0-15% quarterly growth
+    # (roughly 0-60% annualized, matching growth_score_to_rate's range)
+    growth_rate_pct = growth_score_to_rate(growth_pot, DEFAULT_GROWTH_RATE_MIN, DEFAULT_GROWTH_RATE_MAX)
+    quarterly_growth = (1 + growth_rate_pct / 100.0) ** 0.25 - 1
+    rev_growth = 1 + quarterly_growth + rng.gauss(0, 0.005)
     if latest_inc:
-        rev = float(latest_inc.revenue) * (1 + rng.gauss(0.01, 0.03))
+        rev = float(latest_inc.revenue) * max(rev_growth, 0.8)
+        rev = max(rev, 1e3)
     else:
         rev = rng.uniform(1e8, 1e10)
-    rev = max(rev, 1e6)
+        rev = max(rev, 1e6)
 
-    cogs = rev * rng.uniform(0.4, 0.7)
+    # Carry forward cost ratios from latest quarter with small perturbations,
+    # adjusted by company fundamentals
+    if latest_inc:
+        prev_rev = float(latest_inc.revenue)
+        # Gross margin: moat_score improves pricing power (lower COGS %)
+        moat_adj = 1.0 - (moat_score - 50.0) / 100.0 * 0.15  # ±7.5% around 50
+        prev_cogs_r = float(latest_inc.cogs) / prev_rev if prev_rev > 0 else 0.5
+        cogs_r = prev_cogs_r * moat_adj * (1 + rng.gauss(0, 0.02))
+        cogs_r = max(0.25, min(0.80, cogs_r))
+
+        # Operating expense: higher mgmt_quality → lower OpEx
+        mgmt_adj = 1.0 - (mgmt_qual - 50.0) / 100.0 * 0.12  # ±6% around 50
+        prev_opex_r = float(latest_inc.operating_expenses) / prev_rev if prev_rev > 0 else 0.25
+        opex_r = prev_opex_r * mgmt_adj * (1 + rng.gauss(0, 0.025))
+        opex_r = max(0.08, min(0.45, opex_r))
+
+        # DA as % of revenue (linked to asset intensity, stable)
+        prev_da_r = float(latest_inc.depreciation_amortization) / prev_rev if prev_rev > 0 else 0.04
+        da_r = prev_da_r * (1 + rng.gauss(0, 0.03))
+        da_r = max(0.005, min(0.12, da_r))
+
+        # Interest expense depends on debt level and financial quality
+        prev_int = float(latest_inc.interest_expense)
+        fq_adj = 1.0 - (fin_qual - 50.0) / 100.0 * 0.2  # ±10% around 50
+        if latest_bal:
+            debt = float(latest_bal.total_debt)
+            prev_int_r = prev_int / max(debt, 1) if debt > 1e6 else (prev_int / prev_rev if prev_rev > 0 else 0.02)
+        else:
+            prev_int_r = prev_int / prev_rev if prev_rev > 0 else 0.02
+        int_r = prev_int_r * fq_adj * (1 + rng.gauss(0, 0.03))
+        int_r = max(0.001, min(0.08, int_r))
+    else:
+        cogs_r = rng.uniform(0.35, 0.60)
+        opex_r = rng.uniform(0.15, 0.30)
+        da_r = rng.uniform(0.02, 0.06)
+        int_r = rng.uniform(0.01, 0.04)
+
+    cogs = rev * cogs_r
     gp = rev - cogs
-    op_ex = rev * rng.uniform(0.15, 0.35)
+    op_ex = rev * opex_r
     ebitda = gp - op_ex
-    da = rev * rng.uniform(0.02, 0.06)
+    da = rev * da_r
     ebit = ebitda - da
-    int_exp = rev * rng.uniform(0.01, 0.04)
+    # total_debt is stored in "millions" scale (1 = $1M), same as revenue
+    debt_val = float(latest_bal.total_debt) if latest_bal else 0
+    int_exp = (rev * int_r) if debt_val < 10 else (debt_val * int_r)
     pretax = ebit - int_exp
     tax = pretax * TAX_RATE
     ni = pretax - tax
 
     shares = float(company.shares_outstanding)
-    shares_dil = shares * rng.uniform(1.0, 1.05)
-    eps = ni / shares_dil if shares_dil > 0 else 0
+    prev_shares_dil = float(latest_inc.shares_diluted) if latest_inc else None
+    if prev_shares_dil:
+        shares_dil = prev_shares_dil * (1 + rng.gauss(0, 0.002))
+    else:
+        shares_dil = shares * rng.uniform(1.0, 1.02)
+    # net_profit is in "millions" of dollars (1 = $1M), shares_diluted is actual count.
+    # EPS = net_profit * 1,000,000 / shares_diluted to convert to $/share.
+    eps = ni * 1_000_000 / shares_dil if shares_dil > 0 else 0
 
     inc = IncomeStatement(
         company_id=company.id, fiscal_period=fiscal_period,
@@ -1213,24 +1279,37 @@ def _generate_fake_quarterly_financials(
         cash = float(latest_bal.cash_and_equivalents) * (1 + rng.gauss(0.01, 0.05))
         td = float(latest_bal.total_debt) * (1 + rng.gauss(0.0, 0.02))
         se = float(latest_bal.shareholders_equity) * (1 + rng.gauss(0.005, 0.01))
+        prev_ta = float(latest_bal.total_assets)
+        # Carry forward composition ratios from previous balance sheet
+        if prev_ta > 1:
+            recv_r = float(latest_bal.receivables or 0) / prev_ta
+            inv_r = float(latest_bal.inventory or 0) / prev_ta
+            ppe_r = float(latest_bal.ppe or 0) / prev_ta
+            intan_r = float(latest_bal.intangibles or 0) / prev_ta
+            pay_r = float(latest_bal.payables or 0) / prev_ta
+            std_r = float(latest_bal.short_term_debt or 0) / max(td, 1)
+        else:
+            recv_r, inv_r, ppe_r, intan_r, pay_r, std_r = 0.1, 0.1, 0.45, 0.1, 0.06, 0.2
     else:
         ta = rev * rng.uniform(1.5, 3.0)
         cash = rev * rng.uniform(0.05, 0.15)
         td = rev * rng.uniform(0.3, 0.8)
         se = rev * rng.uniform(0.5, 1.5)
+        recv_r, inv_r, ppe_r, intan_r, pay_r, std_r = 0.1, 0.1, 0.45, 0.1, 0.06, 0.2
 
-    ta = max(ta, 1e6)
-    se = max(se, 1e6)
-    recv = ta * rng.uniform(0.05, 0.15)
-    inv = ta * rng.uniform(0.05, 0.2)
+    ta = max(ta, 1)
+    se = max(se, 1)
+    td = max(td, 1)
+    recv = ta * recv_r * (1 + rng.gauss(0, 0.03))
+    inv = ta * inv_r * (1 + rng.gauss(0, 0.03))
     ca = cash + recv + inv
-    ppe = ta * rng.uniform(0.3, 0.6)
-    intan = ta * rng.uniform(0.05, 0.15)
-    pay = ta * rng.uniform(0.03, 0.1)
-    std = td * rng.uniform(0.1, 0.3)
+    ppe = ta * ppe_r * (1 + rng.gauss(0, 0.02))
+    intan = ta * intan_r * (1 + rng.gauss(0, 0.03))
+    pay = ta * pay_r * (1 + rng.gauss(0, 0.03))
+    std = td * std_r * (1 + rng.gauss(0, 0.03))
     cl = pay + std
     ltd = td - std
-    tl = cl + ltd + ta * rng.uniform(0.05, 0.15)
+    tl = cl + ltd + ta * (rng.uniform(0.03, 0.08))  # other liabilities
     ic = se + td
 
     bal = BalanceSheet(
@@ -1246,13 +1325,29 @@ def _generate_fake_quarterly_financials(
     )
     session.add(bal)
 
-    ocf = ni + da - recv * rng.uniform(0, 0.1)
-    capex = -ppe * rng.uniform(0.02, 0.05)
+    # Carry forward cash flow ratios from latest CFS
+    latest_cfs_stmt = session.query(CashFlowStatement).filter_by(
+        company_id=company.id
+    ).order_by(CashFlowStatement.fiscal_period.desc()).first()
+    if latest_cfs_stmt:
+        prev_ppe = float(latest_bal.ppe) if latest_bal else 1
+        capex_r = abs(float(latest_cfs_stmt.capex)) / max(prev_ppe, 1)
+        prev_ni = float(latest_inc.net_profit) if latest_inc else ni
+        div_payout_r = abs(float(latest_cfs_stmt.dividends_paid)) / max(prev_ni, 1)
+        fcf_val = float(latest_cfs_stmt.free_cash_flow)
+        bb_r = abs(float(latest_cfs_stmt.buybacks)) / max(fcf_val if fcf_val > 0 else 1, 1)
+    else:
+        capex_r = 0.035
+        div_payout_r = 0.25
+        bb_r = 0.15
+
+    capex = -ppe * capex_r * (1 + rng.gauss(0, 0.05))
+    ocf = ni + da - recv * rng.uniform(0, 0.05)
     fcf = ocf + capex
-    icf = -capex - recv * rng.uniform(0, 0.05)
-    div = -ni * rng.uniform(0.1, 0.4)
-    bb = -fcf * rng.uniform(0, 0.3) if fcf > 0 else 0
-    fincf = td * rng.uniform(-0.02, 0.02) + div + bb
+    icf = -capex - recv * rng.uniform(0, 0.03)
+    div = -ni * div_payout_r * (1 + rng.gauss(0, 0.05))
+    bb = fcf * bb_r * (1 + rng.gauss(0, 0.05)) if fcf > 0 else 0
+    fincf = td * rng.gauss(0, 0.01) + div + bb
     ncc = ocf + icf + fincf
 
     cf = CashFlowStatement(
@@ -1710,6 +1805,5 @@ def _apply_factor_effects_to_company(
     latest_cfs.fair_pe = round(fpe, 4)
     latest_cfs.intrinsic_value = round(iv, 4)
 
-    company_map[cid].intrinsic_value = round(iv, 4)
     company_map[cid].intrinsic_score = round(iscore, 4)
     company_map[cid].fair_pe = round(fpe, 4)
