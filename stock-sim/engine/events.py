@@ -24,6 +24,11 @@ def apply_effect_to_drivers(
     effect_profile maps driver_key -> base effect magnitude (signed).
     Returns a new dict; does not mutate the input.
     All driver values are clamped to [-1, 1] after applying effects.
+
+    NOTE: severity is divided by 100 because the base effect values were designed
+    for factor scores (range 0-100), but drivers live in [-1, 1]. Without this
+    normalization, a typical effect of 0.3 × severity 35 = 10.5, which saturates
+    the ±1 driver clamp instantly.
     """
     decay_factor = decay(rho, days_elapsed)
     updated = dict(driver_values)

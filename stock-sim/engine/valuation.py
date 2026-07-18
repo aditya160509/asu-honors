@@ -29,6 +29,7 @@ DEFAULT_M_INFLECTION = 60.0
 
 DEFAULT_GROWTH_RATE_MIN = 2.0
 DEFAULT_GROWTH_RATE_MAX = 60.0
+DEFAULT_PE_MIN = 8.0
 
 
 def quality_multiplier(
@@ -69,9 +70,18 @@ def fair_peg(
     return neutral_industry_peg * quality_multiplier(intrinsic_score, m_min, m_max, k, c)
 
 
-def fair_pe_from_peg(peg: float, long_term_growth_rate_pct: float) -> float:
-    """Fair P/E = Fair PEG x LongTermGrowthRate (growth entered as a percent number, e.g. 18.0 for 18%)."""
-    return peg * long_term_growth_rate_pct
+def fair_pe_from_peg(
+    peg: float,
+    long_term_growth_rate_pct: float,
+    pe_min: float = DEFAULT_PE_MIN,
+) -> float:
+    """Fair P/E = baseline + Fair PEG x LongTermGrowthRate%, floored at pe_min.
+
+    The PEG model breaks down at low growth rates — a company growing 2%/yr
+    would get PE = 0.68 x 2.0 = 1.4x, which is nonsense. The baseline floor
+    (default 8.0x) ensures existing earnings have value independent of growth.
+    """
+    return max(pe_min, peg * long_term_growth_rate_pct)
 
 
 def growth_score_to_rate(
@@ -90,6 +100,51 @@ def growth_score_to_rate(
     """
     growth_potential = max(0.0, min(100.0, growth_potential))
     return rate_min + (rate_max - rate_min) * (growth_potential / 100.0)
+
+
+def compute_growth_potential_from_financials(
+    income_statements: list,
+    rate_min: float = DEFAULT_GROWTH_RATE_MIN,
+    rate_max: float = DEFAULT_GROWTH_RATE_MAX,
+) -> float:
+    """Compute growth_potential score (0-100) from a company's trailing income statements.
+
+    Uses median per-period EPS and revenue growth rates to dampen single-period
+    noise, weighted 40/60 (EPS/revenue) since revenue is more stable. Revenue
+    alone produces a conservative baseline even when EPS is noisy.
+    """
+    if len(income_statements) < 2:
+        return 50.0
+
+    incs = sorted(income_statements, key=lambda x: x.fiscal_period)
+
+    eps_rates = []
+    rev_rates = []
+    for i in range(1, len(incs)):
+        eps_prev = float(incs[i - 1].eps)
+        eps_curr = float(incs[i].eps)
+        if eps_prev > 0 and eps_curr > 0:
+            eps_rates.append(eps_curr / eps_prev - 1.0)
+
+        rev_prev = float(incs[i - 1].revenue)
+        rev_curr = float(incs[i].revenue)
+        if rev_prev > 0 and rev_curr > 0:
+            rev_rates.append(rev_curr / rev_prev - 1.0)
+
+    eps_rates.sort()
+    rev_rates.sort()
+
+    eps_growth = eps_rates[len(eps_rates) // 2] if eps_rates else 0.0
+    rev_growth = rev_rates[len(rev_rates) // 2] if rev_rates else 0.0
+
+    eps_growth = max(-0.5, min(1.5, eps_growth))
+    rev_growth = max(-0.5, min(1.5, rev_growth))
+
+    growth_rate = (0.4 * eps_growth + 0.6 * rev_growth) * 100.0
+    growth_rate = max(rate_min, min(rate_max, growth_rate))
+
+    score = (growth_rate - rate_min) / (rate_max - rate_min) * 100.0
+    return max(0.0, min(100.0, score))
 
 
 def intrinsic_value_per_share(fair_pe: float, eps: float) -> float:

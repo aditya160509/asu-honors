@@ -96,6 +96,8 @@ from engine.valuation import (
     DEFAULT_M_MAX,
     DEFAULT_M_MIN,
     DEFAULT_M_STEEPNESS,
+    DEFAULT_PE_MIN,
+    compute_growth_potential_from_financials,
     drift_iv,
     fair_pe_from_peg,
     fair_peg,
@@ -663,9 +665,11 @@ def _compute_drivers(
                 decay_rate = event_data.get("decay_rate", 0.1)
                 start_day = event_data.get("start_day", 0)
                 days_elapsed = tick_count - start_day
-                driver_values = apply_effect_to_drivers(
-                    driver_values, effect_profile, severity, decay_rate, days_elapsed,
-                )
+                driver_effects = {k: v for k, v in effect_profile.items() if k in DRIVER_KEYS}
+                if driver_effects:
+                    driver_values = apply_effect_to_drivers(
+                        driver_values, driver_effects, severity, decay_rate, days_elapsed,
+                    )
 
     drv_weights = {
         "value_opportunity": float(state.params.get("w_vo", 0.20)),
@@ -959,7 +963,8 @@ def _recompute_valuation(
     neutral_peg = neutral_industry_pegs.get(industry_id, 1.0)
     peg = fair_peg(neutral_peg, intrinsic_score, m_min, m_max, m_k, m_c)
     growth_rate_pct = growth_score_to_rate(growth_potential, growth_rate_min, growth_rate_max)
-    fpe = fair_pe_from_peg(peg, growth_rate_pct)
+    pe_min = float(params.get("fair_pe_min", DEFAULT_PE_MIN))
+    fpe = fair_pe_from_peg(peg, growth_rate_pct, pe_min)
     iv = intrinsic_value_per_share(fpe, eps)
     return fpe, iv
 
@@ -1008,6 +1013,10 @@ def _refresh_fundamentals(
     for cfs_row in session.query(CompanyFactorScore).order_by(CompanyFactorScore.id.asc()).all():
         latest_cfs_by_company[cfs_row.company_id] = cfs_row
 
+    all_incomes_by_company: dict[int, list[IncomeStatement]] = {}
+    for inc_row in session.query(IncomeStatement).order_by(IncomeStatement.fiscal_period.asc()).all():
+        all_incomes_by_company.setdefault(inc_row.company_id, []).append(inc_row)
+
     company_rows = []
     for company in companies:
         raw = _generate_fake_quarterly_financials(session, company, latest_period, rng)
@@ -1039,18 +1048,20 @@ def _refresh_fundamentals(
         fq = financial_quality_composite(r["fq_subscores"], ind_pw, subfactor_pillar)
         moat_val = moat_composite(moat_scores.get(company.id, {}), moat_weights)
         prior_cfs = latest_cfs_by_company.get(company.id)
-        # Carry forward from the *_base snapshot, not the (possibly event-mutated)
-        # effective column, so undecayed event deltas from the prior quarter don't
-        # get baked into next quarter's baseline -- see CompanyFactorScore's *_base
-        # column docstring and _apply_factor_effects_to_company below.
+# Carry forward management and FCF quality from *_base snapshot (not
+        # the event-mutated effective column), but derive growth_potential
+        # afresh from trailing financials each quarter.
         mgmt_base = float(prior_cfs.management_quality_base) if prior_cfs and prior_cfs.management_quality_base is not None else (float(prior_cfs.management_quality) if prior_cfs else 50.0)
-        growth_base = float(prior_cfs.growth_potential_base) if prior_cfs and prior_cfs.growth_potential_base is not None else (float(prior_cfs.growth_potential) if prior_cfs else 50.0)
         fcfq_base = float(prior_cfs.fcf_quality_base) if prior_cfs and prior_cfs.fcf_quality_base is not None else (float(prior_cfs.fcf_quality) if prior_cfs else 50.0)
-        iscore = compute_intrinsic_score(mgmt_base, moat_val, fq, fcfq_base, growth_base)
+        growth_rate_min = float(params.get("growth_rate_min", DEFAULT_GROWTH_RATE_MIN))
+        growth_rate_max = float(params.get("growth_rate_max", DEFAULT_GROWTH_RATE_MAX))
+        company_incs = all_incomes_by_company.get(company.id, [])
+        growth = compute_growth_potential_from_financials(company_incs, growth_rate_min, growth_rate_max)
+        iscore = compute_intrinsic_score(mgmt_base, moat_val, fq, fcfq_base, growth)
 
         eps_val = float(r["raw"].get("eps", 0.0))
         fpe, iv = _recompute_valuation(
-            iscore, growth_base, company.industry_id, neutral_industry_pegs, params, eps_val,
+            iscore, growth, company.industry_id, neutral_industry_pegs, params, eps_val,
         )
 
         company.intrinsic_value = round(iv, 4)
@@ -1075,9 +1086,9 @@ def _refresh_fundamentals(
                 moat_score=round(moat_val, 4),
                 financial_quality=round(fq, 4),
                 fcf_quality=round(fcfq_base, 4),
-                growth_potential=round(growth_base, 4),
+                growth_potential=round(growth, 4),
                 management_quality_base=round(mgmt_base, 4),
-                growth_potential_base=round(growth_base, 4),
+                growth_potential_base=round(growth, 4),
                 fcf_quality_base=round(fcfq_base, 4),
                 intrinsic_score=round(iscore, 4),
                 fair_pe=round(fpe, 4),

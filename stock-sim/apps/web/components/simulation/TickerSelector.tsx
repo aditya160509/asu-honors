@@ -177,7 +177,7 @@ function DropdownItem({
           color: "var(--mer-ink-secondary)",
         }}
       >
-        {formatPrice(company.current_price)}
+{formatPrice(company.current_price)}
       </span>
     </button>
   );

@@ -189,7 +189,7 @@ MARKET_EVENTS = [
         "decay_rate": 0.04,
         "probability_weight": 0.03,
         "news_type": "structural",
-        "effect_profile": {"moat_score": 4, "growth_potential": 3, "financial_quality": 2},
+        "effect_profile": {"moat_score": 0.3, "growth_potential": 0.25, "financial_quality": 0.2},
     },
     # ── BOTH EVENTS (structural + price drivers) ──
     {
@@ -202,7 +202,7 @@ MARKET_EVENTS = [
         "decay_rate": 0.15,
         "probability_weight": 0.02,
         "news_type": "both",
-        "effect_profile": {"news_severity": -0.4, "guidance": -0.5, "management_quality": -5},
+        "effect_profile": {"news_severity": -0.4, "guidance": -0.5, "management_quality": -0.4},
     },
     {
         "name": "Product Launch Success",
@@ -214,7 +214,7 @@ MARKET_EVENTS = [
         "decay_rate": 0.10,
         "probability_weight": 0.04,
         "news_type": "both",
-        "effect_profile": {"news_severity": 0.5, "technical_momentum": 0.3, "growth_potential": 3, "innovation": 5},
+        "effect_profile": {"news_severity": 0.5, "technical_momentum": 0.3, "growth_potential": 0.3, "innovation": 0.5},
     },
     {
         "name": "Product Recall",
@@ -226,7 +226,7 @@ MARKET_EVENTS = [
         "decay_rate": 0.12,
         "probability_weight": 0.03,
         "news_type": "both",
-        "effect_profile": {"news_severity": -0.6, "guidance": -0.7, "moat_score": -3, "management_quality": -2},
+        "effect_profile": {"news_severity": -0.6, "guidance": -0.7, "moat_score": -0.3, "management_quality": -0.2},
     },
     {
         "name": "Dividend Hike",
@@ -238,7 +238,7 @@ MARKET_EVENTS = [
         "decay_rate": 0.25,
         "probability_weight": 0.06,
         "news_type": "both",
-        "effect_profile": {"news_severity": 0.3, "guidance": 0.2, "fcf_quality": 2},
+        "effect_profile": {"news_severity": 0.3, "guidance": 0.2, "fcf_quality": 0.15},
     },
     {
         "name": "Dividend Cut",
@@ -250,7 +250,7 @@ MARKET_EVENTS = [
         "decay_rate": 0.15,
         "probability_weight": 0.04,
         "news_type": "both",
-        "effect_profile": {"news_severity": -0.5, "guidance": -0.6, "fcf_quality": -5},
+        "effect_profile": {"news_severity": -0.5, "guidance": -0.6, "fcf_quality": -0.3},
     },
     {
         "name": "Patent Granted",
@@ -262,7 +262,7 @@ MARKET_EVENTS = [
         "decay_rate": 0.08,
         "probability_weight": 0.03,
         "news_type": "both",
-        "effect_profile": {"news_severity": 0.4, "technical_momentum": 0.2, "moat_score": 4, "intangibles": 8, "growth_potential": 2},
+        "effect_profile": {"news_severity": 0.4, "technical_momentum": 0.2, "moat_score": 0.4, "intangibles": 0.8, "growth_potential": 0.2},
     },
     {
         "name": "Lawsuits Filed",
@@ -274,7 +274,7 @@ MARKET_EVENTS = [
         "decay_rate": 0.05,
         "probability_weight": 0.02,
         "news_type": "both",
-        "effect_profile": {"news_severity": -0.5, "management_quality": -3},
+        "effect_profile": {"news_severity": -0.5, "management_quality": -0.25},
     },
     {
         "name": "Regulatory Change",
@@ -286,7 +286,7 @@ MARKET_EVENTS = [
         "decay_rate": 0.06,
         "probability_weight": 0.05,
         "news_type": "both",
-        "effect_profile": {"news_severity": -0.4, "economic_outlook": -0.2, "growth_potential": -3},
+        "effect_profile": {"news_severity": -0.4, "economic_outlook": -0.2, "growth_potential": -0.2},
     },
     {
         "name": "Industry Boom",
@@ -298,7 +298,7 @@ MARKET_EVENTS = [
         "decay_rate": 0.07,
         "probability_weight": 0.04,
         "news_type": "both",
-        "effect_profile": {"news_severity": 0.4, "economic_outlook": 0.3, "growth_potential": 4},
+        "effect_profile": {"news_severity": 0.4, "economic_outlook": 0.3, "growth_potential": 0.3},
     },
     {
         "name": "Supply Chain Disruption",
@@ -310,7 +310,7 @@ MARKET_EVENTS = [
         "decay_rate": 0.10,
         "probability_weight": 0.06,
         "news_type": "both",
-        "effect_profile": {"news_severity": -0.3, "guidance": -0.4, "financial_quality": -2},
+        "effect_profile": {"news_severity": -0.3, "guidance": -0.4, "financial_quality": -0.2},
     },
     {
         "name": "Technology Breakthrough",
@@ -322,7 +322,7 @@ MARKET_EVENTS = [
         "decay_rate": 0.08,
         "probability_weight": 0.03,
         "news_type": "both",
-        "effect_profile": {"news_severity": 0.4, "technical_momentum": 0.3, "growth_potential": 5, "innovation": 6},
+        "effect_profile": {"news_severity": 0.4, "technical_momentum": 0.3, "growth_potential": 0.4, "innovation": 0.6},
     },
     {
         "name": "Commodity Price Spike",
@@ -334,7 +334,7 @@ MARKET_EVENTS = [
         "decay_rate": 0.10,
         "probability_weight": 0.05,
         "news_type": "both",
-        "effect_profile": {"news_severity": 0.2, "economic_outlook": -0.2, "financial_quality": -2},
+        "effect_profile": {"news_severity": 0.2, "economic_outlook": -0.2, "financial_quality": -0.15},
     },
     {
         "name": "Consolidation Wave (M&A)",
@@ -346,7 +346,7 @@ MARKET_EVENTS = [
         "decay_rate": 0.09,
         "probability_weight": 0.03,
         "news_type": "both",
-        "effect_profile": {"news_severity": 0.3, "technical_momentum": 0.2, "moat_score": 3},
+        "effect_profile": {"news_severity": 0.3, "technical_momentum": 0.2, "moat_score": 0.3},
     },
     {
         "name": "Recession Fears",
@@ -358,7 +358,7 @@ MARKET_EVENTS = [
         "decay_rate": 0.04,
         "probability_weight": 0.03,
         "news_type": "both",
-        "effect_profile": {"economic_outlook": -0.7, "news_severity": -0.5, "institutional_buying": -0.4, "growth_potential": -5},
+        "effect_profile": {"economic_outlook": -0.7, "news_severity": -0.5, "institutional_buying": -0.4, "growth_potential": -0.3},
     },
     {
         "name": "Strong Competitor Entry",
@@ -372,9 +372,9 @@ MARKET_EVENTS = [
         "news_type": "both",
         "effect_profile": {
             "news_severity": -0.4,
-            "moat_score": -4,
-            "market_share": -5,
-            "growth_potential": -2,
+            "moat_score": -0.5,
+            "market_share": -0.6,
+            "growth_potential": -0.3,
         },
     },
 ]

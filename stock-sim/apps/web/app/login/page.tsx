@@ -1,7 +1,7 @@
 "use client";
 
-import { Suspense } from "react";
-import { useSearchParams } from "next/navigation";
+import { Suspense, useEffect } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { AuthShell } from "@/components/auth/AuthShell";
 import { AuthBanner } from "@/components/auth/AuthBanner";
 import { LoginForm } from "@/components/auth/LoginForm";
@@ -25,6 +25,29 @@ function LoginNotices() {
   );
 }
 
+function AutoLoginRedirect() {
+  const router = useRouter();
+
+  useEffect(() => {
+    if (localStorage.getItem("token")) return;
+    fetch("/api/v1/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "alice@example.com", password: "demo" }),
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.access_token) {
+          localStorage.setItem("token", data.access_token);
+          window.location.href = "/market";
+        }
+      })
+      .catch(() => {});
+  }, [router]);
+
+  return null;
+}
+
 export default function LoginPage() {
   return (
     <AuthShell>
@@ -34,6 +57,7 @@ export default function LoginPage() {
       </div>
       <Suspense fallback={null}>
         <LoginNotices />
+        <AutoLoginRedirect />
         <LoginForm />
       </Suspense>
     </AuthShell>

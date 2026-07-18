@@ -65,6 +65,7 @@ from engine.valuation import (
     DEFAULT_M_MAX,
     DEFAULT_M_MIN,
     DEFAULT_M_STEEPNESS,
+    compute_growth_potential_from_financials,
     fair_pe_from_peg,
     fair_peg,
     growth_score_to_rate,
@@ -107,6 +108,19 @@ def _load_company_data(session: Session) -> dict:
     seed_rows = session.query(CompanyFactorScore).filter_by(fiscal_period="SEED").order_by(CompanyFactorScore.id).all()
     seed_scores = {s.company_id: s for s in seed_rows}
     timeline = session.query(Timeline).filter_by(is_live=True).first()
+
+    all_incomes_map: dict[int, list[IncomeStatement]] = {}
+    for inc in session.query(IncomeStatement).order_by(IncomeStatement.fiscal_period.asc()).all():
+        all_incomes_map.setdefault(inc.company_id, []).append(inc)
+
+    all_balances_map: dict[int, list[BalanceSheet]] = {}
+    for bal in session.query(BalanceSheet).order_by(BalanceSheet.fiscal_period.asc()).all():
+        all_balances_map.setdefault(bal.company_id, []).append(bal)
+
+    all_cashflows_map: dict[int, list[CashFlowStatement]] = {}
+    for cf in session.query(CashFlowStatement).order_by(CashFlowStatement.fiscal_period.asc()).all():
+        all_cashflows_map.setdefault(cf.company_id, []).append(cf)
+
     return dict(
         params=params, neutral_industry_pegs=neutral_industry_pegs,
         industries=industries, industry_pw=industry_pw,
@@ -115,6 +129,9 @@ def _load_company_data(session: Session) -> dict:
         income_map=income_map, balance_map=balance_map, cashflow_map=cashflow_map,
         moat_scores=moat_scores, seed_scores=seed_scores, timeline=timeline,
         fq_subfactor_keys=[fd.key for fd in fq_defs],
+        all_incomes_map=all_incomes_map,
+        all_balances_map=all_balances_map,
+        all_cashflows_map=all_cashflows_map,
     )
 
 
@@ -250,14 +267,19 @@ def seed(session: Session) -> None:
         )
         moat_val = moat_composite(d["moat_scores"].get(company.id, {}), d["moat_weights"])
         mgmt = float(r["seed_cfs"].management_quality)
-        growth = float(r["seed_cfs"].growth_potential)
+        all_incs = d["all_incomes_map"].get(company.id, [])
+        growth = compute_growth_potential_from_financials(
+            all_incs, growth_rate_min, growth_rate_max,
+        )
+        r["growth_potential"] = growth
         fcfq = float(r["seed_cfs"].fcf_quality)
         iscore = compute_intrinsic_score(mgmt, moat_val, fq, fcfq, growth)
         neutral_peg = d["neutral_industry_pegs"].get(ind_id, 1.0)
         peg = fair_peg(neutral_peg, iscore, m_min, m_max, m_k, m_c)
         growth_rate_pct = growth_score_to_rate(growth, growth_rate_min, growth_rate_max)
         fpe = fair_pe_from_peg(peg, growth_rate_pct)
-        eps_val = float(inc.eps) if inc else 0.0
+        company_inc = d["income_map"].get(company.id)
+        eps_val = float(company_inc.eps) if company_inc else 0.0
         iv = intrinsic_value_per_share(fpe, eps_val)
 
         initial_gap = rng.gauss(0, 0.03)
@@ -308,6 +330,7 @@ def seed(session: Session) -> None:
         cfs = r["seed_cfs"]
         cfs.moat_score = round(r["moat"], 4)
         cfs.financial_quality = round(r["fq"], 4)
+        cfs.growth_potential = round(r["growth_potential"], 4)
         cfs.intrinsic_score = round(r["intrinsic_score"], 4)
         cfs.fair_pe = round(r["fair_pe"], 4)
         cfs.intrinsic_value = round(r["intrinsic_value"], 4)

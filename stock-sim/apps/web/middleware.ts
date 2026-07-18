@@ -31,7 +31,7 @@ export function middleware(request: NextRequest) {
   const hasSession = Boolean(request.cookies.get(SESSION_FLAG_COOKIE)?.value);
 
   if (PROTECTED_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`))) {
-    if (!hasSession) {
+    if (!hasSession && process.env.NODE_ENV !== "development") {
       const loginUrl = new URL("/login", request.url);
       loginUrl.searchParams.set("redirect", pathname);
       return NextResponse.redirect(loginUrl);

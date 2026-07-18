@@ -15,15 +15,21 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+def _is_sqlite() -> bool:
+    return op.get_bind().dialect.name == "sqlite"
+
+
 def upgrade() -> None:
     op.add_column("market_events", sa.Column("news_type", sa.String(20), nullable=False, server_default="both"))
-    op.create_check_constraint("ck_market_events_news_type", "market_events", "news_type in ('structural', 'price', 'both')")
     op.add_column("news_feed", sa.Column("news_type", sa.String(20), nullable=False, server_default="both"))
-    op.create_check_constraint("ck_news_feed_news_type", "news_feed", "news_type in ('structural', 'price', 'both')")
+    if not _is_sqlite():
+        op.create_check_constraint("ck_market_events_news_type", "market_events", "news_type in ('structural', 'price', 'both')")
+        op.create_check_constraint("ck_news_feed_news_type", "news_feed", "news_type in ('structural', 'price', 'both')")
 
 
 def downgrade() -> None:
-    op.drop_constraint("ck_news_feed_news_type", "news_feed", type_="check")
+    if not _is_sqlite():
+        op.drop_constraint("ck_news_feed_news_type", "news_feed", type_="check")
+        op.drop_constraint("ck_market_events_news_type", "market_events", type_="check")
     op.drop_column("news_feed", "news_type")
-    op.drop_constraint("ck_market_events_news_type", "market_events", type_="check")
     op.drop_column("market_events", "news_type")
