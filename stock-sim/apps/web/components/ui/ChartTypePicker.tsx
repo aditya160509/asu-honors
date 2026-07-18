@@ -69,13 +69,13 @@ export function ChartTypePicker({ value, onChange }: ChartTypePickerProps) {
         onClick={() => setOpen((o) => !o)}
         onKeyDown={handleKeyDown}
         className={cn(
-          "h-7 rounded-sm px-2.5 text-micro font-medium transition-colors inline-flex items-center gap-1.5",
-          "text-text-tertiary hover:bg-bg-hover hover:text-text-secondary"
+          "h-7 rounded-md border border-border bg-bg-secondary px-2.5 text-micro font-semibold transition-colors inline-flex items-center gap-1.5",
+          "text-text-secondary hover:bg-bg-hover hover:text-text-primary"
         )}
         aria-haspopup="listbox"
         aria-expanded={open}
       >
-        <span className="text-xs">{current.icon}</span>
+        <span className="text-[10px] font-bold text-accent">{current.icon}</span>
         <span>{current.label}</span>
         <svg width="10" height="10" viewBox="0 0 10 10" fill="none" className="text-text-tertiary">
           <path d="M2.5 3.75L5 6.25L7.5 3.75" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
@@ -83,11 +83,11 @@ export function ChartTypePicker({ value, onChange }: ChartTypePickerProps) {
       </button>
       {open && (
         <div
-          className="absolute top-full left-0 z-50 mt-1 w-56 rounded-sm border border-border bg-bg-secondary p-1 shadow-mer-overlay"
+          className="absolute top-full left-0 z-50 mt-1 w-64 rounded-lg border border-border bg-bg-secondary p-1.5 shadow-mer-overlay"
           role="listbox"
           onKeyDown={handleKeyDown}
         >
-          <div className="grid grid-cols-2 gap-0.5">
+          <div className="grid grid-cols-1 gap-0.5">
             {types.map((type, idx) => {
               const cfg = CHART_TYPES[type];
               const isSelected = type === value;
@@ -105,17 +105,19 @@ export function ChartTypePicker({ value, onChange }: ChartTypePickerProps) {
                   }}
                   onMouseEnter={() => setFocusIdx(idx)}
                   className={cn(
-                    "flex flex-col items-start gap-0.5 rounded-sm px-2 py-1.5 text-left text-micro transition-colors",
+                    "flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-micro transition-colors",
                     isSelected && "bg-accent-dim text-accent",
                     isFocused && !isSelected && "bg-bg-hover",
                     !isSelected && !isFocused && "text-text-secondary hover:bg-bg-hover"
                   )}
                 >
-                  <span className="flex items-center gap-1.5">
-                    <span className="text-xs">{cfg.icon}</span>
-                    <span className="font-medium">{cfg.label}</span>
+                  <span className="flex h-6 w-8 items-center justify-center rounded border border-border bg-bg-primary text-[10px] font-bold text-accent">
+                    {cfg.icon}
                   </span>
-                  <span className="text-text-tertiary pl-[22px]">{cfg.description}</span>
+                  <span className="min-w-0">
+                    <span className="block font-semibold">{cfg.label}</span>
+                    <span className="block truncate text-text-tertiary">{cfg.description}</span>
+                  </span>
                 </button>
               );
             })}

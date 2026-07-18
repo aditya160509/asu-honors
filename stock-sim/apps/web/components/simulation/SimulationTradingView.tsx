@@ -5,9 +5,7 @@ import { PriceChart } from "@/components/charts/PriceChart";
 import { IndicatorSubChart } from "@/components/charts/IndicatorSubChart";
 import { TickerTape } from "@/components/simulation/TickerTape";
 import { TickerSelector } from "@/components/simulation/TickerSelector";
-import { SimControlPanel } from "@/components/simulation/SimControlPanel";
 import { ReplayControls } from "@/components/simulation/ReplayControls";
-import { BookmarkPanel } from "@/components/simulation/BookmarkPanel";
 import { TimeRangeSelector } from "@/components/simulation/TimeRangeSelector";
 import { SentimentGauge } from "@/components/dashboard/SentimentGauge";
 import { SentimentHistory } from "@/components/dashboard/SentimentHistory";
@@ -21,14 +19,15 @@ import { useSimState } from "@/lib/api/hooks/useSimulation";
 import { useMarketGrid, useCycleState } from "@/lib/api/hooks/useMarket";
 import { useNews } from "@/lib/api/hooks/useNews";
 import { useTimeControlStore } from "@/lib/stores/timeControlStore";
-import { formatPrice, formatPct, formatLarge } from "@/lib/utils";
-import type { PriceHistoryItem } from "@/lib/api/types";
+import { formatPrice, formatLarge } from "@/lib/utils";
+import type { NewsItem, PriceHistoryItem } from "@/lib/api/types";
 import type { IndicatorKey } from "@/components/charts/PriceChart";
 import type { EventMarker } from "@/components/charts/EventMarkers";
 import type { EventSentiment } from "@/components/charts/EventMarkers";
 import type { ChartType } from "@/lib/charts/types";
 import type { IndicatorType } from "@/lib/charts/indicators";
 import type { DrawingToolType } from "@/lib/charts/drawing/types";
+import type { VisibleRange } from "@/lib/charts/types";
 
 const TIME_RANGES = [
   { label: "1D", days: 1 },
@@ -123,7 +122,7 @@ function MiniSparkline({ data, width = 60, height = 20, positive }: MiniSparklin
     ctx.scale(dpr, dpr);
     ctx.clearRect(0, 0, width, height);
 
-    const closes = data.map((d) => d.close);
+    const closes = data.map((d) => Number(d.close));
     const min = Math.min(...closes);
     const max = Math.max(...closes);
     const range = max - min || 1;
@@ -158,6 +157,7 @@ export function SimulationTradingView() {
   const [showVolumeProfile, setShowVolumeProfile] = React.useState(true);
   const chartContainerRef = React.useRef<HTMLDivElement>(null);
   const [chartHeight, setChartHeight] = React.useState(500);
+  const [chartRange, setChartRange] = React.useState<VisibleRange>({ from: 0, to: 0 });
 
   const timeRange = useTimeControlStore((s) => s.timeRange);
   const customRange = useTimeControlStore((s) => s.customRange);
@@ -244,14 +244,6 @@ export function SimulationTradingView() {
 
     return data;
   }, [priceHistory, timeRange, customRange, replayMode, currentTick]);
-
-  // Top movers from market grid
-  const topMovers = React.useMemo(() => {
-    if (!grid?.companies) return [];
-    return [...grid.companies]
-      .sort((a, b) => Math.abs(b.day_change_pct ?? 0) - Math.abs(a.day_change_pct ?? 0))
-      .slice(0, 10);
-  }, [grid?.companies]);
 
   // Recent OHLC for header
   const latestPrice = priceHistory && priceHistory.length > 0 ? priceHistory[priceHistory.length - 1] : null;
@@ -578,6 +570,8 @@ export function SimulationTradingView() {
               chartType={chartType}
               drawingManager={drawingManager}
               activeDrawingTool={activeDrawingTool}
+              externalRange={chartRange.to > chartRange.from ? chartRange : undefined}
+              onRangeChange={setChartRange}
             />
           </div>
           {paneIndicators.length > 0 && (
@@ -603,8 +597,9 @@ export function SimulationTradingView() {
                   <IndicatorSubChart
                     type={type}
                     data={filteredData}
-                    height={86}
-                    range={{ from: 0, to: filteredData.length }}
+                    height={96}
+                    range={chartRange.to > chartRange.from ? chartRange : { from: Math.max(0, filteredData.length - 200), to: filteredData.length }}
+                    onRangeChange={setChartRange}
                   />
                 </div>
               ))}
@@ -718,134 +713,12 @@ export function SimulationTradingView() {
               </div>
             )}
 
-            <SimControlPanel />
+            <NewsCompactPanel news={newsData ?? []} companyName={currentCompany?.name ?? null} />
           </aside>
       </div>
 
       {/* Replay Controls */}
       <ReplayControls />
-      <BookmarkPanel compact />
-
-      {/* Bottom Watchlist / Top Movers */}
-      <div
-        style={{
-          background: "var(--mer-surface-1)",
-          borderTop: "1px solid var(--mer-stroke-hairline)",
-          padding: "6px 0",
-          overflow: "hidden",
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            padding: "0 16px",
-            marginBottom: 4,
-          }}
-        >
-          <span
-            style={{
-              fontSize: "var(--fs-micro)",
-              fontWeight: 600,
-              textTransform: "uppercase",
-              letterSpacing: "0.08em",
-              color: "var(--mer-ink-tertiary)",
-            }}
-          >
-            Top Movers
-          </span>
-        </div>
-        <div
-          style={{
-            display: "flex",
-            gap: 8,
-            overflowX: "auto",
-            padding: "0 16px 4px",
-          }}
-          className="scrollbar-none"
-        >
-          {topMovers.map((c) => {
-            const change = c.day_change_pct ?? 0;
-            const pos = change >= 0;
-            return (
-              <button
-                key={c.ticker}
-                onClick={() => setSelectedTicker(c.ticker)}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  padding: "6px 10px",
-                  background:
-                    c.ticker === selectedTicker
-                      ? "var(--mer-surface-3)"
-                      : "var(--mer-surface-2)",
-                  border: "1px solid",
-                  borderColor:
-                    c.ticker === selectedTicker
-                      ? "var(--mer-stroke-emphasis)"
-                      : "var(--mer-stroke-hairline)",
-                  borderRadius: "var(--mer-radius-sm)",
-                  cursor: "pointer",
-                  whiteSpace: "nowrap",
-                  flexShrink: 0,
-                  transition: "all 100ms",
-                }}
-                onMouseEnter={(e) => {
-                  if (c.ticker !== selectedTicker)
-                    e.currentTarget.style.borderColor = "var(--mer-stroke-emphasis)";
-                }}
-                onMouseLeave={(e) => {
-                  if (c.ticker !== selectedTicker)
-                    e.currentTarget.style.borderColor = "var(--mer-stroke-hairline)";
-                }}
-              >
-                <span
-                  style={{
-                    fontFamily: "var(--font-mono)",
-                    fontSize: "var(--fs-small)",
-                    fontWeight: 700,
-                    color: "var(--mer-ink-primary)",
-                  }}
-                >
-                  {c.ticker}
-                </span>
-                <span
-                  className="num"
-                  style={{
-                    fontSize: "var(--fs-small)",
-                    color: "var(--mer-ink-secondary)",
-                  }}
-                >
-                  {formatPrice(c.current_price)}
-                </span>
-                <span
-                  className="num"
-                  style={{
-                    fontSize: "var(--fs-micro)",
-                    fontWeight: 600,
-                    color: pos ? "var(--positive)" : "var(--negative)",
-                  }}
-                >
-                  {formatPct(c.day_change_pct)}
-                </span>
-                {c.market_cap != null && (
-                  <span
-                    className="num"
-                    style={{
-                      fontSize: "var(--fs-micro)",
-                      color: "var(--mer-ink-tertiary)",
-                    }}
-                  >
-                    {formatLarge(c.market_cap)}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
-      </div>
     </div>
   );
 }
@@ -874,6 +747,94 @@ function OhlcBadge({ label, value }: { label: string; value: number | string | n
       >
         {Number.isFinite(numericValue) ? numericValue.toFixed(2) : "--"}
       </span>
+    </div>
+  );
+}
+
+function NewsCompactPanel({ news, companyName }: { news: NewsItem[]; companyName: string | null }) {
+  const items = React.useMemo(
+    () => news.filter((item) => !item.company_name || item.company_name === companyName).slice(0, 6),
+    [companyName, news]
+  );
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        minHeight: 0,
+        borderTop: "1px solid var(--mer-stroke-hairline)",
+      }}
+    >
+      <div
+        style={{
+          padding: "8px 10px",
+          borderBottom: "1px solid var(--mer-stroke-hairline)",
+          fontSize: "var(--fs-micro)",
+          fontWeight: 700,
+          letterSpacing: "0.08em",
+          textTransform: "uppercase",
+          color: "var(--mer-ink-tertiary)",
+        }}
+      >
+        News
+      </div>
+      <div style={{ overflow: "auto", minHeight: 0 }}>
+        {items.length === 0 ? (
+          <div style={{ padding: 10, fontSize: "var(--fs-small)", color: "var(--mer-ink-tertiary)" }}>
+            No relevant news.
+          </div>
+        ) : (
+          items.map((item) => {
+            const tone = item.sentiment === "positive" ? "var(--positive)" : item.sentiment === "negative" ? "var(--negative)" : "var(--mer-ink-tertiary)";
+            return (
+              <div
+                key={item.id}
+                style={{
+                  padding: "9px 10px",
+                  borderBottom: "1px solid var(--mer-stroke-hairline)",
+                  display: "grid",
+                  gridTemplateColumns: "6px minmax(0, 1fr)",
+                  gap: 8,
+                }}
+              >
+                <span
+                  style={{
+                    width: 6,
+                    height: 6,
+                    marginTop: 5,
+                    borderRadius: "50%",
+                    background: tone,
+                  }}
+                />
+                <div style={{ minWidth: 0 }}>
+                  <div
+                    style={{
+                      color: "var(--mer-ink-primary)",
+                      fontSize: "var(--fs-small)",
+                      lineHeight: 1.3,
+                      fontWeight: 600,
+                    }}
+                  >
+                    {item.headline}
+                  </div>
+                  <div
+                    className="num"
+                    style={{
+                      marginTop: 4,
+                      color: "var(--mer-ink-tertiary)",
+                      fontSize: "var(--fs-micro)",
+                      fontFamily: "var(--font-mono)",
+                    }}
+                  >
+                    {item.sim_date}
+                  </div>
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
     </div>
   );
 }

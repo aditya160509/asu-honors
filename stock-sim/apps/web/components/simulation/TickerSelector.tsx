@@ -54,17 +54,18 @@ export function TickerSelector({ value, onChange }: TickerSelectorProps) {
   }
 
   return (
-    <div ref={containerRef} style={{ position: "relative", flex: 1, maxWidth: 240 }}>
+    <div ref={containerRef} style={{ position: "relative", flex: "0 0 178px", maxWidth: 178 }}>
       <div
         style={{
           display: "flex",
           alignItems: "center",
           gap: 6,
-          height: 32,
-          padding: "0 10px",
-          background: "var(--mer-surface-2)",
+          height: 28,
+          padding: "0 9px",
+          background: "rgba(255,255,255,0.035)",
           border: "1px solid var(--mer-stroke-hairline)",
-          borderRadius: "var(--mer-radius-sm)",
+          borderRadius: 7,
+          boxShadow: "inset 0 1px 0 rgba(255,255,255,0.03)",
         }}
       >
         <Search size={13} style={{ color: "var(--mer-ink-tertiary)", flexShrink: 0 }} />
@@ -84,8 +85,8 @@ export function TickerSelector({ value, onChange }: TickerSelectorProps) {
             color: "var(--mer-ink-primary)",
             fontFamily: "var(--font-mono)",
             fontSize: "var(--fs-small)",
-            fontWeight: 600,
-            letterSpacing: "0.03em",
+            fontWeight: 700,
+            letterSpacing: "0.01em",
           }}
         />
       </div>
@@ -97,12 +98,12 @@ export function TickerSelector({ value, onChange }: TickerSelectorProps) {
             top: "100%",
             left: 0,
             right: 0,
-            marginTop: 4,
-            background: "var(--mer-surface-2)",
+            marginTop: 6,
+            background: "rgba(15, 18, 24, 0.98)",
             border: "1px solid var(--mer-stroke-emphasis)",
-            borderRadius: "var(--mer-radius-sm)",
+            borderRadius: 8,
             boxShadow: "var(--mer-shadow-overlay)",
-            maxHeight: 280,
+            maxHeight: 310,
             overflowY: "auto",
             zIndex: 50,
           }}
@@ -131,11 +132,11 @@ function DropdownItem({
         alignItems: "center",
         justifyContent: "space-between",
         width: "100%",
-        padding: "8px 10px",
+        padding: "7px 9px",
         background: "transparent",
         border: "none",
         cursor: "pointer",
-        borderBottom: "1px solid var(--mer-stroke-hairline)",
+        borderBottom: "1px solid rgba(255,255,255,0.045)",
         textAlign: "left",
         transition: "background 100ms",
       }}
@@ -146,7 +147,7 @@ function DropdownItem({
         e.currentTarget.style.background = "transparent";
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
         <span
           style={{
             fontFamily: "var(--font-mono)",
@@ -174,10 +175,11 @@ function DropdownItem({
         className="num"
         style={{
           fontSize: "var(--fs-small)",
-          color: "var(--mer-ink-secondary)",
+          color: "var(--mer-ink-primary)",
+          fontWeight: 700,
         }}
       >
-{formatPrice(company.current_price)}
+        {formatPrice(company.current_price)}
       </span>
     </button>
   );
