@@ -38,11 +38,11 @@ export interface ChartTypeConfig {
 }
 
 export const CHART_TYPES: Record<ChartType, ChartTypeConfig> = {
-  candlestick: { label: "Candlestick", icon: "\ud83d\udd6f\ufe0f", description: "Standard OHLC candles" },
-  heikinAshi: { label: "Heikin Ashi", icon: "\ud83d\udcca", description: "Smoothed trend candles" },
-  hollowCandlestick: { label: "Hollow", icon: "\ud83d\udd32", description: "Hollow/filled candles" },
-  line: { label: "Line", icon: "\ud83d\udcc8", description: "Close price line" },
-  area: { label: "Area", icon: "\ud83c\udfd4\ufe0f", description: "Filled area under line" },
-  baseline: { label: "Baseline", icon: "\u2696\ufe0f", description: "Above/below baseline" },
-  ohlcBar: { label: "OHLC Bar", icon: "\ud83d\udcca", description: "Traditional OHLC bars" },
+  candlestick: { label: "Candlestick", icon: "C", description: "Standard OHLC candles" },
+  heikinAshi: { label: "Heikin Ashi", icon: "HA", description: "Smoothed trend candles" },
+  hollowCandlestick: { label: "Hollow", icon: "HC", description: "Hollow/filled candles" },
+  line: { label: "Line", icon: "L", description: "Close price line" },
+  area: { label: "Area", icon: "A", description: "Filled area under line" },
+  baseline: { label: "Baseline", icon: "B", description: "Above/below baseline" },
+  ohlcBar: { label: "OHLC Bar", icon: "O", description: "Traditional OHLC bars" },
 };

@@ -20,6 +20,7 @@ import {
   computeMFI,
   computeCMF,
   computeROC,
+  computeATR,
 } from "@/lib/charts/indicators";
 
 const PADDING = { top: 6, right: 56, bottom: 4, left: 8 };
@@ -41,6 +42,7 @@ const SUB_CHART_CONFIGS: Record<string, SubChartConfig> = {
   mfi: { label: "MFI", range: [0, 100], refLines: [{ value: 20, color: "#ef444466" }, { value: 80, color: "#22c55e66" }] },
   cmf: { label: "CMF", range: [-1, 1], refLines: [{ value: 0, color: "#ffffff15" }] },
   roc: { label: "ROC", refLines: [{ value: 0, color: "#ffffff15" }] },
+  atr: { label: "ATR" },
   volume: { label: "Vol" },
 };
 
@@ -437,6 +439,7 @@ export function IndicatorSubChart({
             case "williamsR": return computeWilliamsR(highs, lows, closes, 14);
             case "mfi": return computeMFI(highs, lows, closes, data.map((d) => d.volume), 14);
             case "roc": return computeROC(closes, 12);
+            case "atr": return computeATR(highs, lows, closes, 14);
             default: return [];
           }
         })();

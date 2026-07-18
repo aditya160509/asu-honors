@@ -14,6 +14,10 @@ import { drawHollowCandlestickSeries } from "@/lib/charts/series/HollowCandlesti
 import { drawBaselineSeries } from "@/lib/charts/series/BaselineSeries";
 import { computeSMA } from "@/lib/charts/indicators/sma";
 import { computeEMA } from "@/lib/charts/indicators/ema";
+import { computeBollinger } from "@/lib/charts/indicators/bollinger";
+import { computeVWAP } from "@/lib/charts/indicators/vwap";
+import { computeIchimoku } from "@/lib/charts/indicators/ichimoku";
+import { computeSuperTrend } from "@/lib/charts/indicators/superTrend";
 import { defaultRange, panRange, zoomRange } from "@/lib/charts/core/Viewport";
 import { formatDateAxis, formatPriceAxis } from "@/lib/charts/core/utils";
 import type { LinePoint, OHLC, VisibleRange, ChartType } from "@/lib/charts/types";
@@ -30,9 +34,9 @@ import { getRequiredPoints } from "@/lib/charts/drawing/interactions";
 import { renderEventMarkers, hitTestEvent, EventMarkerTooltip } from "@/components/charts/EventMarkers";
 import type { EventMarker } from "@/components/charts/EventMarkers";
 
-export type IndicatorKey = "sma20" | "sma50" | "ema12";
+export type IndicatorKey = "sma20" | "sma50" | "ema12" | "bollinger" | "vwap" | "ichimoku" | "superTrend";
 
-const INDICATOR_CONFIG: Record<IndicatorKey, { label: string; color: string; compute: (closes: number[]) => (number | null)[] }> = {
+const INDICATOR_CONFIG: Record<Exclude<IndicatorKey, "bollinger" | "vwap" | "ichimoku" | "superTrend">, { label: string; color: string; compute: (closes: number[]) => (number | null)[] }> = {
   sma20: { label: "SMA 20", color: "#f59e0b", compute: (closes) => computeSMA(closes, 20) },
   sma50: { label: "SMA 50", color: "#3b82f6", compute: (closes) => computeSMA(closes, 50) },
   ema12: { label: "EMA 12", color: "#14b8a6", compute: (closes) => computeEMA(closes, 12) },
@@ -69,8 +73,15 @@ function toOHLC(items: PriceHistoryItem[]): OHLC[] {
     high: Number(item.high),
     low: Number(item.low),
     close: Number(item.close),
-    volume: item.volume,
+    volume: Number(item.volume),
   }));
+}
+
+function toLinePoints(values: (number | null)[]): LinePoint[] {
+  return values.reduce<LinePoint[]>((acc, value, time) => {
+    if (value != null && Number.isFinite(value)) acc.push({ time, value });
+    return acc;
+  }, []);
 }
 
 export function PriceChart({
@@ -147,7 +158,7 @@ export function PriceChart({
   // visibility filtering below stays correct.
   const indicatorSeries = React.useMemo(() => {
     const closes = ohlc.map((c) => c.close);
-    return indicators.map((key) => {
+    return indicators.filter((key): key is keyof typeof INDICATOR_CONFIG => key in INDICATOR_CONFIG).map((key) => {
       const config = INDICATOR_CONFIG[key];
       const values = config.compute(closes);
       const points: LinePoint[] = [];
@@ -156,6 +167,71 @@ export function PriceChart({
       });
       return { key, color: config.color, points };
     });
+  }, [ohlc, indicators]);
+
+  const bollingerSeries = React.useMemo(() => {
+    if (!indicators.includes("bollinger")) return null;
+    const values = computeBollinger(ohlc.map((c) => c.close), 20, 2);
+    const toPoints = (rows: (number | null)[]) =>
+      rows.reduce<LinePoint[]>((acc, value, time) => {
+        if (value != null) acc.push({ time, value });
+        return acc;
+      }, []);
+    return {
+      upper: toPoints(values.upper),
+      middle: toPoints(values.middle),
+      lower: toPoints(values.lower),
+    };
+  }, [ohlc, indicators]);
+
+  const vwapSeries = React.useMemo(() => {
+    if (!indicators.includes("vwap")) return [];
+    const values = computeVWAP(
+      ohlc.map((c) => c.high),
+      ohlc.map((c) => c.low),
+      ohlc.map((c) => c.close),
+      ohlc.map((c) => c.volume)
+    );
+    return values.reduce<LinePoint[]>((acc, value, time) => {
+      if (value != null) acc.push({ time, value });
+      return acc;
+    }, []);
+  }, [ohlc, indicators]);
+
+  const ichimokuSeries = React.useMemo(() => {
+    if (!indicators.includes("ichimoku")) return null;
+    const values = computeIchimoku(
+      ohlc.map((c) => c.high),
+      ohlc.map((c) => c.low),
+      ohlc.map((c) => c.close)
+    );
+    return {
+      tenkan: toLinePoints(values.tenkan),
+      kijun: toLinePoints(values.kijun),
+      senkouA: toLinePoints(values.senkouA),
+      senkouB: toLinePoints(values.senkouB),
+      chikou: toLinePoints(values.chikou),
+    };
+  }, [ohlc, indicators]);
+
+  const superTrendSeries = React.useMemo(() => {
+    if (!indicators.includes("superTrend")) return null;
+    const values = computeSuperTrend(
+      ohlc.map((c) => c.high),
+      ohlc.map((c) => c.low),
+      ohlc.map((c) => c.close),
+      10,
+      3
+    );
+    const bullish: LinePoint[] = [];
+    const bearish: LinePoint[] = [];
+    values.superTrend.forEach((value, time) => {
+      if (value == null || !Number.isFinite(value)) return;
+      const point = { time, value };
+      if (values.direction[time] === -1) bearish.push(point);
+      else bullish.push(point);
+    });
+    return { bullish, bearish };
   }, [ohlc, indicators]);
 
   const render = React.useCallback(
@@ -285,6 +361,51 @@ export function PriceChart({
         }
       });
 
+      if (bollingerSeries) {
+        [
+          { points: bollingerSeries.upper, color: "#a78bfa", width: 1 },
+          { points: bollingerSeries.middle, color: "#a78bfa88", width: 1 },
+          { points: bollingerSeries.lower, color: "#a78bfa", width: 1 },
+        ].forEach((band) => {
+          const visiblePoints = band.points.filter((p) => p.time >= range.from && p.time < range.to);
+          if (visiblePoints.length > 1) {
+            drawLineSeries({ ctx, data: visiblePoints, width, height: h, padding: pricePadding, yDomain, color: band.color, lineWidth: band.width });
+          }
+        });
+      }
+
+      const visibleVwap = vwapSeries.filter((p) => p.time >= range.from && p.time < range.to);
+      if (visibleVwap.length > 1) {
+        drawLineSeries({ ctx, data: visibleVwap, width, height: h, padding: pricePadding, yDomain, color: "#f97316", lineWidth: 1.25, dashed: [4, 3] });
+      }
+
+      if (ichimokuSeries) {
+        [
+          { points: ichimokuSeries.tenkan, color: "#22c55e", width: 1 },
+          { points: ichimokuSeries.kijun, color: "#ef4444", width: 1 },
+          { points: ichimokuSeries.senkouA, color: "#60a5fa", width: 1 },
+          { points: ichimokuSeries.senkouB, color: "#c084fc", width: 1 },
+          { points: ichimokuSeries.chikou, color: "#94a3b8", width: 1 },
+        ].forEach((line) => {
+          const visiblePoints = line.points.filter((p) => p.time >= range.from && p.time < range.to);
+          if (visiblePoints.length > 1) {
+            drawLineSeries({ ctx, data: visiblePoints, width, height: h, padding: pricePadding, yDomain, color: line.color, lineWidth: line.width });
+          }
+        });
+      }
+
+      if (superTrendSeries) {
+        [
+          { points: superTrendSeries.bullish, color: "#22c55e" },
+          { points: superTrendSeries.bearish, color: "#ef4444" },
+        ].forEach((line) => {
+          const visiblePoints = line.points.filter((p) => p.time >= range.from && p.time < range.to);
+          if (visiblePoints.length > 1) {
+            drawLineSeries({ ctx, data: visiblePoints, width, height: h, padding: pricePadding, yDomain, color: line.color, lineWidth: 1.35 });
+          }
+        });
+      }
+
       if (drawingManager) {
         ctx.save();
         ctx.beginPath();
@@ -368,7 +489,7 @@ export function PriceChart({
         }
       }
     },
-    [ohlc, range, hover, data, indicatorSeries, showVolumeProfile, chartType, drawingManager, placingPoints, previewPoint, activeDrawingTool, events]
+    [ohlc, range, hover, data, indicatorSeries, bollingerSeries, vwapSeries, ichimokuSeries, superTrendSeries, showVolumeProfile, chartType, drawingManager, placingPoints, previewPoint, activeDrawingTool, events]
   );
 
   function handleWheel(deltaY: number, x: number) {

@@ -41,7 +41,7 @@ const TIME_RANGES = [
   { label: "ALL", days: null },
 ] as const;
 
-const PRICE_OVERLAY_IDS = new Set<IndicatorType>(["sma20", "sma50", "ema12"]);
+const PRICE_OVERLAY_IDS = new Set<IndicatorType>(["sma20", "sma50", "ema12", "bollinger", "vwap", "ichimoku", "superTrend"]);
 const PANE_INDICATOR_IDS = new Set<IndicatorType>([
   "rsi",
   "macd",
@@ -53,11 +53,16 @@ const PANE_INDICATOR_IDS = new Set<IndicatorType>([
   "mfi",
   "roc",
   "cmf",
+  "atr",
 ]);
 
 function toNumber(value: number | string | null | undefined, fallback = 0): number {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+function clampPercent(value: number): number {
+  return Math.max(0, Math.min(100, value));
 }
 
 function TerminalButton({
@@ -284,7 +289,45 @@ export function SimulationTradingView() {
     return markers;
   }, [newsData, priceHistory, currentCompany]);
 
-  const sentimentValue = cycleData?.market_sentiment != null ? Math.max(0, Math.min(100, (cycleData.market_sentiment + 1) * 50)) : 50;
+  const sentimentDrivers = React.useMemo(() => {
+    const companies = grid?.companies ?? [];
+    const cycleScore = cycleData?.market_sentiment != null
+      ? clampPercent((cycleData.market_sentiment + 1) * 50)
+      : 50;
+
+    const breadthScore = companies.length > 0
+      ? clampPercent((companies.filter((company) => toNumber(company.day_change_pct) >= 0).length / companies.length) * 100)
+      : 50;
+
+    const avgChange = companies.length > 0
+      ? companies.reduce((sum, company) => sum + toNumber(company.day_change_pct), 0) / companies.length
+      : 0;
+    const momentumScore = clampPercent(50 + avgChange * 12);
+
+    const relevantNews = (newsData ?? []).filter((item) => !item.company_name || item.company_name === currentCompany?.name);
+    const newsScore = relevantNews.length > 0
+      ? clampPercent(
+          50 +
+            (relevantNews.reduce((sum, item) => {
+              if (item.sentiment === "positive") return sum + 1;
+              if (item.sentiment === "negative") return sum - 1;
+              return sum;
+            }, 0) /
+              relevantNews.length) *
+              35
+        )
+      : 50;
+
+    return {
+      cycle: cycleScore,
+      breadth: breadthScore,
+      momentum: momentumScore,
+      news: newsScore,
+      composite: clampPercent(cycleScore * 0.35 + breadthScore * 0.25 + momentumScore * 0.25 + newsScore * 0.15),
+    };
+  }, [cycleData?.market_sentiment, currentCompany?.name, grid?.companies, newsData]);
+
+  const sentimentValue = sentimentDrivers.composite;
 
   React.useEffect(() => {
     sentimentHistoryRef.current.push(sentimentValue);
@@ -659,6 +702,19 @@ export function SimulationTradingView() {
                 </span>
                 <SentimentGauge value={sentimentValue} previousValue={prevSentiment} width={218} height={108} />
                 <SentimentHistory history={sentimentHistoryRef.current} width={218} height={32} />
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                    gap: 5,
+                    marginTop: 8,
+                  }}
+                >
+                  <SentimentDriver label="Cycle" value={sentimentDrivers.cycle} />
+                  <SentimentDriver label="Breadth" value={sentimentDrivers.breadth} />
+                  <SentimentDriver label="Momentum" value={sentimentDrivers.momentum} />
+                  <SentimentDriver label="News" value={sentimentDrivers.news} />
+                </div>
               </div>
             )}
 
@@ -818,6 +874,44 @@ function OhlcBadge({ label, value }: { label: string; value: number | string | n
       >
         {Number.isFinite(numericValue) ? numericValue.toFixed(2) : "--"}
       </span>
+    </div>
+  );
+}
+
+function SentimentDriver({ label, value }: { label: string; value: number }) {
+  const rounded = Math.round(value);
+  const color = rounded >= 58 ? "var(--positive)" : rounded <= 42 ? "var(--negative)" : "var(--mer-ink-secondary)";
+
+  return (
+    <div
+      style={{
+        padding: "5px 6px",
+        border: "1px solid var(--mer-stroke-hairline)",
+        borderRadius: "var(--mer-radius-sm)",
+        background: "rgba(255,255,255,0.025)",
+      }}
+    >
+      <div
+        style={{
+          fontSize: "var(--fs-micro)",
+          color: "var(--mer-ink-tertiary)",
+          textTransform: "uppercase",
+          letterSpacing: "0.06em",
+        }}
+      >
+        {label}
+      </div>
+      <div
+        className="num"
+        style={{
+          marginTop: 2,
+          fontSize: "var(--fs-small)",
+          fontWeight: 700,
+          color,
+        }}
+      >
+        {rounded}
+      </div>
     </div>
   );
 }

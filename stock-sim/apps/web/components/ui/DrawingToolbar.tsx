@@ -1,7 +1,6 @@
 "use client";
 
 import * as React from "react";
-import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { DrawingStylePicker } from "./DrawingStylePicker";
 import type { DrawingManager } from "@/lib/charts/drawing/DrawingManager";
@@ -165,7 +164,6 @@ interface DrawingToolbarProps {
 export function DrawingToolbar({ manager, className }: DrawingToolbarProps) {
   const [, forceUpdate] = React.useReducer((x: number) => x + 1, 0);
   const [drawingStyle, setDrawingStyle] = React.useState<DrawingStyle>({ ...DEFAULT_DRAWING_STYLE });
-  const [submenu, setSubmenu] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     return manager.subscribe(() => forceUpdate());
@@ -209,7 +207,6 @@ export function DrawingToolbar({ manager, className }: DrawingToolbarProps) {
     } else {
       manager.setActiveTool(tool.type);
     }
-    setSubmenu(null);
   }
 
   const activeTool = manager.activeTool;
@@ -217,10 +214,17 @@ export function DrawingToolbar({ manager, className }: DrawingToolbarProps) {
   return (
     <TooltipProvider delayDuration={300}>
       <div
-        className={cn(
-          "absolute left-2 top-2 z-10 flex flex-col items-center gap-0.5 bg-surface-primary border border-border-primary rounded-lg p-1 shadow-lg",
-          className
-        )}
+        className={className}
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          gap: 3,
+          width: "100%",
+          height: "100%",
+          padding: "8px 5px",
+          background: "linear-gradient(180deg, var(--mer-surface-1), var(--mer-surface-0))",
+        }}
       >
         {TOOLS.map((tool) => {
           const isActive = activeTool === tool.type;
@@ -229,12 +233,32 @@ export function DrawingToolbar({ manager, className }: DrawingToolbarProps) {
               <TooltipTrigger asChild>
                 <button
                   onClick={() => handleToolClick(tool)}
-                  className={cn(
-                    "flex items-center justify-center w-8 h-8 rounded transition-colors",
-                    isActive
-                      ? "bg-accent-primary text-white"
-                      : "text-text-secondary hover:bg-surface-secondary hover:text-text-primary"
-                  )}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    width: 32,
+                    height: 32,
+                    borderRadius: "var(--mer-radius-sm)",
+                    border: "1px solid",
+                    borderColor: isActive ? "rgba(62, 111, 224, 0.72)" : "transparent",
+                    background: isActive ? "rgba(62, 111, 224, 0.22)" : "transparent",
+                    color: isActive ? "var(--mer-accent-500)" : "var(--mer-ink-secondary)",
+                    cursor: "pointer",
+                    transition: "background 120ms ease, border-color 120ms ease, color 120ms ease",
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!isActive) {
+                      e.currentTarget.style.background = "var(--mer-surface-2)";
+                      e.currentTarget.style.color = "var(--mer-ink-primary)";
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isActive) {
+                      e.currentTarget.style.background = "transparent";
+                      e.currentTarget.style.color = "var(--mer-ink-secondary)";
+                    }
+                  }}
                 >
                   {tool.icon}
                 </button>
@@ -242,14 +266,14 @@ export function DrawingToolbar({ manager, className }: DrawingToolbarProps) {
               <TooltipContent side="right">
                 <span>{tool.label}</span>
                 {tool.shortcut && (
-                  <span className="ml-2 text-text-tertiary">{tool.shortcut}</span>
+                  <span style={{ marginLeft: 8, color: "var(--mer-ink-tertiary)" }}>{tool.shortcut}</span>
                 )}
               </TooltipContent>
             </Tooltip>
           );
         })}
 
-        <div className="w-6 h-px bg-border-primary my-1" />
+        <div style={{ width: 24, height: 1, background: "var(--mer-stroke-hairline)", margin: "4px 0" }} />
 
         <DrawingStylePicker
           style={drawingStyle}
@@ -271,7 +295,18 @@ export function DrawingToolbar({ manager, className }: DrawingToolbarProps) {
             <TooltipTrigger asChild>
               <button
                 onClick={() => manager.removeDrawing(manager.selectedId!)}
-                className="flex items-center justify-center w-8 h-8 rounded text-negative hover:bg-surface-secondary transition-colors"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  width: 32,
+                  height: 32,
+                  border: "none",
+                  borderRadius: "var(--mer-radius-sm)",
+                  background: "transparent",
+                  color: "var(--negative)",
+                  cursor: "pointer",
+                }}
               >
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
                   <line x1="4" y1="4" x2="12" y2="12" />
@@ -287,7 +322,18 @@ export function DrawingToolbar({ manager, className }: DrawingToolbarProps) {
           <TooltipTrigger asChild>
             <button
               onClick={() => manager.clear()}
-              className="flex items-center justify-center w-8 h-8 rounded text-text-tertiary hover:bg-surface-secondary hover:text-text-secondary transition-colors"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: 32,
+                height: 32,
+                border: "none",
+                borderRadius: "var(--mer-radius-sm)",
+                background: "transparent",
+                color: "var(--mer-ink-tertiary)",
+                cursor: "pointer",
+              }}
             >
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <rect x="3" y="3" width="10" height="10" rx="1" />
