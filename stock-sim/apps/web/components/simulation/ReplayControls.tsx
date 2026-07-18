@@ -1,14 +1,12 @@
 "use client";
 
 import * as React from "react";
-import { Loader2 } from "lucide-react";
 import { useTimeControlStore } from "@/lib/stores/timeControlStore";
 import { SpeedControl } from "./SpeedControl";
 import { useAdvance, useSimState } from "@/lib/api/hooks/useSimulation";
 import { formatDateFull } from "@/lib/utils";
 
-const ADVANCE_OPTIONS = [1, 5, 30] as const;
-const LIVE_TICK_GAP_MS = 150;
+const MIN_LIVE_TICK_GAP_MS = 180;
 
 export function ReplayControls() {
   const simState = useSimState();
@@ -17,7 +15,7 @@ export function ReplayControls() {
   const currentTick = useTimeControlStore((s) => s.currentTick);
   const totalTicks = useTimeControlStore((s) => s.totalTicks);
   const speed = useTimeControlStore((s) => s.speed);
-  const togglePlay = useTimeControlStore((s) => s.togglePlay);
+  const play = useTimeControlStore((s) => s.play);
   const pause = useTimeControlStore((s) => s.pause);
   const stepForward = useTimeControlStore((s) => s.stepForward);
   const stepBackward = useTimeControlStore((s) => s.stepBackward);
@@ -42,8 +40,9 @@ export function ReplayControls() {
 
   const handleTogglePlay = React.useCallback(() => {
     setReplayMode(false);
-    togglePlay();
-  }, [setReplayMode, togglePlay]);
+    if (isPlaying) pause();
+    else play();
+  }, [isPlaying, pause, play, setReplayMode]);
 
   const handleStepForward = React.useCallback(() => {
     setReplayMode(true);
@@ -82,7 +81,8 @@ export function ReplayControls() {
         { timeline_id: timelineId, days: 1 },
         {
           onSettled: () => {
-            if (!cancelled) timeoutId = setTimeout(fireNext, LIVE_TICK_GAP_MS);
+            const intervalMs = Math.max(MIN_LIVE_TICK_GAP_MS, 1200 / useTimeControlStore.getState().speed);
+            if (!cancelled) timeoutId = setTimeout(fireNext, intervalMs);
           },
         }
       );
@@ -143,14 +143,8 @@ export function ReplayControls() {
     goToTick(Math.round(ratio * totalTicks));
   }
 
-  function handleAdvance(days: number) {
-    if (!timelineId) return;
-    pause();
-    setReplayMode(false);
-    advance.mutate({ timeline_id: timelineId, days });
-  }
-
   const progress = totalTicks > 0 ? (currentTick / totalTicks) * 100 : 0;
+  const liveBlocked = !timelineId || advance.isPending;
 
   return (
     <div
@@ -232,17 +226,20 @@ export function ReplayControls() {
         <button
           type="button"
           onClick={handleTogglePlay}
-          title="Play/Pause (Space)"
+          disabled={!timelineId && !replayMode}
+          title={isPlaying ? "Stop simulation" : "Start simulation"}
           style={{
             ...transportBtnStyle,
-            width: 32,
-            height: 32,
+            width: 34,
+            height: 34,
             borderRadius: "50%",
             border: "1px solid var(--mer-stroke-accent)",
-            background: "rgba(62, 111, 224, 0.16)",
+            background: isPlaying ? "rgba(239, 68, 68, 0.16)" : "rgba(62, 111, 224, 0.18)",
+            color: isPlaying ? "var(--negative)" : "var(--mer-accent-300)",
+            opacity: !timelineId && !replayMode ? 0.55 : 1,
           }}
         >
-          {isPlaying ? <PauseIcon /> : <PlayIcon />}
+          {isPlaying ? <StopIcon /> : <PlayIcon />}
         </button>
 
         <button
@@ -269,44 +266,7 @@ export function ReplayControls() {
 
         <div style={{ width: 1, height: 20, background: "var(--mer-stroke-hairline)", margin: "0 4px" }} />
 
-        <span
-          className="num"
-          style={{
-            fontSize: "var(--fs-micro)",
-            color: "var(--mer-ink-secondary)",
-            fontFamily: "var(--font-mono)",
-            fontWeight: 500,
-            whiteSpace: "nowrap",
-          }}
-        >
-          {replayMode ? "Replay" : isPlaying ? "Live" : "Paused"} · Tick {currentTick.toLocaleString()} / {totalTicks.toLocaleString()}
-        </span>
-
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          {ADVANCE_OPTIONS.map((days) => (
-            <button
-              key={days}
-              type="button"
-              disabled={!timelineId || advance.isPending || isPlaying}
-              onClick={() => handleAdvance(days)}
-              style={{
-                height: 28,
-                minWidth: 44,
-                padding: "0 10px",
-                border: "1px solid var(--mer-stroke-hairline)",
-                borderRadius: "var(--mer-radius-sm)",
-                background: "var(--mer-surface-2)",
-                color: "var(--mer-ink-primary)",
-                fontSize: "var(--fs-small)",
-                fontWeight: 700,
-                cursor: !timelineId || advance.isPending || isPlaying ? "not-allowed" : "pointer",
-                opacity: !timelineId || advance.isPending || isPlaying ? 0.55 : 1,
-              }}
-            >
-              {advance.isPending ? <Loader2 size={12} className="animate-spin" /> : `${days}D`}
-            </button>
-          ))}
-        </div>
+        <StatusPill active={isPlaying} busy={advance.isPending} replayMode={replayMode} blocked={liveBlocked} />
 
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
           {advance.isError && (
@@ -323,7 +283,7 @@ export function ReplayControls() {
               whiteSpace: "nowrap",
             }}
           >
-            {simState.data ? formatDateFull(simState.data.current_sim_date) : "No simulation"}
+            {simState.data ? `${formatDateFull(simState.data.current_sim_date)} · Tick ${currentTick.toLocaleString()} / ${totalTicks.toLocaleString()}` : "No simulation"}
           </span>
         </div>
       </div>
@@ -344,6 +304,51 @@ const transportBtnStyle: React.CSSProperties = {
   cursor: "pointer",
   padding: 0,
 };
+
+function StatusPill({
+  active,
+  busy,
+  replayMode,
+  blocked,
+}: {
+  active: boolean;
+  busy: boolean;
+  replayMode: boolean;
+  blocked: boolean;
+}) {
+  const label = replayMode ? "Replay" : active ? "Running" : busy ? "Advancing" : blocked ? "Offline" : "Ready";
+  const color = active ? "var(--positive)" : busy ? "var(--mer-accent-300)" : blocked ? "var(--negative)" : "var(--mer-ink-secondary)";
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        height: 26,
+        padding: "0 10px",
+        border: "1px solid var(--mer-stroke-hairline)",
+        borderRadius: 999,
+        background: "rgba(255,255,255,0.025)",
+        color,
+        fontSize: "var(--fs-micro)",
+        fontWeight: 800,
+        letterSpacing: "0.06em",
+        textTransform: "uppercase",
+      }}
+    >
+      <span
+        style={{
+          width: 6,
+          height: 6,
+          borderRadius: "50%",
+          background: color,
+          boxShadow: active ? "0 0 10px rgba(34,197,94,0.8)" : "none",
+        }}
+      />
+      {label}
+    </span>
+  );
+}
 
 function SkipToStartIcon() {
   return (
@@ -375,6 +380,14 @@ function PauseIcon() {
     <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
       <rect x="3" y="2.5" width="3" height="9" fill="currentColor" />
       <rect x="8" y="2.5" width="3" height="9" fill="currentColor" />
+    </svg>
+  );
+}
+
+function StopIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+      <rect x="3.25" y="3.25" width="7.5" height="7.5" rx="1" fill="currentColor" />
     </svg>
   );
 }

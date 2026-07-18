@@ -19,16 +19,16 @@ export function TimeRangeSelector({ compact = false }: { compact?: boolean }) {
   const setTimeRange = useTimeControlStore((s) => s.setTimeRange);
   const customRange = useTimeControlStore((s) => s.customRange);
   const setCustomRange = useTimeControlStore((s) => s.setCustomRange);
+  const setReplayMode = useTimeControlStore((s) => s.setReplayMode);
 
   const [showCustom, setShowCustom] = React.useState(false);
   const [start, setStart] = React.useState("");
   const [end, setEnd] = React.useState("");
 
-  const activePreset = TIME_RANGES.find((r) => r.label === timeRange);
-
   function handleApplyCustom() {
     if (start && end) {
       setCustomRange({ start, end });
+      setReplayMode(false);
       setShowCustom(false);
     }
   }
@@ -40,8 +40,19 @@ export function TimeRangeSelector({ compact = false }: { compact?: boolean }) {
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: compact ? "row" : "column", alignItems: compact ? "center" : undefined, gap: compact ? 4 : 6 }}>
-      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 4 }}>
+    <div style={{ display: "flex", flexDirection: compact ? "row" : "column", alignItems: compact ? "center" : undefined, gap: compact ? 4 : 6, position: "relative" }}>
+      <div
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "center",
+          gap: 2,
+          padding: 2,
+          border: "1px solid var(--mer-stroke-hairline)",
+          borderRadius: 8,
+          background: "rgba(255,255,255,0.025)",
+        }}
+      >
         {TIME_RANGES.map((range) => {
           const active = timeRange === range.label && !customRange;
           return (
@@ -51,18 +62,16 @@ export function TimeRangeSelector({ compact = false }: { compact?: boolean }) {
               onClick={() => {
                 setTimeRange(range.label);
                 setCustomRange(null);
+                setReplayMode(false);
               }}
               style={{
                 height: compact ? 24 : 28,
                 padding: compact ? "0 8px" : "0 10px",
-                border: "1px solid",
-                borderColor: active
-                  ? "var(--mer-stroke-accent)"
-                  : "var(--mer-stroke-hairline)",
-                borderRadius: "var(--mer-radius-sm)",
+                border: "1px solid transparent",
+                borderRadius: 6,
                 background: active
-                  ? "rgba(62, 111, 224, 0.16)"
-                  : "var(--mer-surface-2)",
+                  ? "var(--mer-surface-4)"
+                  : "transparent",
                 color: active
                   ? "var(--mer-accent-300)"
                   : "var(--mer-ink-secondary)",
@@ -84,14 +93,11 @@ export function TimeRangeSelector({ compact = false }: { compact?: boolean }) {
           style={{
             height: compact ? 24 : 28,
             padding: compact ? "0 8px" : "0 10px",
-            border: "1px solid",
-            borderColor: customRange
-              ? "var(--mer-stroke-accent)"
-              : "var(--mer-stroke-hairline)",
-            borderRadius: "var(--mer-radius-sm)",
+            border: "1px solid transparent",
+            borderRadius: 6,
             background: customRange
-              ? "rgba(62, 111, 224, 0.16)"
-              : "var(--mer-surface-2)",
+              ? "var(--mer-surface-4)"
+              : "transparent",
             color: customRange
               ? "var(--mer-accent-300)"
               : "var(--mer-ink-secondary)",
@@ -152,8 +158,8 @@ export function TimeRangeSelector({ compact = false }: { compact?: boolean }) {
             background: "var(--mer-surface-2)",
             position: compact ? "absolute" : undefined,
             zIndex: compact ? 60 : undefined,
-            top: compact ? 96 : undefined,
-            left: compact ? 220 : undefined,
+            top: compact ? 34 : undefined,
+            left: compact ? 0 : undefined,
           }}
         >
           <label

@@ -164,6 +164,7 @@ export function SimulationTradingView() {
   const replayMode = useTimeControlStore((s) => s.replayMode);
   const currentTick = useTimeControlStore((s) => s.currentTick);
   const setTotalTicks = useTimeControlStore((s) => s.setTotalTicks);
+  const goToTick = useTimeControlStore((s) => s.goToTick);
 
   const timelineId = simState?.timeline_id;
 
@@ -212,9 +213,13 @@ export function SimulationTradingView() {
 
   React.useEffect(() => {
     if (priceHistory && priceHistory.length > 0) {
-      setTotalTicks(priceHistory.length - 1);
+      const lastTick = priceHistory.length - 1;
+      setTotalTicks(lastTick);
+      if (!replayMode) {
+        goToTick(lastTick);
+      }
     }
-  }, [priceHistory, setTotalTicks]);
+  }, [goToTick, priceHistory, replayMode, setTotalTicks]);
 
   const filteredData = React.useMemo(() => {
     if (!priceHistory || priceHistory.length === 0) return [];
@@ -244,6 +249,10 @@ export function SimulationTradingView() {
 
     return data;
   }, [priceHistory, timeRange, customRange, replayMode, currentTick]);
+
+  React.useEffect(() => {
+    setChartRange({ from: 0, to: 0 });
+  }, [customRange, filteredData.length, selectedTicker, timeRange]);
 
   // Recent OHLC for header
   const latestPrice = priceHistory && priceHistory.length > 0 ? priceHistory[priceHistory.length - 1] : null;
@@ -363,8 +372,8 @@ export function SimulationTradingView() {
       style={{
         display: "flex",
         flexDirection: "column",
-        height: "calc(100vh - 100px)",
-        background: "linear-gradient(180deg, var(--mer-bg-canvas) 0%, #07090d 100%)",
+        height: "calc(100vh - 96px)",
+        background: "linear-gradient(180deg, #080b10 0%, #06080c 100%)",
         borderRadius: "var(--mer-radius-sm)",
         border: "1px solid var(--mer-stroke-hairline)",
         overflow: "hidden",
@@ -381,10 +390,10 @@ export function SimulationTradingView() {
         style={{
           display: "flex",
           alignItems: "center",
-          gap: 12,
-          padding: "8px 14px",
+          gap: 10,
+          padding: "6px 12px",
           borderBottom: "1px solid var(--mer-stroke-hairline)",
-          background: "linear-gradient(180deg, var(--mer-surface-2) 0%, var(--mer-surface-1) 100%)",
+          background: "linear-gradient(180deg, rgba(22,26,34,0.92) 0%, var(--mer-surface-1) 100%)",
         }}
       >
         <TickerSelector
@@ -395,7 +404,7 @@ export function SimulationTradingView() {
         <div style={{ display: "flex", minWidth: 0, flexDirection: "column", gap: 2 }}>
           <span
             style={{
-                fontSize: "var(--fs-h3)",
+                fontSize: "var(--fs-body)",
               fontWeight: 700,
               color: "var(--mer-ink-primary)",
               fontFamily: "var(--font-mono)",
@@ -411,7 +420,7 @@ export function SimulationTradingView() {
                 overflow: "hidden",
                 textOverflow: "ellipsis",
                 whiteSpace: "nowrap",
-                fontSize: "var(--fs-small)",
+                fontSize: "var(--fs-micro)",
                 color: "var(--mer-ink-tertiary)",
               }}
             >
@@ -424,7 +433,7 @@ export function SimulationTradingView() {
           <span
             className="num"
             style={{
-              fontSize: "var(--fs-h3)",
+              fontSize: "var(--fs-body)",
               fontWeight: 700,
               color: "var(--mer-ink-primary)",
             }}
@@ -434,7 +443,7 @@ export function SimulationTradingView() {
           <span
             className="num"
             style={{
-              fontSize: "var(--fs-body)",
+              fontSize: "var(--fs-small)",
               fontWeight: 500,
               color: isPositive ? "var(--positive)" : "var(--negative)",
             }}
@@ -448,12 +457,12 @@ export function SimulationTradingView() {
           <MiniSparkline
             data={priceHistory ?? []}
             positive={isPositive}
-            width={70}
-            height={24}
+            width={60}
+            height={20}
           />
         )}
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(64px, auto))", gap: 6 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(58px, auto))", gap: 5 }}>
           <QuoteStat label="Range" value={currentRange.label} />
           <QuoteStat label="Volume" value={lastVolume == null ? "--" : formatLarge(lastVolume)} />
           <QuoteStat label="Mkt Cap" value={currentCompany?.market_cap == null ? "--" : formatLarge(currentCompany.market_cap)} />
@@ -491,7 +500,7 @@ export function SimulationTradingView() {
             display: "flex",
             flexDirection: "column",
             minWidth: 0,
-            padding: "8px 10px",
+            padding: "6px 8px",
             overflow: "hidden",
           }}
         >
@@ -501,8 +510,8 @@ export function SimulationTradingView() {
             style={{
               display: "flex",
               alignItems: "center",
-              gap: 8,
-              marginBottom: 6,
+              gap: 6,
+              marginBottom: 5,
               flexWrap: "wrap",
             }}
           >
@@ -549,7 +558,7 @@ export function SimulationTradingView() {
             ref={chartContainerRef}
             style={{
               flex: 1,
-              background: "radial-gradient(circle at 50% 0%, rgba(62,111,224,0.07), transparent 36%), var(--mer-surface-1)",
+              background: "radial-gradient(circle at 50% 0%, rgba(51, 102, 204, 0.08), transparent 36%), #0b0f14",
               border: "1px solid var(--mer-stroke-hairline)",
               borderRadius: "var(--mer-radius-md)",
               overflow: "hidden",
@@ -881,8 +890,8 @@ function QuoteStat({ label, value }: { label: string; value: React.ReactNode }) 
   return (
     <div
       style={{
-        minWidth: 70,
-        padding: "4px 7px",
+        minWidth: 58,
+        padding: "3px 6px",
         border: "1px solid var(--mer-stroke-hairline)",
         borderRadius: "var(--mer-radius-sm)",
         background: "rgba(255,255,255,0.025)",
@@ -902,7 +911,7 @@ function QuoteStat({ label, value }: { label: string; value: React.ReactNode }) 
         className="num"
         style={{
           marginTop: 2,
-          fontSize: "var(--fs-small)",
+          fontSize: "var(--fs-micro)",
           fontWeight: 700,
           color: "var(--mer-ink-primary)",
           fontFamily: "var(--font-mono)",
