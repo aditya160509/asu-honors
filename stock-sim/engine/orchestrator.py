@@ -201,7 +201,7 @@ def run_ticks(
             # one call per quarter boundary (same cadence as the financials
             # themselves).
             _generate_concalls_for_quarter(
-                session, companies, state.latest_cfs, sim_date, state.rng, tick_count,
+                session, timeline_id, companies, state.latest_cfs, sim_date, state.rng, tick_count,
             )
 
         # -- IV drift ---------------------------------------------------------
@@ -1813,8 +1813,64 @@ def _compute_fiscal_period(tick_count: int) -> str:
     return f"{year}Q{quarter}"
 
 
+def _quarter_market_performance(
+    session: Session, timeline_id: int, company_ids: list[int], quarter_start: date, quarter_end: date,
+) -> dict[int, float]:
+    """Close-to-close stock return over the quarter just closed, per company,
+    for engine.concalls.generate_concall's market_performance tie-breaker.
+
+    Looks up the closing price on/before quarter_start and on/before
+    quarter_end (PriceHistory rows exist for trading days only, so an exact
+    date match on a boundary isn't guaranteed). Companies missing either
+    endpoint (e.g. IPO'd mid-quarter) are simply omitted -- generate_concall
+    treats a missing market_performance as "no tie-breaker" rather than 0.0,
+    which would otherwise misreport a flat quarter.
+    """
+    if not company_ids:
+        return {}
+
+    start_rows = (
+        session.query(PriceHistory.company_id, PriceHistory.close)
+        .filter(
+            PriceHistory.timeline_id == timeline_id,
+            PriceHistory.company_id.in_(company_ids),
+            PriceHistory.sim_date <= quarter_start,
+        )
+        .order_by(PriceHistory.company_id.asc(), PriceHistory.sim_date.desc())
+        .all()
+    )
+    end_rows = (
+        session.query(PriceHistory.company_id, PriceHistory.close)
+        .filter(
+            PriceHistory.timeline_id == timeline_id,
+            PriceHistory.company_id.in_(company_ids),
+            PriceHistory.sim_date <= quarter_end,
+        )
+        .order_by(PriceHistory.company_id.asc(), PriceHistory.sim_date.desc())
+        .all()
+    )
+
+    start_close: dict[int, float] = {}
+    for company_id, close in start_rows:
+        start_close.setdefault(company_id, float(close))  # first row per id = most recent <= quarter_start
+
+    end_close: dict[int, float] = {}
+    for company_id, close in end_rows:
+        end_close.setdefault(company_id, float(close))
+
+    performance: dict[int, float] = {}
+    for company_id in company_ids:
+        s = start_close.get(company_id)
+        e = end_close.get(company_id)
+        if s is None or e is None or s <= 0:
+            continue
+        performance[company_id] = (e - s) / s
+    return performance
+
+
 def _generate_concalls_for_quarter(
     session: Session,
+    timeline_id: int,
     companies: list[Company],
     stale_latest_cfs: dict[int, CompanyFactorScore],
     sim_date: date,
@@ -1849,6 +1905,11 @@ def _generate_concalls_for_quarter(
         for row in session.query(ConCall.company_id).filter_by(fiscal_period=latest_period).all()
     }
 
+    quarter_start = sim_date - timedelta(days=QUARTER_LENGTH)
+    market_performance_by_company = _quarter_market_performance(
+        session, timeline_id, [c.id for c in companies], quarter_start, sim_date,
+    )
+
     for company in companies:
         if company.id in existing_calls:
             continue  # already generated for this (company, fiscal_period) -- retried advance
@@ -1877,6 +1938,7 @@ def _generate_concalls_for_quarter(
         cfs = fresh_cfs_by_company.get(company.id) or stale_latest_cfs.get(company.id)
         management_quality = float(cfs.management_quality) if cfs else 50.0
         growth_potential = float(cfs.growth_potential) if cfs else 50.0
+        moat_score = float(cfs.moat_score) if cfs else None
 
         concall = generate_concall(
             company=company,
@@ -1890,6 +1952,8 @@ def _generate_concalls_for_quarter(
             rng=rng,
             balance_sheet=balance_sheet,
             cash_flow=cash_flow,
+            moat_score=moat_score,
+            market_performance=market_performance_by_company.get(company.id),
         )
         session.add(concall)
 

@@ -1671,7 +1671,7 @@ def test_quarter_boundary_concall_is_idempotent_on_retry(session):
         date(2026, 4, 1),
     )
     _generate_concalls_for_quarter(
-        session, state.companies, state.latest_cfs, date(2026, 4, 1), state.rng, state.tick_count,
+        session, timeline_id, state.companies, state.latest_cfs, date(2026, 4, 1), state.rng, state.tick_count,
     )
     session.commit()
 
