@@ -61,6 +61,10 @@ export interface PriceChartProps {
   activeDrawingTool?: DrawingToolType | null;
   /** Event markers to render on the chart timeline. */
   events?: EventMarker[];
+  /** Optional externally controlled viewport range. */
+  externalRange?: VisibleRange;
+  /** Emits viewport changes so lower panes can stay aligned. */
+  onRangeChange?: (range: VisibleRange) => void;
 }
 
 const PADDING = { top: 8, right: 56, bottom: 24, left: 8 };
@@ -97,6 +101,8 @@ export function PriceChart({
   drawingManager,
   activeDrawingTool = null,
   events = [],
+  externalRange,
+  onRangeChange,
 }: PriceChartProps) {
   const ohlc = React.useMemo(() => toOHLC(data), [data]);
   const [range, setRange] = React.useState<VisibleRange>(() => defaultRange(ohlc.length));
@@ -120,6 +126,20 @@ export function PriceChart({
     if (!drawingManager) return;
     return drawingManager.subscribe(() => forceUpdate());
   }, [drawingManager]);
+
+  React.useEffect(() => {
+    onRangeChange?.(range);
+  }, [onRangeChange, range]);
+
+  React.useEffect(() => {
+    if (!externalRange) return;
+    if (externalRange.to <= externalRange.from) return;
+    setRange((current) => (
+      current.from === externalRange.from && current.to === externalRange.to
+        ? current
+        : externalRange
+    ));
+  }, [externalRange]);
 
   React.useEffect(() => {
     setPlacingPoints([]);

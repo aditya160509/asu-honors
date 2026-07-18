@@ -6,6 +6,7 @@ import { drawGrid } from "@/lib/charts/core/Grid";
 import { drawCrosshair } from "@/lib/charts/core/Crosshair";
 import { drawLineSeries, lineYDomain } from "@/lib/charts/series/LineSeries";
 import { alignToDevicePixel } from "@/lib/charts/core/utils";
+import { panRange, zoomRange } from "@/lib/charts/core/Viewport";
 import type { IndicatorType } from "@/lib/charts/indicators";
 import type { PriceHistoryItem } from "@/lib/api/types";
 import type { VisibleRange, LinePoint, OHLC } from "@/lib/charts/types";
@@ -55,6 +56,7 @@ export interface IndicatorSubChartProps {
   colors?: string[];
   hoverX?: number | null;
   range: VisibleRange;
+  onRangeChange?: (range: VisibleRange) => void;
   onPointerMove?: (x: number) => void;
   onPointerLeave?: () => void;
 }
@@ -66,8 +68,12 @@ function toOHLC(items: PriceHistoryItem[]): OHLC[] {
     high: Number(item.high),
     low: Number(item.low),
     close: Number(item.close),
-    volume: item.volume,
+    volume: Number(item.volume),
   }));
+}
+
+function numericSeries(data: PriceHistoryItem[], key: "open" | "high" | "low" | "close" | "volume"): number[] {
+  return data.map((d) => Number(d[key]));
 }
 
 function renderMACD(
@@ -79,7 +85,7 @@ function renderMACD(
   range: VisibleRange,
   colors: string[]
 ) {
-  const closes = data.map((d) => d.close);
+  const closes = numericSeries(data, "close");
   const result = computeMACD(closes);
 
   const macdPoints: LinePoint[] = [];
@@ -210,7 +216,7 @@ function renderStochastic(
   range: VisibleRange,
   colors: string[]
 ) {
-  const result = computeStochastic(data.map((d) => d.high), data.map((d) => d.low), data.map((d) => d.close));
+  const result = computeStochastic(numericSeries(data, "high"), numericSeries(data, "low"), numericSeries(data, "close"));
 
   const kPoints: LinePoint[] = [];
   const dPoints: LinePoint[] = [];
@@ -241,7 +247,7 @@ function renderADX(
   range: VisibleRange,
   colors: string[]
 ) {
-  const result = computeADX(data.map((d) => d.high), data.map((d) => d.low), data.map((d) => d.close));
+  const result = computeADX(numericSeries(data, "high"), numericSeries(data, "low"), numericSeries(data, "close"));
 
   const adxPoints: LinePoint[] = [];
   const plusPoints: LinePoint[] = [];
@@ -271,7 +277,7 @@ function renderCMF(
   range: VisibleRange,
   colors: string[]
 ) {
-  const values = computeCMF(data.map((d) => d.high), data.map((d) => d.low), data.map((d) => d.close), data.map((d) => d.volume));
+  const values = computeCMF(numericSeries(data, "high"), numericSeries(data, "low"), numericSeries(data, "close"), numericSeries(data, "volume"));
 
   let min = Infinity;
   let max = -Infinity;
@@ -403,15 +409,21 @@ export function IndicatorSubChart({
   colors = [],
   hoverX,
   range,
+  onRangeChange,
   onPointerMove,
   onPointerLeave,
 }: IndicatorSubChartProps) {
   const ohlc = React.useMemo(() => toOHLC(data), [data]);
   const config = SUB_CHART_CONFIGS[type];
+  const widthRef = React.useRef(0);
+  const isPanning = React.useRef(false);
+  const panStartX = React.useRef(0);
+  const panStartRange = React.useRef<VisibleRange>(range);
 
   const render = React.useCallback(
     ({ ctx, width, height: h, dpr }: { ctx: CanvasRenderingContext2D; width: number; height: number; dpr: number }) => {
       if (ohlc.length === 0) return;
+      widthRef.current = width;
 
       drawGrid({ ctx, width, height: h, dpr, padding: PADDING, rows: 3, cols: 6 });
 
@@ -429,15 +441,16 @@ export function IndicatorSubChart({
         yDomain = renderCMF(ctx, width, h, dpr, data, range, colors);
       } else {
         const values = (() => {
-          const closes = data.map((d) => d.close);
-          const highs = data.map((d) => d.high);
-          const lows = data.map((d) => d.low);
+          const closes = numericSeries(data, "close");
+          const highs = numericSeries(data, "high");
+          const lows = numericSeries(data, "low");
+          const volumes = numericSeries(data, "volume");
           switch (type) {
             case "rsi": return computeRSI(closes, 14);
-            case "obv": return computeOBV(closes, data.map((d) => d.volume));
+            case "obv": return computeOBV(closes, volumes);
             case "cci": return computeCCI(highs, lows, closes, 20);
             case "williamsR": return computeWilliamsR(highs, lows, closes, 14);
-            case "mfi": return computeMFI(highs, lows, closes, data.map((d) => d.volume), 14);
+            case "mfi": return computeMFI(highs, lows, closes, volumes, 14);
             case "roc": return computeROC(closes, 12);
             case "atr": return computeATR(highs, lows, closes, 14);
             default: return [];
@@ -468,6 +481,29 @@ export function IndicatorSubChart({
 
   function handlePointerMove(x: number) {
     onPointerMove?.(x);
+    if (isPanning.current && onRangeChange) {
+      const span = panStartRange.current.to - panStartRange.current.from;
+      const plotW = Math.max(1, widthRef.current - PADDING.left - PADDING.right);
+      const deltaCandles = Math.round(((panStartX.current - x) / plotW) * span);
+      onRangeChange(panRange(panStartRange.current, data.length, deltaCandles));
+    }
+  }
+
+  function handleWheel(deltaY: number, x: number) {
+    if (!onRangeChange) return;
+    const plotW = Math.max(1, widthRef.current - PADDING.left - PADDING.right);
+    const frac = Math.max(0, Math.min(1, (x - PADDING.left) / plotW));
+    onRangeChange(zoomRange(range, data.length, deltaY > 0 ? 1.1 : 1 / 1.1, frac));
+  }
+
+  function handlePointerDown(x: number) {
+    isPanning.current = true;
+    panStartX.current = x;
+    panStartRange.current = range;
+  }
+
+  function handlePointerUp() {
+    isPanning.current = false;
   }
 
   return (
@@ -475,7 +511,13 @@ export function IndicatorSubChart({
       height={height}
       padding={PADDING}
       onPointerMove={handlePointerMove}
-      onPointerLeave={onPointerLeave}
+      onPointerLeave={() => {
+        isPanning.current = false;
+        onPointerLeave?.();
+      }}
+      onWheel={handleWheel}
+      onPointerDown={handlePointerDown}
+      onPointerUp={handlePointerUp}
     >
       {render}
     </ChartSurface>

@@ -1,10 +1,18 @@
 "use client";
 
 import * as React from "react";
+import { Loader2 } from "lucide-react";
 import { useTimeControlStore } from "@/lib/stores/timeControlStore";
 import { SpeedControl } from "./SpeedControl";
+import { useAdvance, useSimState } from "@/lib/api/hooks/useSimulation";
+import { formatDateFull } from "@/lib/utils";
+
+const ADVANCE_OPTIONS = [1, 5, 30] as const;
+const LIVE_TICK_GAP_MS = 150;
 
 export function ReplayControls() {
+  const simState = useSimState();
+  const advance = useAdvance();
   const isPlaying = useTimeControlStore((s) => s.isPlaying);
   const currentTick = useTimeControlStore((s) => s.currentTick);
   const totalTicks = useTimeControlStore((s) => s.totalTicks);
@@ -16,11 +24,11 @@ export function ReplayControls() {
   const goToTick = useTimeControlStore((s) => s.goToTick);
   const replayMode = useTimeControlStore((s) => s.replayMode);
   const setReplayMode = useTimeControlStore((s) => s.setReplayMode);
-  const addBookmark = useTimeControlStore((s) => s.addBookmark);
 
-  const [showBookmarkInput, setShowBookmarkInput] = React.useState(false);
-  const [bookmarkLabel, setBookmarkLabel] = React.useState("");
   const barRef = React.useRef<HTMLDivElement>(null);
+  const timelineId = simState.data?.timeline_id;
+  const advanceRef = React.useRef(advance);
+  advanceRef.current = advance;
 
   const skipToStart = React.useCallback(() => {
     setReplayMode(true);
@@ -33,10 +41,9 @@ export function ReplayControls() {
   }, [goToTick, pause, setReplayMode, totalTicks]);
 
   const handleTogglePlay = React.useCallback(() => {
-    if (!replayMode && currentTick >= totalTicks) goToTick(0);
-    setReplayMode(true);
+    setReplayMode(false);
     togglePlay();
-  }, [currentTick, goToTick, replayMode, setReplayMode, togglePlay, totalTicks]);
+  }, [setReplayMode, togglePlay]);
 
   const handleStepForward = React.useCallback(() => {
     setReplayMode(true);
@@ -51,7 +58,7 @@ export function ReplayControls() {
   }, [pause, setReplayMode, stepBackward]);
 
   React.useEffect(() => {
-    if (!isPlaying) return;
+    if (!isPlaying || !replayMode) return;
     const intervalMs = Math.max(10, 1000 / speed);
     const id = setInterval(() => {
       const state = useTimeControlStore.getState();
@@ -62,7 +69,35 @@ export function ReplayControls() {
       state.stepForward();
     }, intervalMs);
     return () => clearInterval(id);
-  }, [isPlaying, speed]);
+  }, [isPlaying, replayMode, speed]);
+
+  React.useEffect(() => {
+    if (!isPlaying || replayMode || !timelineId) return;
+    let cancelled = false;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+    function fireNext() {
+      if (cancelled || !timelineId) return;
+      advanceRef.current.mutate(
+        { timeline_id: timelineId, days: 1 },
+        {
+          onSettled: () => {
+            if (!cancelled) timeoutId = setTimeout(fireNext, LIVE_TICK_GAP_MS);
+          },
+        }
+      );
+    }
+
+    fireNext();
+    return () => {
+      cancelled = true;
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+  }, [isPlaying, replayMode, timelineId]);
+
+  React.useEffect(() => {
+    if (advance.isError) pause();
+  }, [advance.isError, pause]);
 
   React.useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -108,11 +143,11 @@ export function ReplayControls() {
     goToTick(Math.round(ratio * totalTicks));
   }
 
-  function handleAddBookmark() {
-    const now = new Date().toISOString();
-    addBookmark(bookmarkLabel || `Tick ${currentTick}`, now);
-    setBookmarkLabel("");
-    setShowBookmarkInput(false);
+  function handleAdvance(days: number) {
+    if (!timelineId) return;
+    pause();
+    setReplayMode(false);
+    advance.mutate({ timeline_id: timelineId, days });
   }
 
   const progress = totalTicks > 0 ? (currentTick / totalTicks) * 100 : 0;
@@ -125,7 +160,7 @@ export function ReplayControls() {
         gap: 5,
         padding: "6px 14px",
         borderTop: "1px solid var(--mer-stroke-hairline)",
-        background: "var(--mer-surface-1)",
+        background: "linear-gradient(180deg, var(--mer-surface-2), var(--mer-surface-1))",
       }}
     >
       {/* Progress bar */}
@@ -244,67 +279,52 @@ export function ReplayControls() {
             whiteSpace: "nowrap",
           }}
         >
-          {replayMode ? "Replay" : "Live"} · Tick {currentTick.toLocaleString()} / {totalTicks.toLocaleString()}
+          {replayMode ? "Replay" : isPlaying ? "Live" : "Paused"} · Tick {currentTick.toLocaleString()} / {totalTicks.toLocaleString()}
         </span>
 
-        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
-          <button
-            type="button"
-            onClick={() => setShowBookmarkInput(!showBookmarkInput)}
-            title="Add bookmark"
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          {ADVANCE_OPTIONS.map((days) => (
+            <button
+              key={days}
+              type="button"
+              disabled={!timelineId || advance.isPending || isPlaying}
+              onClick={() => handleAdvance(days)}
+              style={{
+                height: 28,
+                minWidth: 44,
+                padding: "0 10px",
+                border: "1px solid var(--mer-stroke-hairline)",
+                borderRadius: "var(--mer-radius-sm)",
+                background: "var(--mer-surface-2)",
+                color: "var(--mer-ink-primary)",
+                fontSize: "var(--fs-small)",
+                fontWeight: 700,
+                cursor: !timelineId || advance.isPending || isPlaying ? "not-allowed" : "pointer",
+                opacity: !timelineId || advance.isPending || isPlaying ? 0.55 : 1,
+              }}
+            >
+              {advance.isPending ? <Loader2 size={12} className="animate-spin" /> : `${days}D`}
+            </button>
+          ))}
+        </div>
+
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+          {advance.isError && (
+            <span style={{ color: "var(--negative)", fontSize: "var(--fs-micro)" }}>
+              {(advance.error as Error)?.message ?? "Advance failed"}
+            </span>
+          )}
+          <span
+            className="num"
             style={{
-              ...transportBtnStyle,
-              width: 28,
-              height: 26,
-              padding: 0,
+              color: "var(--mer-ink-tertiary)",
+              fontSize: "var(--fs-micro)",
+              fontFamily: "var(--font-mono)",
+              whiteSpace: "nowrap",
             }}
           >
-            <BookmarkIcon />
-          </button>
-
-          {showBookmarkInput && (
-            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-              <input
-                type="text"
-                value={bookmarkLabel}
-                onChange={(e) => setBookmarkLabel(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") handleAddBookmark();
-                  if (e.key === "Escape") setShowBookmarkInput(false);
-                }}
-                placeholder="Bookmark label"
-                autoFocus
-                style={{
-                  height: 26,
-                  width: 140,
-                  padding: "0 8px",
-                  border: "1px solid var(--mer-stroke-hairline)",
-                  borderRadius: "var(--mer-radius-sm)",
-                  background: "var(--mer-surface-2)",
-                  color: "var(--mer-ink-primary)",
-                  fontSize: "var(--fs-micro)",
-                  outline: "none",
-                }}
-              />
-              <button
-                type="button"
-                onClick={handleAddBookmark}
-                style={{
-                  height: 26,
-                  padding: "0 8px",
-                  border: "1px solid var(--mer-stroke-accent)",
-                  borderRadius: "var(--mer-radius-sm)",
-                  background: "rgba(62, 111, 224, 0.16)",
-                  color: "var(--mer-accent-300)",
-                  fontSize: "var(--fs-micro)",
-                  fontWeight: 700,
-                  cursor: "pointer",
-                }}
-              >
-                Save
-              </button>
-            </div>
-          )}
+            {simState.data ? formatDateFull(simState.data.current_sim_date) : "No simulation"}
+          </span>
         </div>
       </div>
     </div>
@@ -372,19 +392,6 @@ function SkipToEndIcon() {
     <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
       <rect x="11.5" y="3" width="1.5" height="8" fill="currentColor" />
       <path d="M2 3l7 4-7 4V3z" fill="currentColor" />
-    </svg>
-  );
-}
-
-function BookmarkIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-      <path
-        d="M3 2h8v10l-4-2.5L3 12V2z"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.3"
-      />
     </svg>
   );
 }
