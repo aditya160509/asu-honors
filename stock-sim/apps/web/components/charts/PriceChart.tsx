@@ -9,15 +9,26 @@ import { drawCandlestickSeries, candlestickYDomain } from "@/lib/charts/series/C
 import { drawVolumeSeries } from "@/lib/charts/series/VolumeSeries";
 import { drawLineSeries } from "@/lib/charts/series/LineSeries";
 import { computeVolumeProfile, drawVolumeProfile } from "@/lib/charts/series/VolumeProfile";
+import { computeHeikinAshi, drawHeikinAshiSeries, heikinAshiYDomain } from "@/lib/charts/series/HeikinAshi";
+import { drawHollowCandlestickSeries } from "@/lib/charts/series/HollowCandlestick";
+import { drawBaselineSeries } from "@/lib/charts/series/BaselineSeries";
 import { computeSMA } from "@/lib/charts/indicators/sma";
 import { computeEMA } from "@/lib/charts/indicators/ema";
 import { defaultRange, panRange, zoomRange } from "@/lib/charts/core/Viewport";
 import { formatDateAxis, formatPriceAxis } from "@/lib/charts/core/utils";
-import type { LinePoint, OHLC, VisibleRange } from "@/lib/charts/types";
+import type { LinePoint, OHLC, VisibleRange, ChartType } from "@/lib/charts/types";
+import { alignToDevicePixel } from "@/lib/charts/core/utils";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ui/error-state";
 import type { PriceHistoryItem } from "@/lib/api/types";
+import type { DrawingManager } from "@/lib/charts/drawing/DrawingManager";
+import type { Drawing, DrawingPoint, DrawingToolType } from "@/lib/charts/drawing/types";
+import { DEFAULT_DRAWING_STYLE } from "@/lib/charts/drawing/types";
+import { renderDrawing } from "@/lib/charts/drawing/renderers";
+import { getRequiredPoints } from "@/lib/charts/drawing/interactions";
+import { renderEventMarkers, hitTestEvent, EventMarkerTooltip } from "@/components/charts/EventMarkers";
+import type { EventMarker } from "@/components/charts/EventMarkers";
 
 export type IndicatorKey = "sma20" | "sma50" | "ema12";
 
@@ -38,6 +49,14 @@ export interface PriceChartProps {
   indicators?: IndicatorKey[];
   /** Optional volume-by-price histogram (VPVR) with Point-of-Control line — off by default. */
   showVolumeProfile?: boolean;
+  /** Chart rendering style — defaults to candlestick. */
+  chartType?: ChartType;
+  /** Drawing manager instance for chart annotations. */
+  drawingManager?: DrawingManager;
+  /** Currently active drawing tool (null = no drawing tool active). */
+  activeDrawingTool?: DrawingToolType | null;
+  /** Event markers to render on the chart timeline. */
+  events?: EventMarker[];
 }
 
 const PADDING = { top: 8, right: 56, bottom: 24, left: 8 };
@@ -63,6 +82,10 @@ export function PriceChart({
   ticker,
   indicators = [],
   showVolumeProfile = false,
+  chartType = "candlestick",
+  drawingManager,
+  activeDrawingTool = null,
+  events = [],
 }: PriceChartProps) {
   const ohlc = React.useMemo(() => toOHLC(data), [data]);
   const [range, setRange] = React.useState<VisibleRange>(() => defaultRange(ohlc.length));
@@ -75,6 +98,22 @@ export function PriceChart({
   const prevLenRef = React.useRef(ohlc.length);
   const rangeRef = React.useRef(range);
   rangeRef.current = range;
+
+  const [placingPoints, setPlacingPoints] = React.useState<DrawingPoint[]>([]);
+  const [previewPoint, setPreviewPoint] = React.useState<DrawingPoint | null>(null);
+  const [hoveredEvent, setHoveredEvent] = React.useState<EventMarker | null>(null);
+  const [hoveredEventPos, setHoveredEventPos] = React.useState<{ x: number; y: number } | null>(null);
+  const [, forceUpdate] = React.useReducer((x: number) => x + 1, 0);
+
+  React.useEffect(() => {
+    if (!drawingManager) return;
+    return drawingManager.subscribe(() => forceUpdate());
+  }, [drawingManager]);
+
+  React.useEffect(() => {
+    setPlacingPoints([]);
+    setPreviewPoint(null);
+  }, [activeDrawingTool]);
 
   React.useEffect(() => {
     const tickerChanged = prevTickerRef.current !== ticker;
@@ -125,7 +164,41 @@ export function PriceChart({
       if (ohlc.length === 0) return;
       const priceAreaHeight = h - PADDING.bottom - PADDING.top - VOLUME_HEIGHT;
       const pricePadding = { ...PADDING, bottom: PADDING.bottom + VOLUME_HEIGHT };
-      const yDomain = candlestickYDomain(ohlc, range);
+
+      let yDomain: [number, number];
+      if (chartType === "heikinAshi") {
+        yDomain = heikinAshiYDomain(ohlc, range);
+      } else if (chartType === "line" || chartType === "area") {
+        const visibleCloses = ohlc.slice(Math.max(0, range.from), Math.min(ohlc.length, range.to)).map((c) => c.close);
+        if (visibleCloses.length === 0) yDomain = [0, 1];
+        else {
+          let cMin = Infinity;
+          let cMax = -Infinity;
+          for (const v of visibleCloses) {
+            if (v < cMin) cMin = v;
+            if (v > cMax) cMax = v;
+          }
+          if (cMin === cMax) { cMin -= 1; cMax += 1; }
+          const pad = (cMax - cMin) * 0.08;
+          yDomain = [cMin - pad, cMax + pad];
+        }
+      } else if (chartType === "baseline") {
+        const visibleCloses = ohlc.slice(Math.max(0, range.from), Math.min(ohlc.length, range.to)).map((c) => c.close);
+        if (visibleCloses.length === 0) yDomain = [0, 1];
+        else {
+          let cMin = Infinity;
+          let cMax = -Infinity;
+          for (const v of visibleCloses) {
+            if (v < cMin) cMin = v;
+            if (v > cMax) cMax = v;
+          }
+          if (cMin === cMax) { cMin -= 1; cMax += 1; }
+          const pad = (cMax - cMin) * 0.08;
+          yDomain = [cMin - pad, cMax + pad];
+        }
+      } else {
+        yDomain = candlestickYDomain(ohlc, range);
+      }
 
       drawGrid({ ctx, width, height: h, dpr, padding: pricePadding });
 
@@ -134,7 +207,76 @@ export function PriceChart({
         drawVolumeProfile({ ctx, buckets, width, padding: pricePadding, yDomain, priceAreaHeight });
       }
 
-      drawCandlestickSeries({ ctx, data: ohlc, visibleRange: range, width, height: h, dpr, padding: pricePadding, yDomain });
+      const [yMin, yMax] = yDomain;
+      const ySpan = yMax - yMin || 1;
+      const plotH = priceAreaHeight;
+      const yScaleFn = (v: number) => pricePadding.top + plotH * (1 - (v - yMin) / ySpan);
+      const visibleCount = Math.max(1, range.to - range.from);
+      const candleWidth = Math.min(12, (width - pricePadding.left - pricePadding.right) / visibleCount);
+      const xScaleFn = (i: number) => pricePadding.left + (i - range.from + 0.5) * candleWidth;
+
+      if (chartType === "candlestick") {
+        drawCandlestickSeries({ ctx, data: ohlc, visibleRange: range, width, height: h, dpr, padding: pricePadding, yDomain });
+      } else if (chartType === "heikinAshi") {
+        const haData = computeHeikinAshi(ohlc);
+        drawHeikinAshiSeries(ctx, haData, range, yScaleFn, xScaleFn, candleWidth, dpr);
+      } else if (chartType === "hollowCandlestick") {
+        drawHollowCandlestickSeries(ctx, ohlc, range, yScaleFn, xScaleFn, candleWidth, dpr);
+      } else if (chartType === "line" || chartType === "area") {
+        const visibleCandles = ohlc.slice(Math.max(0, range.from), Math.min(ohlc.length, range.to));
+        if (visibleCandles.length > 1) {
+          const points: LinePoint[] = visibleCandles.map((c, i) => ({ time: range.from + i, value: c.close }));
+          drawLineSeries({
+            ctx,
+            data: points,
+            width,
+            height: h,
+            padding: pricePadding,
+            yDomain,
+            color: "#22c55e",
+            lineWidth: 1.5,
+            fill: chartType === "area" ? "#22c55e" : undefined,
+          });
+        }
+      } else if (chartType === "baseline") {
+        const visibleCandles = ohlc.slice(Math.max(0, range.from), Math.min(ohlc.length, range.to));
+        if (visibleCandles.length > 1) {
+          const midIdx = Math.floor(visibleCandles.length / 2);
+          const baselineValue = visibleCandles[midIdx].close;
+          drawBaselineSeries(ctx, ohlc, range, yScaleFn, xScaleFn, baselineValue, width, h, pricePadding);
+        }
+      } else if (chartType === "ohlcBar") {
+        const visible = ohlc.slice(Math.max(0, range.from), Math.min(ohlc.length, range.to));
+        ctx.save();
+        for (let i = 0; i < visible.length; i++) {
+          const c = visible[i];
+          const globalIndex = range.from + i;
+          const x = xScaleFn(globalIndex);
+          const isUp = c.close >= c.open;
+          const color = isUp ? "#22c55e" : "#ef4444";
+          const tickLen = Math.max(3, candleWidth * 0.3);
+          const hiY = yScaleFn(c.high);
+          const loY = yScaleFn(c.low);
+          const opY = yScaleFn(c.open);
+          const clY = yScaleFn(c.close);
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 1;
+          const wickX = alignToDevicePixel(x, 1, dpr);
+          ctx.beginPath();
+          ctx.moveTo(wickX, hiY);
+          ctx.lineTo(wickX, loY);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(x - tickLen, opY);
+          ctx.lineTo(x, opY);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(x, clY);
+          ctx.lineTo(x + tickLen, clY);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
 
       indicatorSeries.forEach(({ color, points }) => {
         const visiblePoints = points.filter((p) => p.time >= range.from && p.time < range.to);
@@ -142,6 +284,44 @@ export function PriceChart({
           drawLineSeries({ ctx, data: visiblePoints, width, height: h, padding: pricePadding, yDomain, color, lineWidth: 1.25 });
         }
       });
+
+      if (drawingManager) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(pricePadding.left, pricePadding.top, width - pricePadding.left - pricePadding.right, priceAreaHeight);
+        ctx.clip();
+
+        const drawings = drawingManager.getDrawings();
+        for (const d of drawings) {
+          renderDrawing(ctx, d, xScaleFn, yScaleFn, width, h, ohlc);
+        }
+
+        if (placingPoints.length > 0 && previewPoint && activeDrawingTool) {
+          const previewDrawing: Drawing = {
+            id: "__preview__",
+            type: activeDrawingTool,
+            points: [...placingPoints, previewPoint],
+            state: "placing",
+            style: DEFAULT_DRAWING_STYLE,
+          };
+          renderDrawing(ctx, previewDrawing, xScaleFn, yScaleFn, width, h, ohlc);
+        }
+
+        ctx.restore();
+      }
+
+      if (events.length > 0) {
+        renderEventMarkers({
+          ctx,
+          events,
+          range,
+          xScaleFn,
+          chartTop: PADDING.top,
+          chartHeight: priceAreaHeight,
+          candleWidth,
+          dpr,
+        });
+      }
 
       drawVolumeSeries({
         ctx,
@@ -167,7 +347,7 @@ export function PriceChart({
         drawTimeAxis({ ctx, width, height: h, padding: pricePadding, labels });
       }
 
-      if (hover) {
+      if (hover && !activeDrawingTool) {
         drawCrosshair({ ctx, width, height: h, dpr, padding: pricePadding, x: hover.x, y: hover.y });
         const plotW = width - PADDING.left - PADDING.right;
         const idx = range.from + Math.round(((hover.x - PADDING.left) / plotW) * (range.to - range.from));
@@ -188,7 +368,7 @@ export function PriceChart({
         }
       }
     },
-    [ohlc, range, hover, data, indicatorSeries, showVolumeProfile]
+    [ohlc, range, hover, data, indicatorSeries, showVolumeProfile, chartType, drawingManager, placingPoints, previewPoint, activeDrawingTool, events]
   );
 
   function handleWheel(deltaY: number, x: number) {
@@ -197,14 +377,107 @@ export function PriceChart({
     setRange((prev) => zoomRange(prev, ohlc.length, deltaY > 0 ? 1.1 : 1 / 1.1, frac));
   }
 
-  function handlePointerDown(x: number) {
-    isPanning.current = true;
-    panStartX.current = x;
-    panStartRange.current = range;
+  function handlePointerDown(x: number, y: number, shiftKey: boolean) {
+    if (activeDrawingTool && drawingManager) {
+      const priceAreaHeight = height - PADDING.bottom - PADDING.top - VOLUME_HEIGHT;
+      const pricePadding = { ...PADDING, bottom: PADDING.bottom + VOLUME_HEIGHT };
+      const yDomain = candlestickYDomain(ohlc, range);
+      const [yMin, yMax] = yDomain;
+      const ySpan = yMax - yMin || 1;
+      const plotH = priceAreaHeight;
+      const yScaleFn = (v: number) => pricePadding.top + plotH * (1 - (v - yMin) / ySpan);
+      const visibleCount = Math.max(1, range.to - range.from);
+      const candleWidth = Math.min(12, (widthRef.current - pricePadding.left - pricePadding.right) / visibleCount);
+      const xScaleFn = (i: number) => pricePadding.left + (i - range.from + 0.5) * candleWidth;
+
+      const time = (x - pricePadding.left) / candleWidth + range.from - 0.5;
+      const price = yMin + (1 - (y - pricePadding.top) / plotH) * ySpan;
+      const pt: DrawingPoint = { time: Math.round(time), price };
+
+      const required = getRequiredPoints(activeDrawingTool);
+      const next = [...placingPoints, pt];
+
+      if (next.length >= required) {
+        const drawing: Drawing = {
+          id: crypto.randomUUID(),
+          type: activeDrawingTool,
+          points: next,
+          state: "active",
+          style: { ...DEFAULT_DRAWING_STYLE },
+        };
+        drawingManager.addDrawing(drawing);
+        setPlacingPoints([]);
+      } else {
+        setPlacingPoints(next);
+      }
+      return;
+    }
+
+    if (drawingManager) {
+      const priceAreaHeight = height - PADDING.bottom - PADDING.top - VOLUME_HEIGHT;
+      const pricePadding = { ...PADDING, bottom: PADDING.bottom + VOLUME_HEIGHT };
+      const yDomain = candlestickYDomain(ohlc, range);
+      const [yMin, yMax] = yDomain;
+      const ySpan = yMax - yMin || 1;
+      const plotH = priceAreaHeight;
+      const yScaleFn = (v: number) => pricePadding.top + plotH * (1 - (v - yMin) / ySpan);
+      const visibleCount = Math.max(1, range.to - range.from);
+      const candleWidth = Math.min(12, (widthRef.current - pricePadding.left - pricePadding.right) / visibleCount);
+      const xScaleFn = (i: number) => pricePadding.left + (i - range.from + 0.5) * candleWidth;
+
+      const hit = drawingManager.hitTest(x, y, xScaleFn, yScaleFn);
+      if (hit) {
+        drawingManager.selectDrawing(hit.id);
+        return;
+      }
+      drawingManager.selectDrawing(null);
+    }
+
+    if (!shiftKey) {
+      isPanning.current = true;
+      panStartX.current = x;
+      panStartRange.current = range;
+    }
   }
 
   function handlePointerMove(x: number, y: number) {
     setHover({ x, y });
+
+    if (events.length > 0) {
+      const priceAreaHeight = height - PADDING.bottom - PADDING.top - VOLUME_HEIGHT;
+      const pricePadding = { ...PADDING, bottom: PADDING.bottom + VOLUME_HEIGHT };
+      const yDomain = candlestickYDomain(ohlc, range);
+      const [yMin, yMax] = yDomain;
+      const ySpan = yMax - yMin || 1;
+      const plotH = priceAreaHeight;
+      const visibleCount = Math.max(1, range.to - range.from);
+      const cw = Math.min(12, (widthRef.current - pricePadding.left - pricePadding.right) / visibleCount);
+      const xFn = (i: number) => pricePadding.left + (i - range.from + 0.5) * cw;
+      const hit = hitTestEvent(x, y, events, range, xFn, PADDING.top);
+      if (hit) {
+        setHoveredEvent(hit);
+        setHoveredEventPos({ x, y });
+        return;
+      }
+      setHoveredEvent(null);
+      setHoveredEventPos(null);
+    }
+
+    if (activeDrawingTool && drawingManager && placingPoints.length > 0) {
+      const priceAreaHeight = height - PADDING.bottom - PADDING.top - VOLUME_HEIGHT;
+      const pricePadding = { ...PADDING, bottom: PADDING.bottom + VOLUME_HEIGHT };
+      const yDomain = candlestickYDomain(ohlc, range);
+      const [yMin, yMax] = yDomain;
+      const ySpan = yMax - yMin || 1;
+      const plotH = priceAreaHeight;
+      const visibleCount = Math.max(1, range.to - range.from);
+      const candleWidth = Math.min(12, (widthRef.current - pricePadding.left - pricePadding.right) / visibleCount);
+      const time = (x - pricePadding.left) / candleWidth + range.from - 0.5;
+      const price = yMin + (1 - (y - pricePadding.top) / plotH) * ySpan;
+      setPreviewPoint({ time: Math.round(time), price });
+      return;
+    }
+
     if (isPanning.current) {
       const span = panStartRange.current.to - panStartRange.current.from;
       const plotW = Math.max(1, widthRef.current - PADDING.left - PADDING.right);
@@ -218,21 +491,28 @@ export function PriceChart({
   if (ohlc.length === 0) return <EmptyState title={`No trading data yet for ${ticker}.`} />;
 
   return (
-    <ChartSurface
-      height={height}
-      padding={PADDING}
-      onWheel={handleWheel}
-      onPointerMove={handlePointerMove}
-      onPointerLeave={() => {
-        setHover(null);
-        isPanning.current = false;
-      }}
-      onPointerDown={handlePointerDown}
-      onPointerUp={() => (isPanning.current = false)}
-      onDoubleClick={() => setRange(defaultRange(ohlc.length))}
-    >
-      {render}
-    </ChartSurface>
+    <div style={{ position: "relative" }}>
+      <ChartSurface
+        height={height}
+        padding={PADDING}
+        onWheel={handleWheel}
+        onPointerMove={handlePointerMove}
+        onPointerLeave={() => {
+          setHover(null);
+          setHoveredEvent(null);
+          setHoveredEventPos(null);
+          isPanning.current = false;
+        }}
+        onPointerDown={handlePointerDown}
+        onPointerUp={() => (isPanning.current = false)}
+        onDoubleClick={() => setRange(defaultRange(ohlc.length))}
+      >
+        {render}
+      </ChartSurface>
+      {hoveredEvent && hoveredEventPos && (
+        <EventMarkerTooltip event={hoveredEvent} x={hoveredEventPos.x} y={hoveredEventPos.y} />
+      )}
+    </div>
   );
 }
 

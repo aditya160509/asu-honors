@@ -9,7 +9,7 @@ export interface ChartSurfaceProps {
   onPointerMove?: (x: number, y: number) => void;
   onPointerLeave?: () => void;
   onWheel?: (deltaY: number, x: number) => void;
-  onPointerDown?: (x: number) => void;
+  onPointerDown?: (x: number, y: number, shiftKey: boolean) => void;
   onPointerUp?: () => void;
   onDoubleClick?: () => void;
   className?: string;
@@ -85,7 +85,7 @@ export function ChartSurface({
   function handlePointerDown(e: React.PointerEvent<HTMLCanvasElement>) {
     if (!onPointerDown) return;
     const rect = e.currentTarget.getBoundingClientRect();
-    onPointerDown(e.clientX - rect.left);
+    onPointerDown(e.clientX - rect.left, e.clientY - rect.top, e.shiftKey);
   }
 
   return (
