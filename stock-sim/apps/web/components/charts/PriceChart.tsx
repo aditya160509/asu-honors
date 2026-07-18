@@ -119,6 +119,7 @@ export function PriceChart({
   const prevTickerRef = React.useRef(ticker);
   const prevLenRef = React.useRef(ohlc.length);
   const rangeRef = React.useRef(range);
+  const lastReportedRangeRef = React.useRef(range);
   rangeRef.current = range;
 
   const [placingPoints, setPlacingPoints] = React.useState<DrawingPoint[]>([]);
@@ -131,10 +132,16 @@ export function PriceChart({
     setRange((prev) => {
       const resolved = typeof next === "function" ? next(prev) : next;
       if (prev.from === resolved.from && prev.to === resolved.to) return prev;
-      onRangeChange?.(resolved);
       return resolved;
     });
-  }, [onRangeChange]);
+  }, []);
+
+  React.useEffect(() => {
+    const last = lastReportedRangeRef.current;
+    if (last.from === range.from && last.to === range.to) return;
+    lastReportedRangeRef.current = range;
+    onRangeChange?.(range);
+  }, [onRangeChange, range]);
 
   React.useEffect(() => {
     if (!drawingManager) return;
