@@ -424,6 +424,23 @@ class NewsItem(BaseModel):
 
 
 # --------------------------------------------------------------------------
+# 2.4b Con-Call Schemas
+# --------------------------------------------------------------------------
+
+
+class ConCallItem(BaseModel):
+    id: int
+    company_id: int
+    fiscal_period: str
+    call_date: date
+    performance_bucket: str
+    tone: str
+    tone_score: float
+    guidance_revenue_growth: float
+    statements: dict[str, str]
+
+
+# --------------------------------------------------------------------------
 # 2.5 Simulation Schemas
 # --------------------------------------------------------------------------
 

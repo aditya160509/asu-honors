@@ -1,14 +1,17 @@
 "use client";
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DashboardPanel } from "@/components/dashboard/primitives/DashboardPanel";
 import { MER_HAIRLINE } from "@/components/dashboard/primitives/tokens";
 import { cn, formatLarge } from "@/lib/utils";
-import type { FinancialStatementResponse } from "@/lib/api/types";
+import { useConCalls } from "@/lib/api/hooks/useConCalls";
+import type { ConCallItem, FinancialStatementResponse } from "@/lib/api/types";
 
 export interface FinancialTabsProps {
+  ticker: string;
   financials: FinancialStatementResponse | undefined;
   loading?: boolean;
 }
@@ -33,7 +36,72 @@ function StatementTable({ statement }: { statement: Record<string, unknown> | nu
   );
 }
 
-export function FinancialTabs({ financials, loading }: FinancialTabsProps) {
+const TONE_VARIANT: Record<ConCallItem["tone"], "positive" | "negative" | "default"> = {
+  confident: "positive",
+  measured: "default",
+  cautious: "default",
+  defensive: "negative",
+  evasive: "negative",
+};
+
+const BUCKET_VARIANT: Record<ConCallItem["performance_bucket"], "positive" | "negative" | "default"> = {
+  beat: "positive",
+  inline: "default",
+  miss: "negative",
+};
+
+const STATEMENT_ORDER = ["opening", "revenue", "margins", "guidance", "closing"];
+
+function ConCallTranscript({ call }: { call: ConCallItem }) {
+  const sections = Object.entries(call.statements).sort(
+    ([a], [b]) => STATEMENT_ORDER.indexOf(a) - STATEMENT_ORDER.indexOf(b),
+  );
+  return (
+    <div className={cn("flex flex-col gap-2 border-b py-3 last:border-b-0", MER_HAIRLINE)}>
+      <div className="flex items-center gap-2">
+        <span className="text-small font-medium text-mer-ink-primary">{call.fiscal_period}</span>
+        <Badge variant={BUCKET_VARIANT[call.performance_bucket]}>{call.performance_bucket}</Badge>
+        <Badge variant={TONE_VARIANT[call.tone]}>{call.tone}</Badge>
+        <span className="num text-micro text-mer-ink-tertiary">{call.call_date}</span>
+      </div>
+      <div className="flex flex-col gap-1">
+        {sections.map(([section, text]) => (
+          <p key={section} className="text-small text-mer-ink-secondary">
+            {text}
+          </p>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ConCallsTab({ ticker }: { ticker: string }) {
+  const { data, isLoading } = useConCalls({ ticker, limit: 8 });
+
+  if (isLoading) {
+    return (
+      <div className="flex flex-col gap-2">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <Skeleton key={i} width="100%" height={48} />
+        ))}
+      </div>
+    );
+  }
+
+  if (!data || data.length === 0) {
+    return <EmptyState title={`No con-calls for ${ticker} yet.`} />;
+  }
+
+  return (
+    <div className="flex flex-col">
+      {data.map((call) => (
+        <ConCallTranscript key={call.id} call={call} />
+      ))}
+    </div>
+  );
+}
+
+export function FinancialTabs({ ticker, financials, loading }: FinancialTabsProps) {
   if (loading) {
     return (
       <DashboardPanel eyebrow="Statements" title="Financials">
@@ -56,6 +124,7 @@ export function FinancialTabs({ financials, loading }: FinancialTabsProps) {
           <TabsTrigger value="income">Income</TabsTrigger>
           <TabsTrigger value="balance">Balance</TabsTrigger>
           <TabsTrigger value="cashflow">Cash Flow</TabsTrigger>
+          <TabsTrigger value="concalls">Con-Calls</TabsTrigger>
         </TabsList>
         <TabsContent value="income">
           <StatementTable statement={financials.income_statement} />
@@ -65,6 +134,9 @@ export function FinancialTabs({ financials, loading }: FinancialTabsProps) {
         </TabsContent>
         <TabsContent value="cashflow">
           <StatementTable statement={financials.cash_flow_statement} />
+        </TabsContent>
+        <TabsContent value="concalls">
+          <ConCallsTab ticker={ticker} />
         </TabsContent>
       </Tabs>
       {!financials.income_statement && !financials.balance_sheet && !financials.cash_flow_statement && (

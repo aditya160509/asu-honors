@@ -4,7 +4,7 @@
 >
 > **Maintenance contract.** This file must be kept in sync with the code. **Any commit that adds, removes, or changes a function/formula/config-key related to price or value movement (files under `engine/`, `_recompute_valuation`/`_apply_event_factor_effects`/`_compute_drivers`/etc. in `engine/orchestrator.py`, or the corresponding rows in `db/seeds/seed_config.py`) must update this file in the same commit.** See [Maintenance Protocol](#maintenance-protocol) at the bottom for the exact procedure. `done.md` tracks project phases; this file tracks the math itself — update both when a price/value-affecting change lands.
 >
-> Last synced with code: 2026-07-17 (factor-score event effects now decay instead of applying once permanently; `k_drift` wired into the OU price step; see §6.3, §4, §9.3).
+> Last synced with code: 2026-07-18 (quarterly financial generation now driven by trailing trend/management quality/FQ momentum/price/events/con-call guidance instead of a random walk; con-call subsystem added; per-company jitter added to beta_market/beta_sector, economic_outlook, sector shocks, and event severity to reduce cycle-phase lockstep correlation; see §2.5, §2.5a, §4, §4.2, §6.4).
 
 ---
 
@@ -90,11 +90,34 @@ Both `_refresh_fundamentals` (quarterly) and `_apply_factor_effects_to_company` 
 ### 2.5 Quarterly refresh — `_refresh_fundamentals()` in `orchestrator.py`
 
 Runs every `QUARTER_LENGTH = 63` ticks:
-1. Generate a new fake quarter of financials per company (`_generate_fake_quarterly_financials` — random-walk off the prior quarter, ties net income → EPS → consensus estimate).
+1. Generate a new fake quarter of financials per company (`_generate_fake_quarterly_financials`, revenue/margin driven by the multi-signal formula in §2.5a rather than a flat random walk off the prior quarter — ties net income → EPS → consensus estimate).
 2. Cross-sectionally percentile-rank every raw metric into FQ subscores.
 3. Compute FQ composite, Moat composite.
 4. **Carry forward** `management_quality`/`growth_potential`/`fcf_quality` from the latest existing `CompanyFactorScore` (fixed 2026-07-11 — these used to be re-rolled with fresh `rng.uniform()` every quarter, causing IntrinsicScore/FairPE/IV to lurch randomly for reasons unrelated to the company's actual financials).
 5. Compute `IntrinsicScore`, run the PEG valuation chain, write a new `CompanyFactorScore` row and update `Company.intrinsic_value/intrinsic_score/fair_pe`.
+6. Generate a con-call for the quarter just closed (`_generate_concalls_for_quarter`, §6.4) from the financials just written in step 1.
+
+### 2.5a Quarterly growth/margin formula — `_compute_quarterly_growth_and_margin_bias()` in `orchestrator.py`
+
+**Added 2026-07-18.** Previously `_generate_fake_quarterly_financials` drew revenue as `prior_revenue * (1 + rng.gauss(0.01, 0.03))` — pure noise around only the single most recent quarter, ignoring management quality, financial-quality trend, price action, news/events, and (nonexistent at the time) con-call guidance entirely. Growth rate and a margin bias are now:
+
+```
+growth_rate = trend_drift + mgmt_mean_bias + fq_bias + price_reversion + event_bias + guidance_bias + noise
+growth_rate = clamp(growth_rate, GROWTH_RATE_CLAMP_MIN=-0.40, GROWTH_RATE_CLAMP_MAX=0.60)
+
+margin_bias = clamp(mgmt_mean_bias·0.5 + fq_bias·0.5 + event_bias·0.3, -0.05, 0.05)
+```
+
+Terms (`_weighted_trailing_growth`, `_management_quality_bias_and_noise`, `_financial_quality_trend_bias`, all in `orchestrator.py`):
+- `trend_drift` — recency-weighted average QoQ revenue growth over up to the last 4 quarters (weights `0.40, 0.28, 0.20, 0.12`, newest first), replacing the old "only look at last quarter" behavior.
+- `mgmt_mean_bias`, `mgmt_noise_scale` — `management_quality_base` (0–100) maps to a mean growth shift of up to ±2% and a noise stddev that shrinks from 4.5% (quality 0) to 1.5% (quality 100): better-managed companies are both more profitable and more consistent.
+- `fq_bias` — average slope of the last 4 `financial_quality` readings, normalized against a 10-point swing, capped at ±1.5%; recomputed fresh each quarter (momentum, not permanent compounding).
+- `price_reversion` — `clamp(-price_return_qtr * 0.02, -0.01, 0.01)`. Deliberately tiny and hard-capped: price is meant to be an *output* of financials (§4), not a feedback input: this only represents "the market may have overreacted," and can never dominate the other terms.
+- `event_bias` — sum of company+industry `EventInstance` effect deltas that fired during the quarter (roughly −100..+100 scale pre-decay), divided by 400 and capped at ±5%.
+- `guidance_bias` — prior-quarter con-call guidance signal (§6.4) × 0.015; defaults to neutral 0.0 if no con-call exists yet for that company (`_load_concall_guidance_signal` degrades gracefully rather than failing).
+- `noise` — `rng.gauss(0, mgmt_noise_scale)`.
+
+Deterministic given `rng` — no wall-clock or global-random dependence, consistent with the idempotency guarantees elsewhere in `_generate_fake_quarterly_financials`/`_refresh_fundamentals`.
 
 ### 2.6 Daily IV drift — `drift_iv()` in `engine/valuation.py`
 
@@ -146,9 +169,11 @@ Price_{t+1} = IV · e^(y_{t+1})
 - `k_drift` — scales the raw `composite_price_pressure` (§3, `Σ weight_i · driver_i`, itself already ∈ roughly [−1, 1]) down into a plausible single-day log-return contribution before it enters the OU step. Config key `k_drift` (default 0.03 if unseeded), passed as `TickState.pressure_scale` in `engine/tick.py`'s `run_tick()`. **Wired in 2026-07-16/17** — previously `k_drift` was seeded but never read (§9.1 used to list this as dead config) and the raw composite pressure (magnitude up to ~1.0) was fed directly into `y`, which routinely overshot the circuit breaker's `r_cap` whenever several drivers aligned across many companies at once (e.g. every company during the same cycle phase), producing lockstep, lookalike price action that masked company-specific fundamentals.
 - `F_m` — market factor return for the day, from the economic cycle (§4.1).
 - `F_s` — sector/industry factor shock (§4.2).
-- `β_m`, `β_s` — company's market beta and sector beta (`Company.beta_market/beta_sector`).
+- `β_m`, `β_s` — company's market beta and sector beta (`Company.beta_market/beta_sector`), each perturbed every tick by a fresh multiplicative jitter `β * (1 + rng.gauss(0, BETA_JITTER_STD=0.7))` in `orchestrator.py`. **Added 2026-07-18:** all 153 seeded betas are same-sign (0.3–2.5 range), so a shared `F_m`/`F_s` previously pushed every company the same direction each tick, differing only in magnitude — this jitter is zero-mean (doesn't shift the population average) but lets a company's response to a given macro shock swing wide enough to occasionally flip sign relative to its peers.
 - `σ` (sigma) — company-specific volatility (§4.3).
 - `ε` — `rng.gauss(0, 1)`, one fresh draw per company per tick.
+
+The `economic_outlook` driver (§3, weight 0.10) is likewise jittered per-company: `market_sentiment + rng.gauss(0, ECON_OUTLOOK_JITTER_STD=0.3)` in `orchestrator.py`. **Added 2026-07-18:** this driver previously fed the byte-identical `cycle_state["market_sentiment"]` to all 153 companies and turned out to be the single largest shared lockstep term in the whole tick (larger than `β_m·F_m` itself) — see §9.3 for the measured before/after correlation.
 
 `run_tick()` in `engine/tick.py` vectorizes this across all ~150 companies with NumPy in a single call (`update_market_tick`). This is pure — no DB access; `orchestrator.py` builds `CompanyTickInput` per company and calls it, passing `pressure_scale=params.get("k_drift", 0.03)`.
 
@@ -158,7 +183,7 @@ Price_{t+1} = IV · e^(y_{t+1})
 
 ### 4.2 Sector shocks — `generate_sector_shocks()`
 
-Per industry: `F_s = cycle_sensitivity(industry) × market_factor_return + N(0, 0.002)` (idiosyncratic sector noise). `cycle_sensitivity` is a seeded `Industry` attribute — how strongly that industry's returns track the macro cycle.
+Per industry: `F_s = cycle_sensitivity(industry) × market_factor_return + N(0, SECTOR_NOISE_STD)` (idiosyncratic sector noise). `cycle_sensitivity` is a seeded `Industry` attribute — how strongly that industry's returns track the macro cycle. `SECTOR_NOISE_STD` raised from 0.002 to **0.005** (2026-07-18) — at 0.002 it barely decorrelated the 15 industries from each other or from the market-wide trend, given `market_factor_return`'s own base magnitude is only ~0.0001–0.0004 (§4.1).
 
 ### 4.3 Company-specific volatility (σ)
 
@@ -214,6 +239,19 @@ Scope handling (`_scope_target_company_ids`): `company` scope → that one compa
 **Changed 2026-07-17: this path now decays like the driver path, superseding the earlier "always `days_elapsed=0`, permanent step-change" design.** Previously (see the removed §9.1 note and `done.md`'s "News/Event → Factor Score Propagation Fix" entry) this was a deliberate choice: structural events were meant to be a one-time permanent shift, not a fading shock. On reconsideration during a 2026-07-17 code review, that design had an unintended side effect: the function is re-invoked on *every* tick an event is still active (needed so a still-open event's effect participates correctly if it fires again or the quarterly base changes), and each call read the *already-mutated* effective column as its own baseline — so repeated ticks of the *same* event kept re-adding a fresh full-severity delta on top of the previous tick's already-applied one, silently compounding far beyond the originally-intended single step-change. Rather than re-deriving "was this event already applied this tick" bookkeeping to preserve the old apply-once semantics, the fix makes the whole path decay-based like driver effects: `_apply_event_factor_effects` now scans every currently-active (non-expired) `EventInstance` each tick and computes `days_elapsed = sim_date - EventInstance.sim_date` fresh per event, matching `apply_effect_to_drivers`.
 
 To make decay possible without losing the seeded/carried-forward baseline, `CompanyFactorScore` gained three snapshot columns — `management_quality_base`, `growth_potential_base`, `fcf_quality_base` — and `MoatSubscore` gained `score_base` (migration `0010_factor_score_bases`). Quarterly refresh (`_refresh_fundamentals`) writes these from the prior quarter's *base* (not the event-mutated effective value), and event effects are computed against that base each tick, never mutating it. `moat_score`/`financial_quality` didn't need new columns — they were already re-derived fresh from `MoatSubscore`/`FinancialQualitySubscore` sub-factor tables every call, so they already had an equivalent "base" to decay against; only `management_quality`/`growth_potential`/`fcf_quality` (and individual `MoatSubscore` sub-factors) lacked one.
+
+**Added 2026-07-18 — per-company event-severity jitter (`_jitter_event_severities`, `EVENT_SEVERITY_JITTER_STD = 0.25`):** market- and industry-scope `EventInstance` rows previously applied one identical `resolved_severity` to every company in scope (all 153 companies for market scope, or every company in the industry) with zero dispersion — this was actually the single largest driver of "all companies move together" complaints, bigger than the macro `F_m`/`F_s` terms. `_get_active_events_for_company` now draws a fresh multiplicative jitter per company (`severity * (1 + rng.gauss(0, 0.25))`) before the severity feeds `news_severity` (§3) or `_apply_event_factor_effects` (this section), so a market-wide event still moves every company but not by the identical amount.
+
+### 6.4 Con-calls — `engine/concalls.py`
+
+**Added 2026-07-18.** A `ConCall` row (migration `0013_add_con_calls`) is generated per `(company_id, fiscal_period)` immediately after `_refresh_fundamentals` writes that quarter's financials (`_generate_concalls_for_quarter`, called from `run_ticks` at the same quarter boundary, idempotency-guarded like the financials tables it depends on). `generate_concall()` is deterministic/template-based (no LLM call):
+
+1. Buckets the quarter's actual EPS against the consensus estimate into beat/inline/miss.
+2. Crosses that bucket with a `management_quality_base` band (strong/mid/weak) via a tone matrix to pick a `tone` (confident/measured/cautious/defensive/evasive) and a numeric `tone_score` ∈ [−1, 1].
+3. Renders placeholder-substituted statement templates (opening/revenue/margins/guidance/closing) into `statements` (JSONB).
+4. Computes `guidance_revenue_growth` from tone + actual revenue growth + a `growth_potential` tilt + small `rng` jitter.
+
+This is the source of the `guidance_signal` term in §2.5a: `_load_concall_guidance_signal` reads the **prior** quarter's `ConCall.tone_score`/`guidance_revenue_growth` (the quarter being generated hasn't produced its own con-call yet) for each company, defaulting to neutral 0.0 when none exists (early quarters, or a fresh DB before any quarter boundary has run). Exposed via `GET /api/v1/companies/{ticker}/concalls` (`apps/api/routers/concalls.py`).
 
 Net effect for a game designer reading this: a structural event's factor-score nudge now fades over the event's `duration_days` (governed by the event's own `decay_rate`), the same as its driver-side price-pressure nudge — there is no longer an asymmetry where the driver effect on `news_severity` fades but the correlated `financial_quality` hit from the same event stays at full strength forever.
 
@@ -285,7 +323,7 @@ Cross-referenced against `done.md` and `docs/calibration-strategy.md`. Items pur
 ### 9.2 Not yet started (from `docs/calibration-strategy.md`, price/value-relevant sprints only)
 
 - **Sprint A — Valuation calibration.** Fit `NeutralIndustryPEG`, `M(S)` bounds/steepness, `base_volatility`, and betas against the real 3,833-ticker fundamentals dataset (`data/fundamentals/master_fundamentals.parquet`) instead of hand-picked placeholder constants. This is the fix for the Reliance miscalibration above — the highest-ROI next step per the calibration doc, pure parameter changes, no new models needed.
-- **Sprint B — Financial statement realism.** Replace `rng.uniform(...)` ranges in `_generate_fake_quarterly_financials` (COGS%, opex%, D&A%, leverage growth, etc.) with sector-median ratios derived from real data, so quarterly financials aren't just structurally-plausible random walks.
+- **Sprint B — Financial statement realism.** Revenue/margin growth is no longer a flat random walk (§2.5a, 2026-07-18 — now driven by trailing trend, management quality, FQ momentum, price, events, and con-call guidance). Still open: the remaining `rng.uniform(...)` ranges in `_generate_fake_quarterly_financials` for COGS%, opex%, D&A%, and leverage growth *bands themselves* are still hand-picked constants, not sector-median ratios derived from real data.
 - **Sprint C — Score calibration.** Distill real company financials into realistic quality-score *distributions* (currently `management_quality`/`growth_potential`/`fcf_quality` are seeded once and only move via events — never grounded in a real cross-sectional distribution).
 - **Sprint D — Factor-driven price engine.** Integrate the already-downloaded Fama-French (`MKT/SMB/HML/RMW/CMA/Mom`, 1926–2026) and AQR (BAB/QMJ) factor files into the OU process, so `β_m`/`β_s` and `F_m`/`F_s` are backed by real factor history/backtesting instead of a synthetic 4-phase Markov cycle.
 - **TimescaleDB hypertable for `price_history`** — schema gap noted since Phase 3; doesn't affect correctness of price movement, but affects query performance for anything downstream that reads long price histories (e.g. technical_momentum's moving average, chart rendering).
@@ -297,6 +335,7 @@ Cross-referenced against `done.md` and `docs/calibration-strategy.md`. Items pur
 - `engine/market.py`'s `company_volatility()` and `engine/liquidity.py`'s `daily_volume()` — both dead code paths, kept intentionally as tested, spec-referenced reference implementations, not accidental duplication.
 - **`k_drift` wired into the OU step as `pressure_scale` (2026-07-16/17)** — previously listed here as dead config alongside `k_flow`; now resolved, see §4.
 - **Factor-score event effects now decay (2026-07-17), reversing the earlier deliberate "always permanent, never decays" design** — see §6.3 for the full rationale. Superseded, not contradicted: the old design was intentional at the time, but the re-invoke-every-tick call pattern it was paired with made effects silently compound across ticks rather than stay at a single fixed step-change, which was the actual, previously-undetected bug.
+- **Cycle-phase lockstep correlation reduced, not eliminated, by design (2026-07-18).** Measured via a 500-tick Monte Carlo against the real `engine.tick`/`engine.cycle` functions with actual seeded betas/industries: same-direction price movement among the 153 companies during a single phase tick dropped from ~63.4%→59.3% (expansion) and ~62.7%→59.0% (contraction) after adding the jitter described in §4/§4.2/§6.3, while each phase's average `y`-bias (directional tilt) was preserved (expansion +0.000894→+0.000906, contraction −0.000657→−0.000642). The residual same-direction motion is mostly the existing idiosyncratic `σ·ε` term overlapping with a real macro trend, not further lockstep — pushing the correlation materially lower would require either allowing some companies negative betas (changes what the beta ranking means) or increasing idiosyncratic volatility further (distorts realistic per-company price behavior), so this calibration was chosen as the largest safe reduction rather than a target of zero correlation.
 
 ---
 

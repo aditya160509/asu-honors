@@ -1,5 +1,6 @@
 from db.models.auth import OtpCode, PasswordResetToken, UserSession
 from db.models.base import Base
+from db.models.concalls import ConCall
 from db.models.events import EventInstance, MarketEvent, NewsFeed, NewsTemplate
 from db.models.factor_scores import CompanyFactorScore, FinancialQualitySubscore, MoatSubscore
 from db.models.financials import BalanceSheet, CashFlowStatement, ConsensusEstimate, IncomeStatement
@@ -48,6 +49,7 @@ __all__ = [
     "EventInstance",
     "NewsTemplate",
     "NewsFeed",
+    "ConCall",
     "Timeline",
     "SimulationState",
     "User",

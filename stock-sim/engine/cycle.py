@@ -87,10 +87,19 @@ def generate_sector_shocks(
 
     F^s = cycle_sensitivity * market_factor_return + sector_idiosyncratic_noise
     """
+    # Idiosyncratic noise stddev of 0.005 (previously 0.002) so industries diverge
+    # more from the shared market_factor_return and from each other -- with 15
+    # industries all previously drawing from the same small-signal base with only
+    # a 0.002 noise floor, industries sharing similar cycle_sensitivity ended up
+    # producing near-identical F^s most ticks, compounding the lockstep-move
+    # problem across the 153 companies grouped into those industries. Kept modest
+    # (not e.g. 0.02) so a strong-phase tick's average F^s across industries still
+    # points the same direction as the phase (preserves aggregate directional bias).
+    SECTOR_NOISE_STD = 0.005
     shocks: dict[int, float] = {}
     for ind_id in industry_ids:
         sens = cycle_sensitivity_map.get(ind_id, 1.0)
         base = sens * market_factor_return
-        idiosyncratic = rng.gauss(0, 0.002)
+        idiosyncratic = rng.gauss(0, SECTOR_NOISE_STD)
         shocks[ind_id] = round(base + idiosyncratic, 6)
     return shocks

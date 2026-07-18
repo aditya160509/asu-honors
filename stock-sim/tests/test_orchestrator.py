@@ -6,7 +6,7 @@ These tests use SQLite in-memory to verify the orchestrator wiring end-to-end.
 import math
 import os
 import random
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 import pytest
@@ -20,7 +20,7 @@ from db.models import (
     IndustryPillarWeight, MoatSubscore, CompanyFactorScore,
     FinancialQualitySubscore, IncomeStatement, BalanceSheet, CashFlowStatement,
     ConsensusEstimate, Timeline, SimulationState, PriceHistory, EventInstance,
-    MarketEvent, NewsTemplate, NewsFeed, User, Portfolio, Holding,
+    MarketEvent, NewsTemplate, NewsFeed, User, Portfolio, Holding, ConCall,
 )
 from db.models.events import MarketEvent, NewsTemplate
 from db.models.timeseries import EconomicCycleState, PriceDriverScore
@@ -1604,3 +1604,75 @@ def test_run_tick_dead_locals_removed_still_delegates_to_run_ticks(session):
 
     with pytest.raises(ValueError, match="Timeline 999 not found"):
         run_tick(session, 999)
+
+
+# ── Con-calls ────────────────────────────────────────────────────────────
+
+
+def test_quarter_boundary_generates_concall(session):
+    """A quarter-boundary tick must generate exactly one ConCall per company,
+    for the same fiscal_period as the financials _refresh_fundamentals just
+    wrote, with a structured transcript (non-empty statements dict)."""
+    timeline_id = _seed_minimal(session)
+    _setup_fq_factor_defs(session)
+
+    sim = session.query(SimulationState).filter_by(timeline_id=timeline_id).first()
+    sim.tick_count = 63
+    sim.current_sim_date = date(2026, 4, 1)
+    session.commit()
+
+    result = run_tick(session, timeline_id)
+    session.commit()
+    assert result["status"] == "completed"
+
+    calls = session.query(ConCall).filter_by(company_id=1, fiscal_period="2026Q2").all()
+    assert len(calls) == 1
+    call = calls[0]
+    assert call.performance_bucket in ("beat", "inline", "miss")
+    assert call.tone in ("confident", "measured", "cautious", "defensive", "evasive")
+    assert -1.0 <= float(call.tone_score) <= 1.0
+    assert isinstance(call.statements, dict)
+    assert len(call.statements) > 0
+    # driver_deltas mirrors MarketEvent.effect_profile's shape for any future
+    # event-style consumer.
+    assert isinstance(call.driver_deltas, dict)
+
+
+def test_quarter_boundary_concall_is_idempotent_on_retry(session):
+    """Re-crossing the same quarter boundary (e.g. a retried Advance call) must
+    not attempt to insert a second ConCall row for the same
+    (company_id, fiscal_period) and hit uq_con_calls_company_period."""
+    timeline_id = _seed_minimal(session)
+    _setup_fq_factor_defs(session)
+
+    sim = session.query(SimulationState).filter_by(timeline_id=timeline_id).first()
+    sim.tick_count = 63
+    sim.current_sim_date = date(2026, 4, 1)
+    session.commit()
+
+    result = run_tick(session, timeline_id)
+    session.commit()
+    assert result["status"] == "completed"
+
+    # Rewind tick_count back onto the same boundary without touching sim_date,
+    # mimicking a retried Advance call re-crossing tick 63.
+    sim = session.query(SimulationState).filter_by(timeline_id=timeline_id).first()
+    sim.tick_count = 63
+    session.commit()
+
+    from engine.orchestrator import _load_tick_state, _refresh_fundamentals, _generate_concalls_for_quarter
+
+    state = _load_tick_state(session, timeline_id, date(2026, 4, 1))
+    _refresh_fundamentals(
+        session, timeline_id, state.companies, state.industries,
+        state.params, state.neutral_industry_pegs,
+        datetime.now(timezone.utc), state.rng, state.tick_count,
+        date(2026, 4, 1),
+    )
+    _generate_concalls_for_quarter(
+        session, state.companies, state.latest_cfs, date(2026, 4, 1), state.rng, state.tick_count,
+    )
+    session.commit()
+
+    calls = session.query(ConCall).filter_by(company_id=1, fiscal_period="2026Q2").all()
+    assert len(calls) == 1

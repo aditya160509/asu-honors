@@ -21,6 +21,7 @@ from db.models import (
     CashFlowStatement,
     Company,
     CompanyFactorScore,
+    ConCall,
     ConfigParameter,
     ConsensusEstimate,
     EconomicCycleState,
@@ -39,6 +40,7 @@ from db.models import (
     SimulationState,
     Timeline,
 )
+from engine.concalls import generate_concall
 from engine.cycle import advance_cycle_phase, compute_cycle_state, generate_sector_shocks
 from engine.drivers import (
     composite_price_pressure,
@@ -108,11 +110,22 @@ from engine.valuation import (
 TAX_RATE = 0.25
 TRADING_DAYS_PER_YEAR = 252
 QUARTER_LENGTH = 63
+# Hard bounds on quarter-over-quarter revenue growth in _generate_fake_quarterly_
+# financials, applied AFTER summing every signal (trend/management/FQ-trend/
+# price/events/guidance) so no combination of extreme inputs can produce a
+# pathological (e.g. runaway or deeply negative) revenue print.
+GROWTH_RATE_CLAMP_MIN = -0.40
+GROWTH_RATE_CLAMP_MAX = 0.60
 DRIVER_KEYS = frozenset({
     "value_opportunity", "earnings_surprise", "news_severity",
     "economic_outlook", "guidance", "technical_momentum",
     "institutional_buying",
 })
+# Per-company multiplicative dispersion applied to a shared EventInstance's
+# resolved_severity before it feeds news_severity/apply_effect_to_drivers (see
+# _jitter_event_severities) -- a market- or industry-scope event otherwise
+# lands with byte-identical severity on every company in scope.
+EVENT_SEVERITY_JITTER_STD = 0.25
 
 
 def run_tick(session: Session, timeline_id: int) -> dict:
@@ -180,6 +193,15 @@ def run_ticks(
                 session, timeline_id, companies, state.industries,
                 state.params, state.neutral_industry_pegs,
                 datetime.now(timezone.utc), state.rng, tick_count,
+                sim_date,
+            )
+            # Con-calls are generated from the financials/factor-scores that
+            # _refresh_fundamentals just wrote for this same fiscal_period --
+            # must run after it returns, not before, and every company gets
+            # one call per quarter boundary (same cadence as the financials
+            # themselves).
+            _generate_concalls_for_quarter(
+                session, companies, state.latest_cfs, sim_date, state.rng, tick_count,
             )
 
         # -- IV drift ---------------------------------------------------------
@@ -572,8 +594,22 @@ def _compute_drivers(
 
     y = np.log(max(prev_close, 0.01) / max(iv, 0.01))
     theta = float(state.params.get("theta_default", 0.05))
-    beta_m = float(company.beta_market)
-    beta_s = float(company.beta_sector)
+    # Per-tick multiplicative jitter on beta_market/beta_sector: the seeded betas
+    # (db/seeds/seed_companies.py) are fixed constants in a narrow 0.3-2.5 band and
+    # ALL positive, so every company feels the same shared f_m/f_s in the same
+    # direction each tick, differing only in magnitude -- this was the dominant
+    # cause of lockstep phase-wide price action (measured ~62-64% of the 153
+    # companies moving the same direction during a single expansion/contraction
+    # tick before this fix). BETA_JITTER_STD represents idiosyncratic, day-to-day
+    # variation in how sensitive a company "feels" to the macro/sector factor
+    # that tick (e.g. differing investor attention, liquidity, hedging flow) --
+    # deliberately not large enough to flip sign for most companies (that would
+    # defeat the beta ranking itself), just enough to decorrelate magnitude and
+    # occasionally flip sign for companies whose beta is already near the
+    # macro/sector noise floor.
+    BETA_JITTER_STD = 0.7
+    beta_m = float(company.beta_market) * (1.0 + state.rng.gauss(0, BETA_JITTER_STD))
+    beta_s = float(company.beta_sector) * (1.0 + state.rng.gauss(0, BETA_JITTER_STD))
     epsilon = state.rng.gauss(0, 1)
     s_factor = state.sector_shocks.get(company.industry_id, 0.0)
 
@@ -597,7 +633,20 @@ def _compute_drivers(
     trailing_closes = state.recent_closes.get(company.id, [])
     moving_avg = sum(trailing_closes) / len(trailing_closes) if trailing_closes else prev_close
     tm = technical_momentum(prev_close, moving_avg, float(state.params.get("k_m", 0.5)))
-    eo = compute_economic_outlook(state.cycle_state["market_sentiment"])
+    # economic_outlook feeds every company the SAME market_sentiment value each
+    # tick (weight 0.10) -- at PHASE_SENTIMENT's expansion/contraction magnitude
+    # (+-0.3 to +-0.5) this is actually the single largest shared macro term
+    # feeding composite_price_pressure, larger than beta_m*f_m itself, so it was
+    # a major contributor to lockstep phase-wide moves. ECON_OUTLOOK_JITTER_STD
+    # adds small per-company idiosyncratic noise (representing each company's
+    # own analysts/investors reading the macro backdrop slightly differently)
+    # so 153 companies don't all receive the identical outlook signal, while the
+    # jitter is small enough that the population's mean outlook still tracks the
+    # phase's true sentiment (preserving the phase's aggregate directional bias).
+    ECON_OUTLOOK_JITTER_STD = 0.3
+    eo = compute_economic_outlook(
+        state.cycle_state["market_sentiment"] + state.rng.gauss(0, ECON_OUTLOOK_JITTER_STD)
+    )
 
     latest_inc = state.latest_inc.get(company.id)
     latest_ce = state.latest_ce.get(company.id)
@@ -633,6 +682,17 @@ def _compute_drivers(
         company.id, ind.id, state.epoch_start,
     )
     if active_events:
+        # market-/industry-scope events resolve ONE shared severity per
+        # EventInstance (news_manager.py) and _get_active_events_for_company
+        # hands that identical dict to every company in scope (all 153 for a
+        # market-scope event) -- without dispersion here, a single market-wide
+        # event pushes every affected company's news_severity driver by the
+        # exact same amount, another major source of lockstep price action.
+        # EVENT_SEVERITY_JITTER_STD adds per-company dispersion (representing
+        # how the same news lands differently depending on each company's
+        # specific exposure) while its 0 mean keeps the event's average
+        # severity across the affected population unchanged.
+        active_events = _jitter_event_severities(active_events, state.rng, EVENT_SEVERITY_JITTER_STD)
         ns = news_severity(active_events, tick_count, float(state.params.get("news_decay_rate", 0.1)))
 
     driver_values = {
@@ -979,6 +1039,7 @@ def _refresh_fundamentals(
     now: datetime,
     rng: random.Random,
     tick_count: int,
+    sim_date: date,
 ) -> None:
     """Section 6.F -- generate new financial statements and recompute FQ/IV at quarter boundary."""
     pw_rows = session.query(IndustryPillarWeight).order_by(IndustryPillarWeight.id).all()
@@ -1013,13 +1074,107 @@ def _refresh_fundamentals(
     for cfs_row in session.query(CompanyFactorScore).order_by(CompanyFactorScore.id.asc()).all():
         latest_cfs_by_company[cfs_row.company_id] = cfs_row
 
+    # Full financial_quality *history* (not just the latest row) per company,
+    # ordered oldest -> newest by fiscal_period, so the generator below can
+    # detect an improving/declining FQ trend rather than only seeing the
+    # single most-recent value. Kept separate from latest_cfs_by_company
+    # (which intentionally only tracks the newest row per company) to avoid
+    # changing that dict's existing semantics.
+    fq_history_by_company: dict[int, list[float]] = {}
+    for cfs_row in session.query(CompanyFactorScore).order_by(
+        CompanyFactorScore.company_id.asc(), CompanyFactorScore.fiscal_period.asc()
+    ).all():
+        fq_history_by_company.setdefault(cfs_row.company_id, []).append(float(cfs_row.financial_quality))
+
     all_incomes_by_company: dict[int, list[IncomeStatement]] = {}
     for inc_row in session.query(IncomeStatement).order_by(IncomeStatement.fiscal_period.asc()).all():
         all_incomes_by_company.setdefault(inc_row.company_id, []).append(inc_row)
 
+    # Quarter-over-quarter price return per company, used only as a small
+    # stabilizing nudge (see _generate_fake_quarterly_financials) -- price is
+    # meant to be an OUTPUT of financials, not a driver, so this is
+    # deliberately queried once here (not re-derived per-tick) and capped
+    # tightly downstream. Looks up the close nearest the start of the
+    # just-completed quarter (QUARTER_LENGTH trading days back) and the most
+    # recent close before/at sim_date.
+    quarter_start_date = sim_date - timedelta(days=QUARTER_LENGTH * 2)
+    price_return_by_company: dict[int, float] = {}
+    company_ids_for_price = [c.id for c in companies]
+    if company_ids_for_price:
+        recent_prices = session.query(PriceHistory).filter(
+            PriceHistory.timeline_id == timeline_id,
+            PriceHistory.company_id.in_(company_ids_for_price),
+            PriceHistory.sim_date <= sim_date,
+            PriceHistory.sim_date >= quarter_start_date,
+        ).order_by(PriceHistory.company_id.asc(), PriceHistory.sim_date.asc()).all()
+        prices_by_company: dict[int, list[PriceHistory]] = {}
+        for ph in recent_prices:
+            prices_by_company.setdefault(ph.company_id, []).append(ph)
+        for cid, rows in prices_by_company.items():
+            if len(rows) >= 2:
+                start_close = float(rows[0].close)
+                end_close = float(rows[-1].close)
+                if start_close > 0:
+                    price_return_by_company[cid] = (end_close - start_close) / start_close
+
+    # Aggregate company- and industry-scoped event effect deltas that fired
+    # during the just-completed quarter (approximated as the last
+    # QUARTER_LENGTH calendar days, since ticks map ~1:1 to business days and
+    # EventInstance.sim_date is a calendar date) so a company's reported
+    # quarter reflects "what actually happened" news-wise, not just a random
+    # walk. Only the revenue-relevant and margin-relevant effect_profile keys
+    # are summed; unrelated keys (e.g. pure price/driver-only effects with no
+    # analogous factor-score key) are ignored here since they have no
+    # sensible financial-statement mapping.
+    quarter_events_start = sim_date - timedelta(days=QUARTER_LENGTH * 2)
+    event_rows: list[EventInstance] = []
+    if company_ids_for_price:
+        event_rows = session.query(EventInstance).filter(
+            EventInstance.timeline_id == timeline_id,
+            EventInstance.sim_date >= quarter_events_start,
+            EventInstance.sim_date <= sim_date,
+            EventInstance.scope_type.in_(["company", "industry"]),
+        ).all()
+    event_sentiment_by_company: dict[int, float] = {}
+    event_sentiment_by_industry: dict[int, float] = {}
+    for ei in event_rows:
+        # applied_effects is the already severity/decay-scaled delta dict
+        # recorded at fire time (see engine.events.apply_effect_to_factor_scores
+        # and _apply_event_factor_effects below) -- summing its values gives a
+        # rough "net positive/negative impact" scalar per event without
+        # needing to re-derive severity*decay here.
+        net = sum(float(v) for v in (ei.applied_effects or {}).values())
+        if ei.scope_type == "company":
+            event_sentiment_by_company[ei.scope_ref] = event_sentiment_by_company.get(ei.scope_ref, 0.0) + net
+        elif ei.scope_type == "industry":
+            event_sentiment_by_industry[ei.scope_ref] = event_sentiment_by_industry.get(ei.scope_ref, 0.0) + net
+
+    # Prior-quarter con-call guidance signal. If the ConCall model (built by a
+    # parallel workstream) isn't importable/queryable yet in this working
+    # tree, this degrades to a neutral 0.0 delta for every company rather than
+    # blocking fundamentals generation -- see _load_concall_guidance_signal.
+    guidance_signal_by_company: dict[int, float] = _load_concall_guidance_signal(
+        session, [c.id for c in companies], latest_period,
+    )
+
     company_rows = []
     for company in companies:
-        raw = _generate_fake_quarterly_financials(session, company, latest_period, rng)
+        prior_cfs_for_mgmt = latest_cfs_by_company.get(company.id)
+        if prior_cfs_for_mgmt is not None and prior_cfs_for_mgmt.management_quality_base is not None:
+            mgmt_quality_signal = float(prior_cfs_for_mgmt.management_quality_base)
+        elif prior_cfs_for_mgmt is not None:
+            mgmt_quality_signal = float(prior_cfs_for_mgmt.management_quality)
+        else:
+            mgmt_quality_signal = 50.0
+        raw = _generate_fake_quarterly_financials(
+            session, company, latest_period, rng,
+            management_quality=mgmt_quality_signal,
+            fq_history=fq_history_by_company.get(company.id, []),
+            price_return_qtr=price_return_by_company.get(company.id, 0.0),
+            event_sentiment=event_sentiment_by_company.get(company.id, 0.0)
+                + event_sentiment_by_industry.get(company.industry_id, 0.0),
+            guidance_signal=guidance_signal_by_company.get(company.id, 0.0),
+        )
         company_rows.append(dict(company=company, raw=raw, fq_subscores={}, fq_percentiles={}))
 
     fq_percentiles: dict[str, np.ndarray] = {}
@@ -1119,13 +1274,214 @@ def _refresh_fundamentals(
                 ))
 
 
+def _clamp_band(value: float, lo: float, hi: float) -> float:
+    """Clamp a margin-band draw so a large margin_bias nudge can't push a
+    uniform(0.x, 0.y) draw outside a sane range (e.g. negative COGS%)."""
+    return max(lo, min(hi, value))
+
+
+# Trailing-quarter weights for trend_drift below: most recent quarter counted
+# heaviest, decaying for older quarters, matching the "weighted average of
+# last 3-4 quarters" spec. Fewer available quarters just re-normalizes over
+# whatever weights are available (see _weighted_trailing_growth).
+_TREND_WEIGHTS = (0.40, 0.28, 0.20, 0.12)
+
+
+def _weighted_trailing_growth(revenue_history: list[float]) -> float:
+    """Recency-weighted average QoQ growth rate over the last up to 4 quarters
+    of `revenue_history` (oldest -> newest). Returns 0.0 if fewer than 2
+    quarters of history exist (nothing to compute a growth rate from)."""
+    if len(revenue_history) < 2:
+        return 0.0
+    # QoQ growth rates for every consecutive pair, most recent last.
+    qoq_rates = []
+    for prev, curr in zip(revenue_history[:-1], revenue_history[1:]):
+        if prev > 0:
+            qoq_rates.append((curr - prev) / prev)
+    if not qoq_rates:
+        return 0.0
+    trailing = qoq_rates[-len(_TREND_WEIGHTS):]
+    trailing_weights = _TREND_WEIGHTS[: len(trailing)]
+    # trailing is oldest->newest but weights are newest-first, so pair from the end.
+    weighted_sum = sum(rate * w for rate, w in zip(reversed(trailing), trailing_weights))
+    weight_total = sum(trailing_weights)
+    return weighted_sum / weight_total if weight_total > 0 else 0.0
+
+
+def _financial_quality_trend_bias(fq_history: list[float]) -> float:
+    """Momentum/mean-reversion blend on the last up to 4 financial_quality
+    readings: a sustained improving trend biases growth slightly positive, a
+    sustained decline biases it slightly negative. Deliberately small and
+    self-limiting (uses the average slope over the window, not just the last
+    delta) so it can't compound into a runaway spiral across many quarters --
+    each quarter's bias is recomputed fresh from the trailing window, not
+    accumulated from the previous quarter's bias."""
+    recent = fq_history[-4:]
+    if len(recent) < 2:
+        return 0.0
+    deltas = [b - a for a, b in zip(recent[:-1], recent[1:])]
+    avg_delta = sum(deltas) / len(deltas)
+    # financial_quality is on a 0-100 scale; a +/-10 point average swing per
+    # quarter is already a large move, so normalize against that and cap the
+    # resulting growth-rate bias at +/-1.5% -- momentum should nudge, not
+    # dominate, the growth number.
+    normalized = max(-1.0, min(1.0, avg_delta / 10.0))
+    return normalized * 0.015
+
+
+def _management_quality_bias_and_noise(management_quality: float) -> tuple[float, float]:
+    """Map management_quality (0-100) to (mean growth-rate bias, noise stddev).
+
+    Well-run companies (high management_quality) should both perform better
+    on average AND more consistently -- a 90-quality company beating guidance
+    by a wide, random margin every quarter is exactly the kind of noise this
+    redesign is meant to reduce. Centered at 50 (neutral, matches the
+    seed-time neutral default) so an average-management company's behavior is
+    close to the old flat rng.gauss(0.01, 0.03) baseline.
+    """
+    centered = (management_quality - 50.0) / 50.0  # -1.0 .. +1.0
+    mean_bias = centered * 0.02  # up to +/-2% mean growth shift
+    # Noise stddev shrinks from 4.5% (quality=0, chaotic) to 1.5% (quality=100,
+    # highly consistent), linearly in management_quality.
+    noise_scale = 0.045 - (management_quality / 100.0) * 0.03
+    return mean_bias, max(0.01, noise_scale)
+
+
+def _compute_quarterly_growth_and_margin_bias(
+    revenue_history: list[float],
+    management_quality: float,
+    fq_history: list[float],
+    price_return_qtr: float,
+    event_sentiment: float,
+    guidance_signal: float,
+    rng: random.Random,
+) -> tuple[float, float]:
+    """Combine every signal into (growth_rate, margin_bias) for one company's
+    new quarter. See _generate_fake_quarterly_financials' docstring for what
+    each term represents; this is split out as its own function so the
+    weighting/blending formula is unit-testable in isolation from the DB/ORM
+    side of financial-statement generation.
+    """
+    trend_drift = _weighted_trailing_growth(revenue_history)
+    mgmt_mean_bias, mgmt_noise_scale = _management_quality_bias_and_noise(management_quality)
+    fq_bias = _financial_quality_trend_bias(fq_history)
+
+    # Price is meant to be an OUTPUT of financials, not an input driver -- this
+    # is a deliberately tiny, hard-capped mean-reversion nudge representing
+    # "the market may have overreacted," not a feedback channel. A -50%
+    # quarterly price return caps out at the same -1.0% nudge as a -90% return
+    # would, so it can never dominate the other signals.
+    price_reversion = max(-0.01, min(0.01, -price_return_qtr * 0.02))
+
+    # event_sentiment is a sum of already severity/decay-scaled factor-score
+    # deltas (roughly -100..+100 scale per event, typically much smaller after
+    # decay); divide down to a growth-rate-sized contribution and cap it so a
+    # single quarter packed with extreme events still can't single-handedly
+    # blow through the outer GROWTH_RATE_CLAMP_MIN/MAX bounds.
+    event_bias = max(-0.05, min(0.05, event_sentiment / 400.0))
+
+    # guidance_signal is already normalized to [-1, 1] (neutral 0.0 when the
+    # con-call model isn't available yet -- see _load_concall_guidance_signal).
+    guidance_bias = guidance_signal * 0.015
+
+    noise = rng.gauss(0.0, mgmt_noise_scale)
+
+    growth_rate = (
+        trend_drift + mgmt_mean_bias + fq_bias + price_reversion + event_bias + guidance_bias + noise
+    )
+    growth_rate = max(GROWTH_RATE_CLAMP_MIN, min(GROWTH_RATE_CLAMP_MAX, growth_rate))
+
+    # margin_bias reuses the management/FQ-trend/event signals (not price or
+    # guidance, which are revenue-specific) at a smaller scale, since a
+    # well-run company with improving fundamentals and positive news flow
+    # should also show better cost discipline, not just top-line growth.
+    margin_bias = max(-0.05, min(0.05, mgmt_mean_bias * 0.5 + fq_bias * 0.5 + event_bias * 0.3))
+
+    return growth_rate, margin_bias
+
+
+def _load_concall_guidance_signal(
+    session: Session, company_ids: list[int], current_period: str,
+) -> dict[int, float]:
+    """Prior-quarter con-call guidance/tone signal, one scalar per company in
+    roughly [-1, 1] (negative = cautious guidance, positive = bullish).
+
+    Queries the ConCall model built by a parallel workstream. Import is
+    lazy and every failure mode (model not present, table not migrated yet,
+    schema still in flux) degrades to an all-neutral (0.0) dict rather than
+    hard-failing -- guidance is a minor input signal and must never block
+    fundamentals generation.
+    """
+    neutral = {cid: 0.0 for cid in company_ids}
+    if not company_ids:
+        return neutral
+    try:
+        from db.models import ConCall  # type: ignore[attr-defined]
+    except ImportError:
+        return neutral
+
+    try:
+        rows = session.query(ConCall).filter(
+            ConCall.company_id.in_(company_ids),
+            ConCall.fiscal_period < current_period,
+        ).order_by(ConCall.company_id.asc(), ConCall.fiscal_period.desc()).all()
+    except Exception:
+        return neutral
+
+    seen: set[int] = set()
+    result = dict(neutral)
+    for row in rows:
+        if row.company_id in seen:
+            continue  # already took the most recent row for this company
+        seen.add(row.company_id)
+        tone = getattr(row, "tone_score", None)
+        if tone is None:
+            tone = getattr(row, "guidance_revenue_growth", None)
+        if tone is not None:
+            result[row.company_id] = max(-1.0, min(1.0, float(tone)))
+    return result
+
+
 def _generate_fake_quarterly_financials(
     session: Session,
     company: Company,
     fiscal_period: str,
     rng: random.Random,
+    management_quality: float = 50.0,
+    fq_history: Optional[list[float]] = None,
+    price_return_qtr: float = 0.0,
+    event_sentiment: float = 0.0,
+    guidance_signal: float = 0.0,
 ) -> dict[str, float]:
-    """Generate plausible next-quarter financials from the most recent quarter."""
+    """Generate plausible next-quarter financials from the company's trailing
+    history and quality/context signals.
+
+    Revenue growth for the new quarter is built as a sum of independent,
+    individually-small signals rather than a flat random walk:
+
+      1. trend_drift    -- weighted average of the last 3-4 quarters' QoQ
+                            growth rates (recency-weighted), replacing the old
+                            "just look at last quarter" base.
+      2. mgmt_bias/      -- higher management_quality shifts the mean growth
+         mgmt_noise_scale   up and shrinks the noise stddev (consistent
+                            execution); lower management_quality does the
+                            opposite (volatile, weaker outcomes).
+      3. fq_trend_bias   -- momentum/mean-reversion blend on the
+                            financial_quality trend across up to the last 4
+                            quarters.
+      4. price_reversion -- tiny mean-reverting nudge off the quarter's price
+                            return, capped hard so it can't become a feedback
+                            loop.
+      5. event_bias      -- aggregate company+industry event effect deltas
+                            that fired during the quarter.
+      6. guidance_bias   -- prior quarter's con-call guidance/tone signal
+                            (neutral 0.0 if the con-call table is unavailable).
+
+    All six are summed into a single growth-rate delta and clamped to
+    [-0.40, 0.60] QoQ (GROWTH_RATE_CLAMP_MIN/MAX) so no combination of
+    extreme signals can produce a pathological (negative or runaway) revenue
+    figure. See _compute_quarterly_growth_and_margin_bias for the formula.
+    """
     # Check every table this function writes to, not just IncomeStatement --
     # gating solely on IncomeStatement let a retried/re-crossed advance for
     # this (company_id, fiscal_period) fall through to the insert path below
@@ -1176,14 +1532,31 @@ def _generate_fake_quarterly_financials(
     ).order_by(BalanceSheet.fiscal_period.desc()).first()
 
     if latest_inc:
-        rev = float(latest_inc.revenue) * (1 + rng.gauss(0.01, 0.03))
+        growth_rate, margin_bias = _compute_quarterly_growth_and_margin_bias(
+            revenue_history=revenue_history,
+            management_quality=management_quality,
+            fq_history=fq_history or [],
+            price_return_qtr=price_return_qtr,
+            event_sentiment=event_sentiment,
+            guidance_signal=guidance_signal,
+            rng=rng,
+        )
+        rev = float(latest_inc.revenue) * (1 + growth_rate)
     else:
         rev = rng.uniform(1e8, 1e10)
+        margin_bias = 0.0
     rev = max(rev, 1e6)
 
-    cogs = rev * rng.uniform(0.4, 0.7)
+    # Margin bands are nudged by the same management_quality/financial_quality-
+    # trend/event signals as revenue (margin_bias, computed alongside growth_rate
+    # above) so a quarter with strong management execution and positive news
+    # flow shows up as better cost control too, not just top-line growth.
+    # margin_bias is intentionally small and shifts the *center* of each
+    # uniform band rather than replacing the randomness outright, so outcomes
+    # stay noisy but tilted.
+    cogs = rev * _clamp_band(rng.uniform(0.4, 0.7) - margin_bias, 0.25, 0.85)
     gp = rev - cogs
-    op_ex = rev * rng.uniform(0.15, 0.35)
+    op_ex = rev * _clamp_band(rng.uniform(0.15, 0.35) - margin_bias, 0.08, 0.5)
     ebitda = gp - op_ex
     da = rev * rng.uniform(0.02, 0.06)
     ebit = ebitda - da
@@ -1351,6 +1724,87 @@ def _compute_fiscal_period(tick_count: int) -> str:
     return f"{year}Q{quarter}"
 
 
+def _generate_concalls_for_quarter(
+    session: Session,
+    companies: list[Company],
+    stale_latest_cfs: dict[int, CompanyFactorScore],
+    sim_date: date,
+    rng: random.Random,
+    tick_count: int,
+) -> None:
+    """Section 6.O -- generate one ConCall per company for the quarter that
+    _refresh_fundamentals just closed out.
+
+    Must run after _refresh_fundamentals (it reads that quarter's
+    IncomeStatement/ConsensusEstimate/CompanyFactorScore rows), and is
+    idempotency-guarded the same way _generate_fake_quarterly_financials is,
+    so a retried/re-crossed Advance call over the same boundary doesn't hit
+    uq_con_calls_company_period.
+
+    `stale_latest_cfs` is state.latest_cfs from _load_tick_state, which was
+    queried BEFORE _refresh_fundamentals ran this tick and is therefore
+    pre-quarter-refresh for the companies that just got a new
+    CompanyFactorScore row -- used only as a management_quality/
+    growth_potential fallback for companies _refresh_fundamentals may have
+    skipped (defensive; in the normal path every company gets a fresh row).
+    """
+    latest_period = _compute_fiscal_period(tick_count)
+
+    fresh_cfs_by_company: dict[int, CompanyFactorScore] = {
+        row.company_id: row
+        for row in session.query(CompanyFactorScore).filter_by(fiscal_period=latest_period).all()
+    }
+
+    existing_calls = {
+        row.company_id
+        for row in session.query(ConCall.company_id).filter_by(fiscal_period=latest_period).all()
+    }
+
+    for company in companies:
+        if company.id in existing_calls:
+            continue  # already generated for this (company, fiscal_period) -- retried advance
+
+        income_stmt = session.query(IncomeStatement).filter_by(
+            company_id=company.id, fiscal_period=latest_period
+        ).first()
+        if income_stmt is None:
+            continue  # this company's financials weren't refreshed this boundary; nothing to report on
+
+        prior_income_stmt = session.query(IncomeStatement).filter(
+            IncomeStatement.company_id == company.id,
+            IncomeStatement.fiscal_period < latest_period,
+        ).order_by(IncomeStatement.fiscal_period.desc()).first()
+
+        consensus = session.query(ConsensusEstimate).filter_by(
+            company_id=company.id, fiscal_period=latest_period
+        ).first()
+        balance_sheet = session.query(BalanceSheet).filter_by(
+            company_id=company.id, fiscal_period=latest_period
+        ).first()
+        cash_flow = session.query(CashFlowStatement).filter_by(
+            company_id=company.id, fiscal_period=latest_period
+        ).first()
+
+        cfs = fresh_cfs_by_company.get(company.id) or stale_latest_cfs.get(company.id)
+        management_quality = float(cfs.management_quality) if cfs else 50.0
+        growth_potential = float(cfs.growth_potential) if cfs else 50.0
+
+        concall = generate_concall(
+            company=company,
+            income_stmt=income_stmt,
+            prior_income_stmt=prior_income_stmt,
+            consensus=consensus,
+            management_quality=management_quality,
+            growth_potential=growth_potential,
+            fiscal_period=latest_period,
+            call_date=sim_date,
+            rng=rng,
+            balance_sheet=balance_sheet,
+            cash_flow=cash_flow,
+        )
+        session.add(concall)
+
+
 def _safe_finite(v: float) -> float:
     if v == float("inf"):
         return 1e9
@@ -1388,6 +1842,31 @@ def _get_active_events_for_company(
             "decay_rate": float(event.decay_rate),
         })
     return result
+
+
+def _jitter_event_severities(
+    active_events: list[dict],
+    rng: random.Random,
+    jitter_std: float,
+) -> list[dict]:
+    """Apply small per-company multiplicative dispersion to each active event's
+    severity, called once per company per tick from _compute_drivers.
+
+    A single MarketEvent instance's resolved_severity (news_manager.py) is
+    drawn ONCE per firing and then handed identically to every company in its
+    scope by _get_active_events_for_company -- for a market-scope event that
+    is all 153 companies, for an industry-scope event every company in that
+    industry. Without dispersion here, one event moves every affected
+    company's news_severity/guidance/etc. drivers by the exact same delta,
+    which was a major contributor to lockstep phase-wide price moves.
+    Multiplying by (1 + gauss(0, jitter_std)) has zero-mean noise, so the
+    event's average severity across the affected population is unchanged --
+    only which companies feel it slightly more or less each tick.
+    """
+    return [
+        {**event_data, "severity": event_data.get("severity", 0.0) * (1.0 + rng.gauss(0, jitter_std))}
+        for event_data in active_events
+    ]
 
 
 def _mark_to_market(

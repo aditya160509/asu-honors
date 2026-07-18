@@ -365,6 +365,22 @@ export interface NewsItem {
 }
 
 // ---------------------------------------------------------------------------
+// Con-Calls
+// ---------------------------------------------------------------------------
+
+export interface ConCallItem {
+  id: number;
+  company_id: number;
+  fiscal_period: string;
+  call_date: string;
+  performance_bucket: "beat" | "inline" | "miss";
+  tone: "confident" | "measured" | "cautious" | "defensive" | "evasive";
+  tone_score: number;
+  guidance_revenue_growth: number;
+  statements: Record<string, string>;
+}
+
+// ---------------------------------------------------------------------------
 // Simulation
 // ---------------------------------------------------------------------------
 

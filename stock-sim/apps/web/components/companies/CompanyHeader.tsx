@@ -93,6 +93,10 @@ export function CompanyHeader({ company, dayChangePct, history }: CompanyHeaderP
         </div>
       </div>
 
+      {company.description && (
+        <p className="max-w-3xl text-sm text-mer-ink-secondary">{company.description}</p>
+      )}
+
       <div className="h-px w-full bg-gradient-to-r from-transparent via-mer-accent-500 to-transparent opacity-70" />
     </div>
   );

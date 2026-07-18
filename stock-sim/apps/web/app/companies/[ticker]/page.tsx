@@ -117,7 +117,7 @@ export default function CompanyDetailPage() {
               )}
             </DashboardPanel>
 
-            <FinancialTabs financials={financials.data} loading={financials.isLoading} />
+            <FinancialTabs ticker={ticker} financials={financials.data} loading={financials.isLoading} />
 
             <PeerCompaniesSection ticker={ticker} industryName={company.data.industry_name} />
 
