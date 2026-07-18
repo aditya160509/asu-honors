@@ -38,6 +38,16 @@ export function formatLarge(value: number | string | null | undefined): string {
   return formatPrice(num);
 }
 
+/** Financial statement values — always $ millions, 2 decimal places. */
+export function formatMillions(value: number | string | null | undefined): string {
+  if (value == null) return "N/A";
+  const num = Number(value);
+  if (Number.isNaN(num)) return "N/A";
+  const sign = num < 0 ? "-" : "";
+  const millions = Math.abs(num) / 1e6;
+  return `${sign}$${millions.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}M`;
+}
+
 /** Compact dates in tables — YYYY-MM-DD. */
 export function formatDate(ts: number | string | null | undefined): string {
   if (ts == null) return "N/A";
