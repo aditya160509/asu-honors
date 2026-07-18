@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 # Path setup handled by run_all.py entry point
 
 from db.models import Company, CompanyFactorScore, MoatSubscore
+from db.seeds.company_profiles import COMPANY_USPS, derive_profile
 
 
 COMPANIES = [
@@ -242,6 +243,9 @@ def seed(session: Session) -> None:
     for idx, row in enumerate(COMPANIES, start=1):
         industry_id, name, ticker, shares, float_pct, beta_m, beta_s = row
 
+        profile = derive_profile(ticker, idx, industry_id, shares)
+        usp = COMPANY_USPS.get(ticker)
+
         existing = session.query(Company).filter_by(ticker=ticker).first()
         if existing is None:
             company = Company(
@@ -253,12 +257,22 @@ def seed(session: Session) -> None:
                 free_float_pct=float_pct,
                 beta_market=beta_m,
                 beta_sector=beta_s,
+                usp=usp,
+                employee_count=profile["employee_count"],
+                founded_year=profile["founded_year"],
+                headquarters=profile["headquarters"],
+                ceo=profile["ceo"],
             )
             session.add(company)
             session.flush()
             company_id = company.id
         else:
             company_id = existing.id
+            existing.usp = usp
+            existing.employee_count = profile["employee_count"]
+            existing.founded_year = profile["founded_year"]
+            existing.headquarters = profile["headquarters"]
+            existing.ceo = profile["ceo"]
 
         rng = random.Random(company_id)
 
