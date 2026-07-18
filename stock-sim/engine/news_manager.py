@@ -19,6 +19,7 @@ def select_and_fire_events(
     company_ids: list[int],
     industry_ids: list[int],
     company_industry_map: Optional[dict[int, int]] = None,
+    is_quarter_boundary: bool = False,
 ) -> list[MarketEvent]:
     """Section 6.N — probabilistically fire events based on their probability_weight.
 
@@ -26,6 +27,10 @@ def select_and_fire_events(
     event's scope matches a target (company/industry/market), creates an EventInstance.
     Market-level events always fire if selected (scope_ref = 0).
     Industry-level events affect a random company in that industry.
+
+    Earnings-category events are gated to quarter boundaries — they only fire
+    when is_quarter_boundary is True, preventing earnings news from appearing
+    on random days between quarterly reports.
     """
     market_events = session.query(MarketEvent).order_by(MarketEvent.id).all()
 
@@ -33,6 +38,9 @@ def select_and_fire_events(
     selected_events: list[MarketEvent] = []
 
     for me in market_events:
+        # Earnings events only fire at quarter boundaries
+        if me.category == "earnings" and not is_quarter_boundary:
+            continue
         roll = rng.random()
         if roll >= float(me.probability_weight):
             continue
@@ -150,7 +158,22 @@ def generate_news(
     if not templates:
         return None
 
-    template = rng.choice(templates)
+    # For earnings events, select beat vs miss template based on actual EPS
+    # vs consensus EPS instead of random choice.
+    if event.category == "earnings" and extra_replacements:
+        eps_str = extra_replacements.get("{eps}", "")
+        consensus_str = extra_replacements.get("{consensus}", "")
+        if eps_str and consensus_str:
+            try:
+                eps_val = float(eps_str.replace("$", ""))
+                consensus_val = float(consensus_str.replace("$", ""))
+                beat = eps_val >= consensus_val
+                templates = [t for t in templates if t.sentiment == ("positive" if beat else "negative")]
+            except (ValueError, AttributeError):
+                pass
+    template = rng.choice(templates) if templates else None
+    if template is None:
+        return None
     severity = float(event_instance.resolved_severity)
 
     # MarketEvent.sentiment is the correctly-authored positive/negative/neutral
