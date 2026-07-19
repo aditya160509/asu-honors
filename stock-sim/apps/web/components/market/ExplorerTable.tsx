@@ -329,10 +329,13 @@ export function ExplorerTable({
 }: ExplorerTableProps) {
   const rowHeight = DEFAULT_ROW_HEIGHT[density];
   const EXPANDED_HEIGHT = 120;
+  const PAGE_SIZE = 50;
+
   const containerRef = React.useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = React.useState(0);
   const [scrolledX, setScrolledX] = React.useState(false);
   const [containerHeight, setContainerHeight] = React.useState(600);
+  const [currentPage, setCurrentPage] = React.useState(1);
   const [focusedIndex, setFocusedIndex] = React.useState(0);
   const [expandedTicker, setExpandedTicker] = React.useState<string | null>(null);
   const [columnWidths, setColumnWidths] = React.useState<Record<string, number>>(() => {
@@ -377,9 +380,30 @@ export function ExplorerTable({
     [columns, columnWidths]
   );
 
+  // Reset to page 1 if the overall rows length changes (e.g. filters change)
   React.useEffect(() => {
-    setFocusedIndex((i) => Math.min(i, Math.max(rows.length - 1, 0)));
+    setCurrentPage(1);
+    setFocusedIndex(0);
   }, [rows.length]);
+
+  const totalPages = Math.ceil(rows.length / PAGE_SIZE);
+
+  const paginatedRows = React.useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE;
+    return rows.slice(start, start + PAGE_SIZE);
+  }, [rows, currentPage]);
+
+  const handlePageChange = (newPage: number) => {
+    setCurrentPage(newPage);
+    setFocusedIndex(0);
+    if (containerRef.current) {
+      containerRef.current.scrollTop = 0;
+    }
+  };
+
+  React.useEffect(() => {
+    setFocusedIndex((i) => Math.min(i, Math.max(paginatedRows.length - 1, 0)));
+  }, [paginatedRows.length]);
 
   React.useEffect(() => {
     const el = containerRef.current;
@@ -397,7 +421,7 @@ export function ExplorerTable({
     setScrolledX(e.currentTarget.scrollLeft > 0);
   }
 
-  const expandedIdx = expandedTicker ? rows.findIndex((r) => r.ticker === expandedTicker) : -1;
+  const expandedIdx = expandedTicker ? paginatedRows.findIndex((r) => r.ticker === expandedTicker) : -1;
 
   function getRowTop(idx: number): number {
     let top = idx * rowHeight;
@@ -407,20 +431,11 @@ export function ExplorerTable({
     return top;
   }
 
-  const totalRows = rows.length;
+  const totalRows = paginatedRows.length;
   const overscan = 8;
   const visibleStart = Math.max(0, Math.floor(scrollTop / rowHeight) - overscan);
   const visibleCount = Math.ceil(containerHeight / rowHeight) + overscan * 2;
   const visibleEnd = Math.min(totalRows, visibleStart + visibleCount);
-
-  let topPadding = visibleStart * rowHeight;
-  if (expandedIdx >= 0 && expandedIdx < visibleStart) {
-    topPadding += EXPANDED_HEIGHT;
-  }
-  let bottomPadding = (totalRows - visibleEnd) * rowHeight;
-  if (expandedIdx >= 0 && expandedIdx >= visibleEnd) {
-    bottomPadding += EXPANDED_HEIGHT;
-  }
 
   function scrollToIndex(index: number) {
     const el = containerRef.current;
@@ -453,19 +468,19 @@ export function ExplorerTable({
       });
     } else if (e.key === "Enter") {
       e.preventDefault();
-      const row = rows[focusedIndex];
+      const row = paginatedRows[focusedIndex];
       if (row) onActivateRow(row.ticker);
     } else if (e.key === " ") {
       e.preventDefault();
-      const row = rows[focusedIndex];
+      const row = paginatedRows[focusedIndex];
       if (row) onToggleSelect(row.ticker);
     } else if (e.key.toLowerCase() === "w") {
       e.preventDefault();
-      const row = rows[focusedIndex];
+      const row = paginatedRows[focusedIndex];
       if (row) onToggleWatch(row.ticker);
     } else if (e.key.toLowerCase() === "y") {
       e.preventDefault();
-      const row = rows[focusedIndex];
+      const row = paginatedRows[focusedIndex];
       if (row) {
         const line = [row.ticker, row.name, row.industry_name, row.current_price, row.day_change_pct, row.ivGapPct, row.market_cap]
           .map((v) => (v == null ? "" : String(v)))
@@ -474,8 +489,18 @@ export function ExplorerTable({
       }
     } else if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
       e.preventDefault();
-      const row = rows[focusedIndex];
+      const row = paginatedRows[focusedIndex];
       if (row) toggleExpand(row.ticker);
+    } else if (e.key === "PageUp") {
+      e.preventDefault();
+      if (currentPage > 1) {
+        handlePageChange(currentPage - 1);
+      }
+    } else if (e.key === "PageDown") {
+      e.preventDefault();
+      if (currentPage < totalPages) {
+        handlePageChange(currentPage + 1);
+      }
     }
   }
 
@@ -487,6 +512,8 @@ export function ExplorerTable({
     return null;
   }
 
+  const totalHeight = totalRows * rowHeight + (expandedIdx >= 0 ? EXPANDED_HEIGHT : 0);
+
   return (
     <div
       ref={containerRef}
@@ -495,7 +522,7 @@ export function ExplorerTable({
       tabIndex={0}
       role="grid"
       aria-label="Market screener results"
-      className="relative h-full flex-1 overflow-auto outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent/30"
+      className="relative min-h-0 flex-1 overflow-auto outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent/30"
     >
       <div style={{ minWidth: totalWidth }}>
         {/* Header */}
@@ -553,9 +580,8 @@ export function ExplorerTable({
         </div>
 
         {/* Virtualized rows */}
-        <div style={{ height: topPadding }} />
-        <div style={{ position: "relative", height: (visibleEnd - visibleStart) * rowHeight + (expandedIdx >= visibleStart && expandedIdx < visibleEnd ? EXPANDED_HEIGHT : 0) }}>
-          {rows.slice(visibleStart, visibleEnd).map((row, i) => {
+        <div style={{ position: "relative", height: totalHeight }}>
+          {paginatedRows.slice(visibleStart, visibleEnd).map((row, i) => {
             const idx = visibleStart + i;
             return (
               <React.Fragment key={row.ticker}>
@@ -591,15 +617,46 @@ export function ExplorerTable({
             );
           })}
         </div>
-        <div style={{ height: bottomPadding }} />
 
-        {/* Footer hints */}
-        {totalRows > 0 && totalRows < 10 && (
-          <div className="flex items-center gap-2 px-3 py-4 text-micro text-text-tertiary">
-            <TriangleAlert size={11} />
-            Narrow result set — loosen filters for more results.
+        {/* Pagination & Footer hints */}
+        <div className="flex flex-wrap items-center justify-between gap-4 border-t border-[var(--term-divider)] bg-[var(--term-bg)] px-4 py-2 font-mono text-micro text-[color:var(--term-ink-secondary)]">
+          <div>
+            SHOWING {rows.length > 0 ? (currentPage - 1) * PAGE_SIZE + 1 : 0} - {Math.min(currentPage * PAGE_SIZE, rows.length)} OF {rows.length} COMPANIES
           </div>
-        )}
+          {totalPages > 1 && (
+            <div className="flex items-center gap-4">
+              <button
+                type="button"
+                disabled={currentPage === 1}
+                onClick={() => handlePageChange(currentPage - 1)}
+                className={cn(
+                  "px-2 py-0.5 border text-[10px] font-semibold transition-colors uppercase tracking-wider",
+                  currentPage === 1
+                    ? "border-[color:var(--term-divider)] text-[color:var(--term-ink-tertiary)] cursor-not-allowed"
+                    : "border-[color:var(--term-amber)]/60 text-[color:var(--term-amber)] hover:bg-[color:var(--term-amber)]/10"
+                )}
+              >
+                &lt; PREV
+              </button>
+              <span className="text-[color:var(--term-amber)]">
+                PAGE {currentPage} OF {totalPages}
+              </span>
+              <button
+                type="button"
+                disabled={currentPage === totalPages}
+                onClick={() => handlePageChange(currentPage + 1)}
+                className={cn(
+                  "px-2 py-0.5 border text-[10px] font-semibold transition-colors uppercase tracking-wider",
+                  currentPage === totalPages
+                    ? "border-[color:var(--term-divider)] text-[color:var(--term-ink-tertiary)] cursor-not-allowed"
+                    : "border-[color:var(--term-amber)]/60 text-[color:var(--term-amber)] hover:bg-[color:var(--term-amber)]/10"
+                )}
+              >
+                NEXT &gt;
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
