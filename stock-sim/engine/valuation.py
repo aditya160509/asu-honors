@@ -28,7 +28,7 @@ DEFAULT_M_STEEPNESS = 0.11
 DEFAULT_M_INFLECTION = 60.0
 
 DEFAULT_GROWTH_RATE_MIN = 1.0
-DEFAULT_GROWTH_RATE_MAX = 25.0
+DEFAULT_GROWTH_RATE_MAX = 60.0
 DEFAULT_BASELINE_PE = 10.0
 
 
@@ -91,17 +91,16 @@ def growth_score_to_rate(
     rate_min: float = DEFAULT_GROWTH_RATE_MIN,
     rate_max: float = DEFAULT_GROWTH_RATE_MAX,
 ) -> float:
-    """Linear map of the 0-100 growth_potential score to an estimated annual EPS growth rate (%).
+    """Non-linear (quadratic) map: score 0→rate_min, 50→~15%, 100→rate_max.
 
-    growth_potential=0 -> rate_min (~2%/yr, mature/declining); 100 ->
-    rate_max (~60%/yr, best-in-class hypergrowth). This is a fallback used
-    only where a company-specific, financials-and-industry-derived growth
-    estimate isn't available; prefer deriving the rate directly from a
-    company's own trailing fundamentals and industry context where possible
-    (see docs/valuation_dry_run.py for a worked real-company example).
+    A quadratic curve compresses low scores (mid company at score 50 gets
+    ~15% not the linear midpoint) and stretches high scores, reflecting that
+    genuine hypergrowth is rare and most companies cluster toward moderate
+    growth.
     """
     growth_potential = max(0.0, min(100.0, growth_potential))
-    return rate_min + (rate_max - rate_min) * (growth_potential / 100.0)
+    t = growth_potential / 100.0
+    return rate_min + (rate_max - rate_min) * t * t
 
 
 def compute_growth_potential_from_financials(

@@ -76,8 +76,9 @@ def test_growth_score_to_rate_endpoints():
 
 
 def test_growth_score_to_rate_midpoint():
+    # Quadratic: score 50 → 25% of the range above min, not 50%
     result = val.growth_score_to_rate(50, rate_min=2.0, rate_max=60.0)
-    assert math.isclose(result, 2.0 + (60.0 - 2.0) * 0.5)
+    assert math.isclose(result, 2.0 + (60.0 - 2.0) * 0.5 * 0.5)
 
 
 def test_growth_score_to_rate_clamps_out_of_range_input():
