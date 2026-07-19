@@ -3,9 +3,18 @@
 import * as React from "react";
 import Link from "next/link";
 import { Bell, ExternalLink, Star } from "lucide-react";
-import { PriceChart } from "@/components/charts/PriceChart";
+import { PriceChart, type IndicatorKey } from "@/components/charts/PriceChart";
+import { ChartTypePicker } from "@/components/ui/ChartTypePicker";
+import { IndicatorPicker } from "@/components/ui/IndicatorPicker";
+import { DrawingToolbar } from "@/components/ui/DrawingToolbar";
+import { DrawingManager } from "@/lib/charts/drawing/DrawingManager";
+import { INDICATOR_REGISTRY, type IndicatorType } from "@/lib/charts/indicators";
+import type { DrawingToolType } from "@/lib/charts/drawing/types";
+import type { ChartType } from "@/lib/charts/types";
 import { useCompany, usePriceHistory, useValuation } from "@/lib/api/hooks/useCompany";
 import { useNews } from "@/lib/api/hooks/useNews";
+import { useConCalls } from "@/lib/api/hooks/useConCalls";
+import { buildConCallMarkers } from "@/lib/companies/conCallMarkers";
 import { cn, formatLarge, formatPct, formatPrice } from "@/lib/utils";
 import type { EnrichedCompany } from "@/lib/market/types";
 
@@ -61,6 +70,32 @@ export function DetailPanel({ ticker, watched, onToggleWatch, onClose, gridRow }
   const history = usePriceHistory(ticker);
   const valuation = useValuation(ticker);
   const news = useNews({ companyId: company.data?.id, limit: 3 });
+  const conCalls = useConCalls({ ticker, limit: 8 });
+
+  const [chartType, setChartType] = React.useState<ChartType>("candlestick");
+  const [activeOverlays, setActiveOverlays] = React.useState<IndicatorType[]>(["sma20"]);
+  const [drawingManager] = React.useState(() => new DrawingManager());
+  const [activeDrawingTool, setActiveDrawingTool] = React.useState<DrawingToolType | null>(null);
+
+  function toggleOverlay(type: IndicatorType) {
+    setActiveOverlays((prev) => (prev.includes(type) ? prev.filter((t) => t !== type) : [...prev, type]));
+  }
+
+  React.useEffect(() => {
+    return drawingManager.subscribe(() => setActiveDrawingTool(drawingManager.activeTool));
+  }, [drawingManager]);
+
+  // Sidebar-width panel — price overlays only (no sub-chart panes like RSI/MACD,
+  // which need their own ~96px pane each and would crowd the Fields/News below).
+  const priceIndicators = React.useMemo(
+    () => activeOverlays.filter((t): t is IndicatorKey => INDICATOR_REGISTRY[t].type === "overlay"),
+    [activeOverlays]
+  );
+
+  const conCallMarkers = React.useMemo(
+    () => buildConCallMarkers(conCalls.data ?? [], history.data ?? []),
+    [conCalls.data, history.data]
+  );
 
   const price = company.data?.latest_price != null ? Number(company.data.latest_price) : null;
   const dayChangePct =
@@ -99,8 +134,31 @@ export function DetailPanel({ ticker, watched, onToggleWatch, onClose, gridRow }
         </div>
       </div>
 
-      <div className="h-44 border-b border-[var(--term-hairline)] px-2">
-        <PriceChart data={history.data ?? []} loading={history.isLoading} error={history.isError} onRetry={() => history.refetch()} ticker={ticker} height={176} />
+      <div className="border-b border-[var(--term-hairline)] px-2 py-1.5">
+        <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+          <ChartTypePicker value={chartType} onChange={setChartType} />
+          <IndicatorPicker activeIndicators={activeOverlays} onToggle={toggleOverlay} />
+        </div>
+        <div className="flex h-44 gap-1.5">
+          <div className="w-9 shrink-0 overflow-hidden rounded-sm border border-[var(--term-hairline)]">
+            <DrawingToolbar manager={drawingManager} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <PriceChart
+              data={history.data ?? []}
+              loading={history.isLoading}
+              error={history.isError}
+              onRetry={() => history.refetch()}
+              ticker={ticker}
+              height={176}
+              chartType={chartType}
+              indicators={priceIndicators}
+              drawingManager={drawingManager}
+              activeDrawingTool={activeDrawingTool}
+              events={conCallMarkers}
+            />
+          </div>
+        </div>
       </div>
 
       <div className="border-b border-[var(--term-hairline)] px-4 py-2">
