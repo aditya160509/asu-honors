@@ -403,7 +403,7 @@ export function MarketExplorer({ companies, loading, error, onRetry }: MarketExp
         )}
 
         <div className="flex min-w-0 flex-1 overflow-hidden">
-          <div className={detailTicker ? "flex w-[55%] shrink-0 flex-col overflow-hidden" : "flex flex-1 flex-col overflow-hidden"}>
+          <div className={detailTicker ? "flex w-[55%] shrink-0 flex-col overflow-hidden min-h-0" : "flex flex-1 flex-col overflow-hidden min-h-0"}>
             {showSkeleton ? (
               <ExplorerSkeleton columns={visibleColumns} density={density} />
             ) : showError ? (
