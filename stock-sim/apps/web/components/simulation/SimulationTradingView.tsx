@@ -14,7 +14,7 @@ import { DrawingToolbar } from "@/components/ui/DrawingToolbar";
 import { IndicatorPicker } from "@/components/ui/IndicatorPicker";
 import { ChartTypePicker } from "@/components/ui/ChartTypePicker";
 import { DrawingManager } from "@/lib/charts/drawing/DrawingManager";
-import { usePriceHistory, useFinancials, useCompany } from "@/lib/api/hooks/useCompany";
+import { usePriceHistory, useFinancials, useCompany, useCompanyDividends } from "@/lib/api/hooks/useCompany";
 import { useSimState } from "@/lib/api/hooks/useSimulation";
 import { useMarketGrid, useCycleState } from "@/lib/api/hooks/useMarket";
 import { useNews } from "@/lib/api/hooks/useNews";
@@ -179,6 +179,7 @@ export function SimulationTradingView() {
   const { data: cycleData } = useCycleState(timelineId);
   const { data: financials } = useFinancials(selectedTicker ?? "");
   const { data: companyDetail } = useCompany(selectedTicker ?? "", timelineId);
+  const { data: companyDividends } = useCompanyDividends(selectedTicker ?? "", timelineId);
   const { data: newsData } = useNews({ timelineId, limit: 50 });
 
   const [showFundamentals, setShowFundamentals] = React.useState(false);
@@ -689,6 +690,7 @@ export function SimulationTradingView() {
               <FundamentalsPanel
                 financials={financials ?? null}
                 company={companyDetail ?? null}
+                dividendYieldPct={companyDividends?.trailing_12m_yield_pct ?? null}
                 loading={!financials && !!selectedTicker}
               />
             </div>

@@ -77,6 +77,7 @@ export interface CompanyGridItem {
   intrinsic_value: number | null;
   market_cap: number | null;
   volatility: number | null;
+  market_liquidity_score: number | null;
   avg_volume_20d: number | null;
   high_52w: number | null;
   low_52w: number | null;
@@ -123,6 +124,8 @@ export interface CompanyDetail {
   latest_iv: number | null;
   pe_ratio: number | null;
   market_cap: number | null;
+  volatility: number | null;
+  market_liquidity_score: number | null;
   driver_breakdowns: DriverBreakdown[];
 }
 
@@ -142,6 +145,18 @@ export interface ValuationResponse {
   financial_quality: number;
   fcf_quality: number;
   growth_potential: number;
+}
+
+export interface CompanyDividendItem {
+  declared_date: string;
+  ex_date: string;
+  payment_date: string;
+  amount_per_share: number;
+}
+
+export interface CompanyDividendsResponse {
+  history: CompanyDividendItem[];
+  trailing_12m_yield_pct: number | null;
 }
 
 export interface CycleStateResponse {
@@ -384,6 +399,8 @@ export interface ConCallItem {
   tone_score: number;
   guidance_revenue_growth: number;
   statements: Record<string, string>;
+  actual_eps: number | null;
+  consensus_eps: number | null;
 }
 
 // ---------------------------------------------------------------------------

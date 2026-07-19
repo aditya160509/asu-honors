@@ -102,6 +102,7 @@ class CompanyGridItem(BaseModel):
     intrinsic_value: Optional[Decimal] = None
     market_cap: Optional[Decimal] = None
     volatility: Optional[Decimal] = None
+    market_liquidity_score: Optional[Decimal] = None
     avg_volume_20d: Optional[int] = None
     high_52w: Optional[Decimal] = None
     low_52w: Optional[Decimal] = None
@@ -148,6 +149,8 @@ class CompanyDetail(BaseModel):
     latest_iv: Optional[Decimal] = None
     pe_ratio: Optional[float] = None
     market_cap: Optional[Decimal] = None
+    volatility: Optional[Decimal] = None
+    market_liquidity_score: Optional[Decimal] = None
     driver_breakdowns: list[DriverBreakdown] = Field(default_factory=list)
 
 
@@ -345,6 +348,18 @@ class PortfolioDividendsResponse(BaseModel):
     trailing_12m_received: Decimal
 
 
+class CompanyDividendItem(BaseModel):
+    declared_date: date
+    ex_date: date
+    payment_date: date
+    amount_per_share: Decimal
+
+
+class CompanyDividendsResponse(BaseModel):
+    history: list[CompanyDividendItem]
+    trailing_12m_yield_pct: Optional[float] = None
+
+
 class GoalCreateRequest(BaseModel):
     label: str = Field(min_length=1, max_length=60)
     target_value: Decimal = Field(gt=0)
@@ -443,6 +458,8 @@ class ConCallItem(BaseModel):
     tone_score: float
     guidance_revenue_growth: float
     statements: dict[str, str]
+    actual_eps: Optional[float] = None
+    consensus_eps: Optional[float] = None
 
 
 # --------------------------------------------------------------------------

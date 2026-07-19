@@ -7,6 +7,10 @@ import type { FinancialStatementResponse, CompanyDetail } from "@/lib/api/types"
 interface FundamentalsPanelProps {
   financials: FinancialStatementResponse | null;
   company: CompanyDetail | null;
+  /** Trailing-12m dividend yield (%), from GET /companies/{ticker}/dividends -- there is no
+   * `balance_sheet.dividend_yield` field anywhere in the backend, so this must be passed in
+   * rather than read off the financials statement. */
+  dividendYieldPct?: number | null;
   loading?: boolean;
 }
 
@@ -285,7 +289,17 @@ function BalanceSheet({ data, loading }: { data: FinancialStatementResponse | nu
   );
 }
 
-function KeyRatios({ company, data, loading }: { company: CompanyDetail | null; data: FinancialStatementResponse | null; loading: boolean }) {
+function KeyRatios({
+  company,
+  data,
+  loading,
+  dividendYieldPct,
+}: {
+  company: CompanyDetail | null;
+  data: FinancialStatementResponse | null;
+  loading: boolean;
+  dividendYieldPct?: number | null;
+}) {
   if (loading) {
     return (
       <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 8 }}>
@@ -317,7 +331,7 @@ function KeyRatios({ company, data, loading }: { company: CompanyDetail | null; 
     { label: "EV/EBITDA", value: bs?.ev_to_ebitda != null ? Number(bs.ev_to_ebitda) : null },
     { label: "ROE", value: roe },
     { label: "ROIC", value: roic },
-    { label: "Dividend Yield", value: bs?.dividend_yield != null ? Number(bs.dividend_yield) * 100 : null },
+    { label: "Dividend Yield", value: dividendYieldPct ?? null },
   ];
 
   return (
@@ -329,7 +343,7 @@ function KeyRatios({ company, data, loading }: { company: CompanyDetail | null; 
   );
 }
 
-export function FundamentalsPanel({ financials, company, loading = false }: FundamentalsPanelProps) {
+export function FundamentalsPanel({ financials, company, dividendYieldPct, loading = false }: FundamentalsPanelProps) {
   const [activeTab, setActiveTab] = React.useState<TabKey>("income");
 
   return (
@@ -373,7 +387,9 @@ export function FundamentalsPanel({ financials, company, loading = false }: Fund
       <div style={{ padding: "12px 14px", minHeight: 160 }}>
         {activeTab === "income" && <IncomeStatement data={financials} loading={loading} />}
         {activeTab === "balance" && <BalanceSheet data={financials} loading={loading} />}
-        {activeTab === "ratios" && <KeyRatios company={company} data={financials} loading={loading} />}
+        {activeTab === "ratios" && (
+          <KeyRatios company={company} data={financials} loading={loading} dividendYieldPct={dividendYieldPct} />
+        )}
       </div>
     </div>
   );

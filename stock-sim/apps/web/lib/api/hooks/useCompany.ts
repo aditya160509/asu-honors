@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { get } from "@/lib/api/client";
 import type {
   CompanyDetail,
+  CompanyDividendsResponse,
   DriverBreakdown,
   FinancialStatementResponse,
   PriceHistoryItem,
@@ -49,6 +50,24 @@ export function useFinancials(ticker: string, period?: string) {
     queryKey: ["financials", ticker, period],
     queryFn: () => get<FinancialStatementResponse>(`/companies/${ticker}/financials`, { period }),
     staleTime: 60_000,
+    enabled: Boolean(ticker),
+  });
+}
+
+export function useFinancialsHistory(ticker: string, limit = 8) {
+  return useQuery({
+    queryKey: ["financials-history", ticker, limit],
+    queryFn: () => get<FinancialStatementResponse[]>(`/companies/${ticker}/financials/history`, { limit }),
+    staleTime: 60_000,
+    enabled: Boolean(ticker),
+  });
+}
+
+export function useCompanyDividends(ticker: string, timelineId?: number) {
+  return useQuery({
+    queryKey: ["company-dividends", ticker, timelineId],
+    queryFn: () => get<CompanyDividendsResponse>(`/companies/${ticker}/dividends`, { timeline_id: timelineId }),
+    staleTime: 30_000,
     enabled: Boolean(ticker),
   });
 }

@@ -27,7 +27,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useCompany, useDrivers, useFinancials, usePriceHistory, useValuation } from "@/lib/api/hooks/useCompany";
 import { usePortfolio } from "@/lib/api/hooks/usePortfolio";
 import { useConCalls } from "@/lib/api/hooks/useConCalls";
+import { useMarketGrid } from "@/lib/api/hooks/useMarket";
 import { buildConCallMarkers } from "@/lib/companies/conCallMarkers";
+import { computeRiskTierCutoffs, riskTierFor } from "@/lib/market/riskTier";
 import { ApiError } from "@/lib/api/client";
 
 export default function CompanyDetailPage() {
@@ -66,6 +68,13 @@ export default function CompanyDetailPage() {
   const valuation = useValuation(ticker);
   const portfolio = usePortfolio();
   const conCalls = useConCalls({ ticker, limit: 8 });
+  const marketGrid = useMarketGrid();
+
+  const riskTierCutoffs = React.useMemo(
+    () => computeRiskTierCutoffs((marketGrid.data?.companies ?? []).map((c) => Number(c.volatility)).filter((v) => !Number.isNaN(v))),
+    [marketGrid.data]
+  );
+  const riskTier = riskTierFor(company.data?.volatility != null ? Number(company.data.volatility) : null, riskTierCutoffs);
 
   const chartData = React.useMemo(() => sliceByTimeframe(history.data ?? [], timeframe), [history.data, timeframe]);
   const conCallMarkers = React.useMemo(
@@ -119,6 +128,7 @@ export default function CompanyDetailPage() {
               company={company.data}
               latestBar={latestBar}
               dayChangePct={dayChangePct}
+              riskTier={riskTier}
               loading={company.isLoading}
             />
 
@@ -207,6 +217,8 @@ export default function CompanyDetailPage() {
               cashBalance={portfolio.data ? Number(portfolio.data.cash_balance) : 0}
               sharesHeld={holding?.quantity ?? 0}
               isPortfolioLoading={portfolio.isLoading}
+              holdings={portfolio.data?.holdings}
+              totalPortfolioValue={portfolio.data ? Number(portfolio.data.total_value) : undefined}
               onOrderPlaced={() => {
                 company.refetch();
                 portfolio.refetch();

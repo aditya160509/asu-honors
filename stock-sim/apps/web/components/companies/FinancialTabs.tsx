@@ -6,8 +6,11 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DashboardPanel } from "@/components/dashboard/primitives/DashboardPanel";
 import { MER_HAIRLINE } from "@/components/dashboard/primitives/tokens";
-import { cn, formatMillions, formatPrice } from "@/lib/utils";
+import { cn, formatMillions, formatPct, formatPrice } from "@/lib/utils";
 import { useConCalls } from "@/lib/api/hooks/useConCalls";
+import { useFinancialsHistory, useCompanyDividends } from "@/lib/api/hooks/useCompany";
+import { useSimState } from "@/lib/api/hooks/useSimulation";
+import { nextEarningsDate } from "@/lib/companies/earningsCalendar";
 import type { CompanyDetail, ConCallItem, FinancialStatementResponse } from "@/lib/api/types";
 
 export interface FinancialTabsProps {
@@ -110,6 +113,11 @@ function ConCallTranscript({ call }: { call: ConCallItem }) {
         <Badge variant={BUCKET_VARIANT[call.performance_bucket]}>{call.performance_bucket}</Badge>
         <Badge variant={TONE_VARIANT[call.tone]}>{call.tone}</Badge>
         <span className="num text-micro text-mer-ink-tertiary">{call.call_date}</span>
+        {call.actual_eps != null && call.consensus_eps != null && (
+          <span className="num text-micro text-mer-ink-tertiary">
+            Actual EPS {formatPrice(call.actual_eps)} vs. Consensus {formatPrice(call.consensus_eps)}
+          </span>
+        )}
       </div>
       <div className="flex flex-col gap-1">
         {sections.map(([section, text]) => (
@@ -118,6 +126,150 @@ function ConCallTranscript({ call }: { call: ConCallItem }) {
           </p>
         ))}
       </div>
+      <div className="flex items-center gap-1.5 pt-1">
+        <span className="text-micro font-medium uppercase text-mer-ink-tertiary">
+          Guided Growth (management commentary)
+        </span>
+        <span className="num text-small font-medium text-mer-ink-primary">
+          {formatPct(call.guidance_revenue_growth * 100)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+const TREND_METRICS: { key: string; label: string; isEps?: boolean }[] = [
+  { key: "revenue", label: "Revenue" },
+  { key: "net_profit", label: "Net Profit" },
+  { key: "eps", label: "EPS", isEps: true },
+];
+
+function pctChange(current: number | null, prior: number | null): number | null {
+  if (current == null || prior == null || prior === 0) return null;
+  return ((current - prior) / Math.abs(prior)) * 100;
+}
+
+function FinancialsTrendTab({ ticker }: { ticker: string }) {
+  const { data, isLoading } = useFinancialsHistory(ticker, 8);
+
+  if (isLoading) {
+    return (
+      <div className="flex flex-col gap-2 py-2">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <Skeleton key={i} width="100%" height={16} />
+        ))}
+      </div>
+    );
+  }
+
+  if (!data || data.length === 0) {
+    return <EmptyState title={`No multi-quarter history for ${ticker} yet.`} />;
+  }
+
+  // API returns most-recent-first; display oldest -> newest, left to right.
+  const periods = [...data].reverse();
+
+  return (
+    <div className="overflow-x-auto py-2">
+      <table className="table-dense w-full">
+        <thead>
+          <tr className={cn("border-b", MER_HAIRLINE)}>
+            <th className="py-1.5 text-left text-micro font-medium uppercase text-mer-ink-tertiary">Metric</th>
+            {periods.map((p) => (
+              <th key={p.fiscal_period} className="num py-1.5 text-right text-micro font-medium uppercase text-mer-ink-tertiary">
+                {p.fiscal_period}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {TREND_METRICS.map((metric) => (
+            <tr key={metric.key} className={cn("border-b", MER_HAIRLINE)}>
+              <td className="py-1.5 text-mer-ink-secondary">{metric.label}</td>
+              {periods.map((p, i) => {
+                const raw = p.income_statement?.[metric.key];
+                const value = typeof raw === "number" ? raw : null;
+                const priorQ = i > 0 ? periods[i - 1].income_statement?.[metric.key] : null;
+                const priorY = i > 3 ? periods[i - 4].income_statement?.[metric.key] : null;
+                const qoq = pctChange(value, typeof priorQ === "number" ? priorQ : null);
+                const yoy = pctChange(value, typeof priorY === "number" ? priorY : null);
+                return (
+                  <td key={p.fiscal_period} className="num py-1.5 text-right text-mer-ink-primary">
+                    <div>{value == null ? "—" : metric.isEps ? formatPrice(value) : formatMillions(value)}</div>
+                    {(qoq != null || yoy != null) && (
+                      <div className="flex justify-end gap-2 text-micro text-mer-ink-tertiary">
+                        {qoq != null && <span>QoQ {formatPct(qoq)}</span>}
+                        {yoy != null && <span>YoY {formatPct(yoy)}</span>}
+                      </div>
+                    )}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function NextEarningsBanner() {
+  const { data: simState } = useSimState();
+  if (!simState) return null;
+  const next = nextEarningsDate(simState.tick_count, simState.current_sim_date);
+  return (
+    <div className={cn("flex items-center gap-1.5 border-b pb-2 mb-2", MER_HAIRLINE)}>
+      <span className="text-micro font-medium uppercase text-mer-ink-tertiary">Next Earnings</span>
+      <span className="num text-small font-medium text-mer-ink-primary">
+        {next.date} (~{next.daysUntil}d)
+      </span>
+    </div>
+  );
+}
+
+function DividendsTab({ ticker }: { ticker: string }) {
+  const { data, isLoading } = useCompanyDividends(ticker);
+
+  if (isLoading) {
+    return (
+      <div className="flex flex-col gap-2 py-2">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <Skeleton key={i} width="100%" height={16} />
+        ))}
+      </div>
+    );
+  }
+
+  if (!data || data.history.length === 0) {
+    return <EmptyState title={`${ticker} has no dividend history yet.`} />;
+  }
+
+  return (
+    <div className="flex flex-col gap-3 py-2">
+      <div className="flex items-center gap-1.5">
+        <span className="text-micro font-medium uppercase text-mer-ink-tertiary">Trailing 12M Yield</span>
+        <span className="num text-small font-medium text-mer-ink-primary">
+          {data.trailing_12m_yield_pct != null ? formatPct(data.trailing_12m_yield_pct) : "N/A"}
+        </span>
+      </div>
+      <table className="table-dense w-full">
+        <thead>
+          <tr className={cn("border-b", MER_HAIRLINE)}>
+            <th className="py-1.5 text-left text-micro font-medium uppercase text-mer-ink-tertiary">Ex-Date</th>
+            <th className="py-1.5 text-left text-micro font-medium uppercase text-mer-ink-tertiary">Payment Date</th>
+            <th className="num py-1.5 text-right text-micro font-medium uppercase text-mer-ink-tertiary">Amount/Share</th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.history.map((d) => (
+            <tr key={d.ex_date} className={cn("border-b", MER_HAIRLINE)}>
+              <td className="py-1.5 text-mer-ink-secondary">{d.ex_date}</td>
+              <td className="py-1.5 text-mer-ink-secondary">{d.payment_date}</td>
+              <td className="num py-1.5 text-right text-mer-ink-primary">{formatPrice(d.amount_per_share)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -135,15 +287,14 @@ function ConCallsTab({ ticker }: { ticker: string }) {
     );
   }
 
-  if (!data || data.length === 0) {
-    return <EmptyState title={`No con-calls for ${ticker} yet.`} />;
-  }
-
   return (
     <div className="flex flex-col">
-      {data.map((call) => (
-        <ConCallTranscript key={call.id} call={call} />
-      ))}
+      <NextEarningsBanner />
+      {!data || data.length === 0 ? (
+        <EmptyState title={`No con-calls for ${ticker} yet.`} />
+      ) : (
+        data.map((call) => <ConCallTranscript key={call.id} call={call} />)
+      )}
     </div>
   );
 }
@@ -171,6 +322,8 @@ export function FinancialTabs({ ticker, company, financials, loading }: Financia
           <TabsTrigger value="income">Income</TabsTrigger>
           <TabsTrigger value="balance">Balance</TabsTrigger>
           <TabsTrigger value="cashflow">Cash Flow</TabsTrigger>
+          <TabsTrigger value="trend">Trend</TabsTrigger>
+          <TabsTrigger value="dividends">Dividends</TabsTrigger>
           <TabsTrigger value="concalls">Con-Calls</TabsTrigger>
         </TabsList>
         <TabsContent value="about">
@@ -184,6 +337,12 @@ export function FinancialTabs({ ticker, company, financials, loading }: Financia
         </TabsContent>
         <TabsContent value="cashflow">
           <StatementTable statement={financials?.cash_flow_statement} />
+        </TabsContent>
+        <TabsContent value="trend">
+          <FinancialsTrendTab ticker={ticker} />
+        </TabsContent>
+        <TabsContent value="dividends">
+          <DividendsTab ticker={ticker} />
         </TabsContent>
         <TabsContent value="concalls">
           <ConCallsTab ticker={ticker} />

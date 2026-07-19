@@ -287,7 +287,15 @@ def seed(session: Session) -> None:
         price = max(price, 0.01)
         market_cap = price * float(company.shares_outstanding)
         industry = d["industries"][company.industry_id]
-        vol = float(industry.base_volatility) / 100.0
+        # base_volatility is an annualized fraction (e.g. 0.25 = 25%/yr, see
+        # seed_industries.py); Company.volatility is displayed/filtered everywhere
+        # as a percent-scale number (formatPct just appends "%" with no *100), so
+        # the seed value must already be in percent units, not divided by 100 again
+        # (that produced a ~100x-too-small frozen value with zero per-company
+        # variation until the engine overwrote it -- see engine/orchestrator.py's
+        # _update_denormalized_fields, which now persists a real per-tick figure
+        # in the same units).
+        vol = float(industry.base_volatility) * 100.0
         liq_score = min(100.0, float(company.free_float_pct) * 100.0)
 
         r["fq"] = fq

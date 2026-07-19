@@ -221,6 +221,7 @@ def get_market_grid(db: Session, timeline_id: int, as_of_date: Optional[date] = 
                 intrinsic_value=iv,
                 market_cap=company.market_cap,
                 volatility=company.volatility,
+                market_liquidity_score=company.market_liquidity_score,
                 avg_volume_20d=stats.get("avg_volume_20d"),
                 high_52w=stats.get("high_52w"),
                 low_52w=stats.get("low_52w"),
@@ -307,6 +308,8 @@ def get_company_detail(db: Session, ticker: str, timeline_id: int) -> CompanyDet
         latest_iv=iv,
         pe_ratio=pe_ratio,
         market_cap=company.market_cap,
+        volatility=company.volatility,
+        market_liquidity_score=company.market_liquidity_score,
         driver_breakdowns=breakdowns,
     )
 
@@ -383,6 +386,16 @@ def get_driver_breakdowns(
     ]
 
 
+def _statement_row_to_dict(row) -> Optional[dict]:
+    if row is None:
+        return None
+    return {
+        c.name: float(getattr(row, c.name)) if isinstance(getattr(row, c.name), (int, float)) else getattr(row, c.name)
+        for c in row.__table__.columns
+        if c.name not in ("id", "company_id", "created_at", "updated_at")
+    }
+
+
 def get_financials(db: Session, ticker: str, period: Optional[str] = None) -> FinancialStatementResponse:
     """Get income/balance/cashflow statements for the latest (or specified) fiscal period."""
     company = db.query(Company).filter_by(ticker=ticker.upper()).first()
@@ -402,21 +415,53 @@ def get_financials(db: Session, ticker: str, period: Optional[str] = None) -> Fi
     bal = db.query(BalanceSheet).filter_by(company_id=company.id, fiscal_period=fiscal_period).first()
     cf = db.query(CashFlowStatement).filter_by(company_id=company.id, fiscal_period=fiscal_period).first()
 
-    def _row_to_dict(row) -> Optional[dict]:
-        if row is None:
-            return None
-        return {
-            c.name: float(getattr(row, c.name)) if isinstance(getattr(row, c.name), (int, float)) else getattr(row, c.name)
-            for c in row.__table__.columns
-            if c.name not in ("id", "company_id", "created_at", "updated_at")
-        }
-
     return FinancialStatementResponse(
         fiscal_period=fiscal_period,
-        income_statement=_row_to_dict(inc),
-        balance_sheet=_row_to_dict(bal),
-        cash_flow_statement=_row_to_dict(cf),
+        income_statement=_statement_row_to_dict(inc),
+        balance_sheet=_statement_row_to_dict(bal),
+        cash_flow_statement=_statement_row_to_dict(cf),
     )
+
+
+def get_financials_history(db: Session, ticker: str, limit: int = 8) -> list[FinancialStatementResponse]:
+    """Get income/balance/cashflow statements for the last `limit` fiscal periods, most recent first."""
+    company = db.query(Company).filter_by(ticker=ticker.upper()).first()
+    if company is None:
+        raise NotFoundError(f"Company '{ticker}' not found")
+
+    incs = (
+        db.query(IncomeStatement)
+        .filter_by(company_id=company.id)
+        .order_by(IncomeStatement.fiscal_period.desc())
+        .limit(limit)
+        .all()
+    )
+    if not incs:
+        raise NotFoundError(f"No financial statements found for '{ticker}'")
+
+    periods = [inc.fiscal_period for inc in incs]
+    bal_by_period = {
+        b.fiscal_period: b
+        for b in db.query(BalanceSheet).filter(
+            BalanceSheet.company_id == company.id, BalanceSheet.fiscal_period.in_(periods)
+        )
+    }
+    cf_by_period = {
+        c.fiscal_period: c
+        for c in db.query(CashFlowStatement).filter(
+            CashFlowStatement.company_id == company.id, CashFlowStatement.fiscal_period.in_(periods)
+        )
+    }
+
+    return [
+        FinancialStatementResponse(
+            fiscal_period=inc.fiscal_period,
+            income_statement=_statement_row_to_dict(inc),
+            balance_sheet=_statement_row_to_dict(bal_by_period.get(inc.fiscal_period)),
+            cash_flow_statement=_statement_row_to_dict(cf_by_period.get(inc.fiscal_period)),
+        )
+        for inc in incs
+    ]
 
 
 def get_valuation(db: Session, ticker: str, timeline_id: int) -> ValuationResponse:

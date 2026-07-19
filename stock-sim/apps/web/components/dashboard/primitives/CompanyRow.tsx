@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { formatPrice } from "@/lib/utils";
+import { Avatar } from "@/components/ui/avatar";
 import { DeltaBadge } from "@/components/dashboard/primitives/DeltaBadge";
 import { DeltaBar } from "@/components/dashboard/primitives/DeltaBar";
 
@@ -20,6 +21,7 @@ export function CompanyRow({ ticker, name, price, changePct, rightSlot }: Compan
       href={`/companies/${ticker}`}
       className="flex items-center gap-3 rounded-mer-sm px-2 py-2 transition-colors hover:bg-mer-surface-3"
     >
+      <Avatar displayName={name} colorSeed={ticker} className="h-7 w-7 shrink-0 text-micro" />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span className="num text-small font-bold uppercase text-mer-ink-primary">{ticker}</span>

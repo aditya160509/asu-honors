@@ -9,7 +9,9 @@ import { formatPrice } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 import { DashboardPanel } from "@/components/dashboard/primitives/DashboardPanel";
 import { MER_HAIRLINE } from "@/components/dashboard/primitives/tokens";
-import type { OrderSide, OrderType } from "@/lib/api/types";
+import { hypotheticalPostTradeWeight } from "@/lib/portfolio/holdingsMath";
+import { formatPct } from "@/lib/utils";
+import type { HoldingResponse, OrderSide, OrderType } from "@/lib/api/types";
 
 export interface OrderFormProps {
   ticker: string;
@@ -18,6 +20,10 @@ export interface OrderFormProps {
   sharesHeld?: number;
   isPortfolioLoading?: boolean;
   onOrderPlaced?: () => void;
+  /** Full holdings list + total portfolio value, for the post-trade concentration check below.
+   * Optional so callers without a full portfolio in scope (none today) don't break. */
+  holdings?: HoldingResponse[];
+  totalPortfolioValue?: number;
 }
 
 const SELL_PRESETS = [0.25, 0.5, 0.75, 1] as const;
@@ -29,6 +35,8 @@ export function OrderForm({
   sharesHeld = 0,
   isPortfolioLoading = false,
   onOrderPlaced,
+  holdings,
+  totalPortfolioValue,
 }: OrderFormProps) {
   const [side, setSide] = React.useState<OrderSide>("buy");
   const [orderType, setOrderType] = React.useState<OrderType>("market");
@@ -48,6 +56,10 @@ export function OrderForm({
   const maxQty = isPortfolioLoading ? Number.MAX_SAFE_INTEGER : side === "buy" ? maxBuyQty : sharesHeld;
 
   const estimatedTotal = referencePrice ? quantity * referencePrice : 0;
+  const postTradeWeight =
+    holdings && totalPortfolioValue && referencePrice
+      ? hypotheticalPostTradeWeight(holdings, totalPortfolioValue, ticker, referencePrice, side, quantity)
+      : null;
   const limitPriceMissing = orderType === "limit" && (limitPrice === "" || limitPrice <= 0);
   const insufficientFunds = !isPortfolioLoading && side === "buy" && estimatedTotal > cashBalance;
   const noSharesToSell = !isPortfolioLoading && side === "sell" && sharesHeld <= 0;
@@ -215,6 +227,12 @@ export function OrderForm({
               </div>
             </div>
 
+            {postTradeWeight != null && quantity > 0 && (
+              <p className="text-micro text-mer-ink-tertiary">
+                This trade will make {ticker} ~{formatPct(postTradeWeight)} of your portfolio.
+              </p>
+            )}
+
             {insufficientFunds && (
               <p className="text-micro text-negative">
                 Need {formatPrice(estimatedTotal - cashBalance)} more. Cash: {formatPrice(cashBalance)}
@@ -265,6 +283,12 @@ export function OrderForm({
               <span className="text-mer-ink-secondary">Est. total</span>
               <span className="num text-base font-semibold text-mer-ink-primary">{formatPrice(estimatedTotal)}</span>
             </div>
+            {postTradeWeight != null && (
+              <div className="flex justify-between">
+                <span className="text-mer-ink-secondary">Post-trade weight</span>
+                <span className="num text-mer-ink-primary">~{formatPct(postTradeWeight)}</span>
+              </div>
+            )}
           </div>
           <div className="mt-4 flex gap-2">
             <Button variant="outline" className="flex-1" onClick={() => setShowConfirm(false)}>
