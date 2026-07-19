@@ -29,6 +29,17 @@ from db.models.reference import Company
 MGMT_QUALITY_STRONG_THRESHOLD = 65.0
 MGMT_QUALITY_WEAK_THRESHOLD = 35.0
 
+# Moat-score band used as a tone tie-breaker (0-100, see
+# CompanyFactorScore.moat_score) -- a wide moat lets management sound more
+# assured even off a soft quarter; a thin moat sharpens caution on a soft one.
+MOAT_SCORE_STRONG_THRESHOLD = 65.0
+MOAT_SCORE_WEAK_THRESHOLD = 35.0
+
+# Quarter-over-quarter stock return (close-to-close across the quarter, see
+# _quarter_market_performance) band used the same way as the moat band.
+MARKET_PERFORMANCE_STRONG_THRESHOLD = 0.08
+MARKET_PERFORMANCE_WEAK_THRESHOLD = -0.08
+
 # tone -> numeric [-1, 1] mirror stored on ConCall.tone_score, and the
 # magnitude of guidance_revenue_growth suggested for that tone (further
 # scaled by the quarter's actual growth rate below).
@@ -131,6 +142,28 @@ def _mgmt_band(management_quality: float) -> str:
     return "mid"
 
 
+# Ordered worst -> best; tone nudges below move one step toward "confident",
+# nudges up move one step toward "evasive".
+_TONE_ORDER = ["evasive", "defensive", "cautious", "measured", "confident"]
+
+
+def _nudge_tone(tone: str, steps: int) -> str:
+    idx = _TONE_ORDER.index(tone)
+    idx = max(0, min(len(_TONE_ORDER) - 1, idx + steps))
+    return _TONE_ORDER[idx]
+
+
+def _tone_nudge_from_score(score: float, strong_threshold: float, weak_threshold: float) -> int:
+    """A strong moat/market score nudges tone one step more confident; a weak
+    one nudges it one step more cautious. Kept to a single step so the
+    bucket x management-quality matrix stays the dominant signal."""
+    if score >= strong_threshold:
+        return 1
+    if score <= weak_threshold:
+        return -1
+    return 0
+
+
 def _revenue_growth_pct(current_revenue: float, prior_revenue: Optional[float]) -> float:
     if not prior_revenue or prior_revenue <= 0:
         return 0.0
@@ -148,6 +181,17 @@ def _margin_direction(current_margin: Optional[float], prior_margin: Optional[fl
     return "roughly flat"
 
 
+def _market_context_statement(company_name: str, market_performance: float) -> str:
+    """A management remark acknowledging how the stock itself traded over
+    the quarter, independent of the fundamentals commentary above."""
+    pct = f"{market_performance * 100:+.1f}%"
+    if market_performance >= MARKET_PERFORMANCE_STRONG_THRESHOLD:
+        return f"The market has been rewarding that execution -- shares moved {pct} over the quarter."
+    if market_performance <= MARKET_PERFORMANCE_WEAK_THRESHOLD:
+        return f"We're aware the stock hasn't reflected that -- shares moved {pct} over the quarter -- and we don't take that lightly."
+    return f"Shares were roughly flat over the quarter ({pct}), tracking in line with our results."
+
+
 def generate_concall(
     company: Company,
     income_stmt: IncomeStatement,
@@ -160,12 +204,22 @@ def generate_concall(
     rng: random.Random,
     balance_sheet: Optional[BalanceSheet] = None,
     cash_flow: Optional[CashFlowStatement] = None,
+    moat_score: Optional[float] = None,
+    market_performance: Optional[float] = None,
 ) -> ConCall:
     """Build (but do not add/commit) a ConCall row for one company's quarter.
 
     Deterministic given its inputs (aside from a small rng-driven jitter on
     the guidance figure), matching engine.news_manager.generate_news's
     template + placeholder-substitution style rather than any LLM call.
+
+    `moat_score` (0-100, CompanyFactorScore.moat_score) and
+    `market_performance` (quarter close-to-close stock return, fraction) are
+    optional tie-breakers layered on top of the bucket x management-quality
+    tone matrix: a wide moat or a quarter the market rewarded nudges the tone
+    one step more confident, a thin moat or a quarter the market punished
+    nudges it one step more cautious. Either can be omitted (e.g. no prior
+    quarter close to diff against) and the base tone matrix is used as-is.
     """
     eps = float(income_stmt.eps)
     consensus_eps = float(consensus.consensus_eps) if consensus is not None else eps
@@ -173,6 +227,26 @@ def generate_concall(
     bucket = _performance_bucket(eps, consensus_eps)
     mgmt_band = _mgmt_band(management_quality)
     tone = _TONE_MATRIX[(bucket, mgmt_band)]
+
+    tone_nudge = 0
+    if moat_score is not None:
+        tone_nudge += _tone_nudge_from_score(
+            moat_score, MOAT_SCORE_STRONG_THRESHOLD, MOAT_SCORE_WEAK_THRESHOLD
+        )
+    if market_performance is not None:
+        tone_nudge += _tone_nudge_from_score(
+            market_performance, MARKET_PERFORMANCE_STRONG_THRESHOLD, MARKET_PERFORMANCE_WEAK_THRESHOLD
+        )
+    if tone_nudge != 0:
+        base_tone = tone
+        tone = _nudge_tone(tone, tone_nudge)
+        # Nudged tone may not have a template for this bucket (e.g. "beat" has
+        # no "defensive"/"evasive" entries) -- walk back toward base_tone,
+        # which always has a template, rather than risk a KeyError.
+        step_back = -1 if tone_nudge > 0 else 1
+        while (bucket, tone) not in _STATEMENT_TEMPLATES and tone != base_tone:
+            tone = _nudge_tone(tone, step_back)
+
     tone_score = TONE_SCORE[tone]
 
     revenue = float(income_stmt.revenue)
@@ -228,6 +302,9 @@ def generate_concall(
         for key, val in replacements.items():
             rendered = rendered.replace(key, val)
         statements[section] = rendered
+
+    if market_performance is not None:
+        statements["market_context"] = _market_context_statement(company.name, market_performance)
 
     return ConCall(
         company_id=company.id,

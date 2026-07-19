@@ -112,6 +112,11 @@ export interface CompanyDetail {
   industry_name: string;
   description: string | null;
   logo_url: string | null;
+  usp: string | null;
+  employee_count: number | null;
+  founded_year: number | null;
+  headquarters: string | null;
+  ceo: string | null;
   shares_outstanding: number;
   free_float_pct: number;
   latest_price: number | null;

@@ -137,6 +137,11 @@ class CompanyDetail(BaseModel):
     industry_name: str
     description: Optional[str] = None
     logo_url: Optional[str] = None
+    usp: Optional[str] = None
+    employee_count: Optional[int] = None
+    founded_year: Optional[int] = None
+    headquarters: Optional[str] = None
+    ceo: Optional[str] = None
     shares_outstanding: int
     free_float_pct: float
     latest_price: Optional[Decimal] = None

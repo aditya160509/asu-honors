@@ -20,6 +20,8 @@ import { useMarketGrid, useCycleState } from "@/lib/api/hooks/useMarket";
 import { useNews } from "@/lib/api/hooks/useNews";
 import { useTimeControlStore } from "@/lib/stores/timeControlStore";
 import { formatPrice, formatLarge } from "@/lib/utils";
+import { SentimentTrackers, computeRawInputs, computeSentimentDrivers, bootstrapFromPriceHistory } from "@/lib/market/sentimentScore";
+import type { SentimentDrivers } from "@/lib/market/sentimentScore";
 import type { NewsItem, PriceHistoryItem } from "@/lib/api/types";
 import type { IndicatorKey } from "@/components/charts/PriceChart";
 import type { EventMarker } from "@/components/charts/EventMarkers";
@@ -62,10 +64,6 @@ function sameRange(a: VisibleRange, b: VisibleRange): boolean {
 function toNumber(value: number | string | null | undefined, fallback = 0): number {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : fallback;
-}
-
-function clampPercent(value: number): number {
-  return Math.max(0, Math.min(100, value));
 }
 
 function TerminalButton({
@@ -191,6 +189,7 @@ export function SimulationTradingView() {
   const [activeDrawingTool, setActiveDrawingTool] = React.useState<DrawingToolType | null>(null);
   const [replayPickMode, setReplayPickMode] = React.useState(false);
   const sentimentHistoryRef = React.useRef<number[]>([]);
+  const sentimentTrackersRef = React.useRef<SentimentTrackers>(new SentimentTrackers());
 
   function toggleOverlay(type: IndicatorType) {
     setActiveOverlays((prev) =>
@@ -221,6 +220,15 @@ export function SimulationTradingView() {
     selectedTicker ?? "",
     timelineId
   );
+
+  React.useEffect(() => {
+    if (priceHistory && priceHistory.length > 0) {
+      bootstrapFromPriceHistory(sentimentTrackersRef.current, priceHistory);
+    }
+    // Runs once per priceHistory load; TrailingZScore.seed() no-ops once a tracker
+    // already has live-pushed samples, so this can't clobber real data on refetch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [priceHistory]);
 
   React.useEffect(() => {
     if (priceHistory && priceHistory.length > 0) {
@@ -301,43 +309,26 @@ export function SimulationTradingView() {
     return markers;
   }, [newsData, priceHistory, currentCompany]);
 
+  const lastSentimentTickRef = React.useRef<string | null>(null);
+  const lastSentimentDriversRef = React.useRef<SentimentDrivers | null>(null);
   const sentimentDrivers = React.useMemo(() => {
     const companies = grid?.companies ?? [];
-    const cycleScore = cycleData?.market_sentiment != null
-      ? clampPercent((cycleData.market_sentiment + 1) * 50)
-      : 50;
-
-    const breadthScore = companies.length > 0
-      ? clampPercent((companies.filter((company) => toNumber(company.day_change_pct) >= 0).length / companies.length) * 100)
-      : 50;
-
-    const avgChange = companies.length > 0
-      ? companies.reduce((sum, company) => sum + toNumber(company.day_change_pct), 0) / companies.length
-      : 0;
-    const momentumScore = clampPercent(50 + avgChange * 12);
-
     const relevantNews = (newsData ?? []).filter((item) => !item.company_name || item.company_name === currentCompany?.name);
-    const newsScore = relevantNews.length > 0
-      ? clampPercent(
-          50 +
-            (relevantNews.reduce((sum, item) => {
-              if (item.sentiment === "positive") return sum + 1;
-              if (item.sentiment === "negative") return sum - 1;
-              return sum;
-            }, 0) /
-              relevantNews.length) *
-              35
-        )
-      : 50;
+    const raw = computeRawInputs(companies, cycleData?.market_sentiment, relevantNews);
 
-    return {
-      cycle: cycleScore,
-      breadth: breadthScore,
-      momentum: momentumScore,
-      news: newsScore,
-      composite: clampPercent(cycleScore * 0.35 + breadthScore * 0.25 + momentumScore * 0.25 + newsScore * 0.15),
-    };
-  }, [cycleData?.market_sentiment, currentCompany?.name, grid?.companies, newsData]);
+    // Each trailing z-score tracker assumes exactly one push per simulation tick;
+    // pushing again for the same tick (e.g. when newsData resolves after grid) would
+    // corrupt the trailing window with a duplicate sample.
+    const tick = grid?.sim_date ?? null;
+    if (tick !== null && tick === lastSentimentTickRef.current && lastSentimentDriversRef.current) {
+      return lastSentimentDriversRef.current;
+    }
+
+    const drivers = computeSentimentDrivers(sentimentTrackersRef.current, raw);
+    lastSentimentTickRef.current = tick;
+    lastSentimentDriversRef.current = drivers;
+    return drivers;
+  }, [grid?.companies, grid?.sim_date, cycleData?.market_sentiment, currentCompany?.name, newsData]);
 
   const sentimentValue = sentimentDrivers.composite;
 
@@ -745,10 +736,12 @@ export function SimulationTradingView() {
                     marginTop: 8,
                   }}
                 >
-                  <SentimentDriver label="Cycle" value={sentimentDrivers.cycle} />
-                  <SentimentDriver label="Breadth" value={sentimentDrivers.breadth} />
-                  <SentimentDriver label="Momentum" value={sentimentDrivers.momentum} />
-                  <SentimentDriver label="News" value={sentimentDrivers.news} />
+                  <SentimentDriver label="Cycle" value={sentimentDrivers.cycle} warmingUp={sentimentDrivers.warmingUp.cycle} />
+                  <SentimentDriver label="Breadth" value={sentimentDrivers.breadth} warmingUp={sentimentDrivers.warmingUp.breadth} />
+                  <SentimentDriver label="Momentum" value={sentimentDrivers.momentum} warmingUp={sentimentDrivers.warmingUp.momentum} />
+                  <SentimentDriver label="News" value={sentimentDrivers.news} warmingUp={sentimentDrivers.warmingUp.news} />
+                  <SentimentDriver label="Volatility" value={sentimentDrivers.volatility} warmingUp={sentimentDrivers.warmingUp.volatility} />
+                  <SentimentDriver label="52W Range" value={sentimentDrivers.highLowBreadth} warmingUp={sentimentDrivers.warmingUp.highLowBreadth} />
                 </div>
               </div>
             )}
@@ -939,12 +932,19 @@ function NewsCompactPanel({ news, companyName }: { news: NewsItem[]; companyName
   );
 }
 
-function SentimentDriver({ label, value }: { label: string; value: number }) {
+function SentimentDriver({ label, value, warmingUp }: { label: string; value: number; warmingUp?: boolean }) {
   const rounded = Math.round(value);
-  const color = rounded >= 58 ? "var(--positive)" : rounded <= 42 ? "var(--negative)" : "var(--mer-ink-secondary)";
+  const color = warmingUp
+    ? "var(--mer-ink-tertiary)"
+    : rounded >= 58
+      ? "var(--positive)"
+      : rounded <= 42
+        ? "var(--negative)"
+        : "var(--mer-ink-secondary)";
 
   return (
     <div
+      title={warmingUp ? "Warming up — not enough trailing history for a reliable reading yet" : undefined}
       style={{
         padding: "5px 6px",
         border: "1px solid var(--mer-stroke-hairline)",
@@ -969,9 +969,10 @@ function SentimentDriver({ label, value }: { label: string; value: number }) {
           fontSize: "var(--fs-small)",
           fontWeight: 700,
           color,
+          fontStyle: warmingUp ? "italic" : "normal",
         }}
       >
-        {rounded}
+        {warmingUp ? "…" : rounded}
       </div>
     </div>
   );
