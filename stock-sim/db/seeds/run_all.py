@@ -15,12 +15,14 @@ SEEDS = [
     "seed_companies.py",
     "seed_financials.py",
     "seed_events.py",
+    "seed_scenario_templates.py",
     "seed_demo.py",
     "seed_initial_prices.py",
     "seed_dividends.py",
 ]
 
 SEED_TABLES = [
+    "scenario_templates",
     "dividends",
     "price_history",
     "portfolio_holdings",

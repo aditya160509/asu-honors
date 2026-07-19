@@ -39,6 +39,15 @@ def test_history_empty_portfolio(client, test_db, test_portfolio, auth_headers):
 
 
 def test_history_reconstructs_value(client, test_db, test_portfolio, test_company, auth_headers):
+    # test_company seeds a 2026-01-01 baseline PriceHistory row (see
+    # conftest.py) that collides with this test's own date range and would
+    # otherwise double-count a point in the portfolio-history window (which
+    # is bounded by test_timeline's current_sim_date=2026-01-02, not by
+    # sim_today) -- replace it rather than shifting sim_today.
+    from db.models import PriceHistory as _PH
+    test_db.query(_PH).filter_by(timeline_id=1, company_id=test_company.id, sim_date=date(2026, 1, 1)).delete()
+    test_db.commit()
+
     sim_today = date(2026, 1, 2)
     for i, close in enumerate([100.0, 110.0, 120.0]):
         _add_price(test_db, test_company.id, 1, sim_today - timedelta(days=2 - i), close)

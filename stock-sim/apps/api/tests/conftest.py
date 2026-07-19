@@ -21,7 +21,7 @@ from apps.api.auth import create_access_token, hash_password
 from apps.api.database import get_db
 from apps.api.main import app
 from apps.api.rate_limiter import InMemoryRateLimiter
-from db.models import Base, Company, ConfigParameter, Industry, Portfolio, Timeline, SimulationState, User
+from db.models import Base, Company, ConfigParameter, Industry, Portfolio, PriceHistory, Timeline, SimulationState, User
 
 # Bump rate limit so tests don't hit 429
 for mw in app.user_middleware:
@@ -53,7 +53,7 @@ def test_db(engine):
 
 
 @pytest.fixture()
-def client(test_db):
+def client(test_db, engine):
     def _override_get_db():
         yield test_db
 
@@ -61,9 +61,38 @@ def client(test_db):
     # Remove rate limiter middleware for tests to avoid 429 errors
     app.user_middleware = [m for m in app.user_middleware if m.cls.__name__ != "InMemoryRateLimiter"]
     app.middleware_stack = app.build_middleware_stack()
+
+    # Run Celery tasks (apps/api/tasks.py) synchronously/inline instead of
+    # dispatching to a real broker/worker -- and point their DB session
+    # factory at THIS test's in-memory engine (not the module-level
+    # apps.api.database.SessionLocal, which is bound to a different engine
+    # and would see an empty database from inside a task).
+    from apps.api.celery_app import celery_app
+    from apps.api import tasks as tasks_module
+    from sqlalchemy.orm import sessionmaker as _sessionmaker
+
+    celery_app.conf.task_always_eager = True
+    celery_app.conf.task_eager_propagates = True
+    original_factory = tasks_module._session_factory
+    tasks_module._session_factory = _sessionmaker(bind=engine, autocommit=False, autoflush=False)
+
+    # apps.api.routers.simulation.create_timeline pings for a live worker
+    # (celery_app.control.ping) before dispatching a fast-forward job, to
+    # avoid silently losing the job if no worker is listening (see that
+    # router's docstring). In eager mode there IS no real worker/broker
+    # round-trip to make -- tasks execute inline -- so stub the ping to
+    # report one alive worker rather than let it hit whatever Redis happens
+    # to be reachable from the test machine (flaky: passes/fails depending
+    # on incidental local infra state, not the code under test).
+    original_ping = celery_app.control.ping
+    celery_app.control.ping = lambda *a, **kw: [{"test-worker": {"ok": "pong"}}]
+
     with TestClient(app) as c:
         yield c
     app.dependency_overrides.clear()
+    tasks_module._session_factory = original_factory
+    celery_app.conf.task_always_eager = False
+    celery_app.control.ping = original_ping
 
 
 @pytest.fixture()
@@ -147,7 +176,7 @@ def test_industry(test_db: Session) -> Industry:
 
 
 @pytest.fixture()
-def test_company(test_db: Session, test_industry: Industry) -> Company:
+def test_company(test_db: Session, test_industry: Industry, test_timeline: Timeline) -> Company:
     company = Company(
         id=1,
         name="Test Corp",
@@ -164,6 +193,59 @@ def test_company(test_db: Session, test_industry: Industry) -> Company:
         market_cap=10_000_000_000.0,
         volatility=0.02,
         market_liquidity_score=80.0,
+    )
+    test_db.add(company)
+    test_db.commit()
+    # get_latest_price/get_latest_prices (db/timeline_resolver.py) resolve a
+    # timeline's current price from PriceHistory, not company.current_price
+    # directly (that column is a shared, timeline-agnostic cache -- see the
+    # module's docstring) -- trade_service and market_service both route
+    # through the resolver now, so a day-0 baseline row is required for any
+    # test that places an order or reads market data against test_timeline.
+    test_db.add(PriceHistory(
+        timeline_id=test_timeline.id,
+        company_id=company.id,
+        sim_date=date(2026, 1, 1),
+        open=100.0, high=101.0, low=99.0, close=100.0,
+        volume=500_000,
+        intrinsic_value=100.0,
+        order_imbalance=0.0,
+    ))
+    test_db.commit()
+    return company
+
+
+@pytest.fixture()
+def test_company_bare(test_db: Session, test_industry: Industry) -> Company:
+    """Company row only -- no Timeline/PriceHistory seeded, for tests (e.g.
+    db/timeline_resolver.py) that build their own custom timeline graph
+    rather than relying on the single test_timeline (id=1)."""
+    company = Company(
+        id=101,
+        name="Bare Corp",
+        ticker="BARE",
+        industry_id=test_industry.id,
+        shares_outstanding=100_000_000,
+        free_float_pct=0.8,
+        beta_market=1.0,
+        beta_sector=0.5,
+    )
+    test_db.add(company)
+    test_db.commit()
+    return company
+
+
+@pytest.fixture()
+def test_company_2(test_db: Session, test_industry: Industry) -> Company:
+    company = Company(
+        id=102,
+        name="Second Bare Corp",
+        ticker="BARE2",
+        industry_id=test_industry.id,
+        shares_outstanding=50_000_000,
+        free_float_pct=0.7,
+        beta_market=1.1,
+        beta_sector=0.6,
     )
     test_db.add(company)
     test_db.commit()

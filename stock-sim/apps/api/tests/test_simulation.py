@@ -13,25 +13,28 @@ def _seed_tickable(test_db, test_company, test_timeline):
         pillar="profitability", direction="higher_better", formula_ref="test", default_weight=1.0,
     ))
     test_db.add(IndustryPillarWeight(industry_id=1, pillar="profitability", weight=1.0))
-    test_db.add(MoatSubscore(company_id=1, subfactor_key="brand_strength", score=70.0))
+    tid = test_timeline.id
+    test_db.add(MoatSubscore(company_id=1, timeline_id=tid, subfactor_key="brand_strength", score=70.0))
     test_db.add(IncomeStatement(
-        company_id=1, fiscal_period="2026Q1", revenue=1000000, cogs=600000, gross_profit=400000,
+        company_id=1, timeline_id=tid, fiscal_period="2026Q1", revenue=1000000, cogs=600000, gross_profit=400000,
         operating_expenses=200000, ebitda=200000, depreciation_amortization=50000, ebit=150000,
         interest_expense=20000, pretax_income=130000, tax=32500, net_profit=97500, eps=0.975,
         shares_diluted=100000000,
     ))
     test_db.add(BalanceSheet(
-        company_id=1, fiscal_period="2026Q1", cash_and_equivalents=500000, receivables=200000,
+        company_id=1, timeline_id=tid, fiscal_period="2026Q1", cash_and_equivalents=500000, receivables=200000,
         inventory=300000, current_assets=1000000, ppe=2000000, intangibles=500000, total_assets=5000000,
         payables=150000, short_term_debt=100000, current_liabilities=250000, long_term_debt=500000,
         total_debt=600000, total_liabilities=1500000, shareholders_equity=3500000, invested_capital=4100000,
     ))
     test_db.add(CashFlowStatement(
-        company_id=1, fiscal_period="2026Q1", operating_cash_flow=120000, capex=-50000,
+        company_id=1, timeline_id=tid, fiscal_period="2026Q1", operating_cash_flow=120000, capex=-50000,
         free_cash_flow=70000, investing_cash_flow=-50000, financing_cash_flow=-20000,
         dividends_paid=-30000, buybacks=-10000, net_change_in_cash=50000,
     ))
-    test_db.add(ConsensusEstimate(company_id=1, fiscal_period="2026Q1", consensus_eps=0.95, consensus_revenue=980000))
+    test_db.add(ConsensusEstimate(
+        company_id=1, timeline_id=tid, fiscal_period="2026Q1", consensus_eps=0.95, consensus_revenue=980000,
+    ))
     test_db.commit()
 
 
@@ -209,13 +212,27 @@ def test_create_timeline_with_overrides(client, test_db, test_timeline, auth_hea
             "name": "Branch With Overrides",
             "parent_timeline_id": 1,
             "branch_point_sim_date": "2026-01-02",
-            "scenario_overrides": {},
+            "primitive": "structural_override",
+            "overrides": [
+                {
+                    "target_type": "config",
+                    "target_key": "theta_default",
+                    "override_value": "0.08",
+                    "effective_from_sim_date": "2026-01-02",
+                }
+            ],
         },
         headers=auth_headers,
     )
     assert resp.status_code == 201
     body = resp.json()
     assert body["name"] == "Branch With Overrides"
+    assert body["primitive"] == "structural_override"
+
+    from db.models import TimelineOverride
+    rows = test_db.query(TimelineOverride).filter_by(timeline_id=body["id"]).all()
+    assert len(rows) == 1
+    assert rows[0].target_key == "theta_default"
 
 
 def test_inject_event_not_found(client, test_db, test_timeline, admin_auth_headers):

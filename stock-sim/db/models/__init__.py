@@ -12,7 +12,8 @@ from db.models.reference import (
     IndustryFactorWeight,
     IndustryPillarWeight,
 )
-from db.models.simulation import SimulationState, Timeline
+from db.models.scenario_lab import AuditLog, IndustryCrossEffect, ScenarioTemplate, TimelineOverride
+from db.models.simulation import SimulationState, Timeline, TimelineGroup
 from db.models.timeseries import EconomicCycleState, PriceDriverScore, PriceHistory
 from db.models.trading import (
     Dividend,
@@ -51,7 +52,12 @@ __all__ = [
     "NewsFeed",
     "ConCall",
     "Timeline",
+    "TimelineGroup",
     "SimulationState",
+    "ScenarioTemplate",
+    "TimelineOverride",
+    "IndustryCrossEffect",
+    "AuditLog",
     "User",
     "Portfolio",
     "Holding",

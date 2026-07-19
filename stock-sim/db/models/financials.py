@@ -9,6 +9,7 @@ class IncomeStatement(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     company_id: Mapped[int] = mapped_column(ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    timeline_id: Mapped[int] = mapped_column(ForeignKey("timelines.id", ondelete="CASCADE"), nullable=False)
     fiscal_period: Mapped[str] = mapped_column(String(10), nullable=False)
     revenue: Mapped[float] = mapped_column(Numeric, nullable=False)
     cogs: Mapped[float] = mapped_column(Numeric, nullable=False)
@@ -25,7 +26,9 @@ class IncomeStatement(Base, TimestampMixin):
     shares_diluted: Mapped[float] = mapped_column(Numeric, nullable=False)
 
     __table_args__ = (
-        UniqueConstraint("company_id", "fiscal_period", name="uq_income_statements_company_period"),
+        UniqueConstraint(
+            "company_id", "fiscal_period", "timeline_id", name="uq_income_statements_company_period"
+        ),
     )
 
 
@@ -34,6 +37,7 @@ class BalanceSheet(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     company_id: Mapped[int] = mapped_column(ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    timeline_id: Mapped[int] = mapped_column(ForeignKey("timelines.id", ondelete="CASCADE"), nullable=False)
     fiscal_period: Mapped[str] = mapped_column(String(10), nullable=False)
     cash_and_equivalents: Mapped[float] = mapped_column(Numeric, nullable=False)
     receivables: Mapped[float] = mapped_column(Numeric, nullable=False)
@@ -52,7 +56,9 @@ class BalanceSheet(Base, TimestampMixin):
     invested_capital: Mapped[float] = mapped_column(Numeric, nullable=False)
 
     __table_args__ = (
-        UniqueConstraint("company_id", "fiscal_period", name="uq_balance_sheets_company_period"),
+        UniqueConstraint(
+            "company_id", "fiscal_period", "timeline_id", name="uq_balance_sheets_company_period"
+        ),
     )
 
 
@@ -61,6 +67,7 @@ class CashFlowStatement(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     company_id: Mapped[int] = mapped_column(ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    timeline_id: Mapped[int] = mapped_column(ForeignKey("timelines.id", ondelete="CASCADE"), nullable=False)
     fiscal_period: Mapped[str] = mapped_column(String(10), nullable=False)
     operating_cash_flow: Mapped[float] = mapped_column(Numeric, nullable=False)
     capex: Mapped[float] = mapped_column(Numeric, nullable=False)
@@ -72,7 +79,9 @@ class CashFlowStatement(Base, TimestampMixin):
     net_change_in_cash: Mapped[float] = mapped_column(Numeric, nullable=False)
 
     __table_args__ = (
-        UniqueConstraint("company_id", "fiscal_period", name="uq_cash_flow_statements_company_period"),
+        UniqueConstraint(
+            "company_id", "fiscal_period", "timeline_id", name="uq_cash_flow_statements_company_period"
+        ),
     )
 
 
@@ -81,10 +90,13 @@ class ConsensusEstimate(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     company_id: Mapped[int] = mapped_column(ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    timeline_id: Mapped[int] = mapped_column(ForeignKey("timelines.id", ondelete="CASCADE"), nullable=False)
     fiscal_period: Mapped[str] = mapped_column(String(10), nullable=False)
     consensus_eps: Mapped[float] = mapped_column(Numeric, nullable=False)
     consensus_revenue: Mapped[float] = mapped_column(Numeric, nullable=False)
 
     __table_args__ = (
-        UniqueConstraint("company_id", "fiscal_period", name="uq_consensus_estimates_company_period"),
+        UniqueConstraint(
+            "company_id", "fiscal_period", "timeline_id", name="uq_consensus_estimates_company_period"
+        ),
     )

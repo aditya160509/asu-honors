@@ -12,6 +12,7 @@ class CompanyFactorScore(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     company_id: Mapped[int] = mapped_column(ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    timeline_id: Mapped[int] = mapped_column(ForeignKey("timelines.id", ondelete="CASCADE"), nullable=False)
     fiscal_period: Mapped[str] = mapped_column(String(10), nullable=False)
     management_quality: Mapped[float] = mapped_column(Numeric, nullable=False)
     moat_score: Mapped[float] = mapped_column(Numeric, nullable=False)
@@ -26,16 +27,27 @@ class CompanyFactorScore(Base, TimestampMixin):
     # Snapshot of {field} as of the last quarterly refresh, never touched by
     # event effects. management_quality/growth_potential/fcf_quality have no
     # other source of truth to re-derive from (unlike moat_score/
-    # financial_quality, which are always recomputed fresh from MoatSubscore/
+    # financial_quality, which are normally recomputed fresh from MoatSubscore/
     # FinancialQualitySubscore), so event-driven deltas are computed against
     # this base each tick rather than compounding on the mutated effective
     # column -- see engine.orchestrator._apply_factor_effects_to_company.
     management_quality_base: Mapped[Optional[float]] = mapped_column(Numeric, nullable=True)
     growth_potential_base: Mapped[Optional[float]] = mapped_column(Numeric, nullable=True)
     fcf_quality_base: Mapped[Optional[float]] = mapped_column(Numeric, nullable=True)
+    # moat_score/financial_quality are normally re-derived fresh from
+    # MoatSubscore/FinancialQualitySubscore each tick, so they don't need
+    # these to avoid compounding in the common case -- but a company with no
+    # subscore rows yet has nothing to re-derive from, so these serve as the
+    # same fallback anchor for that edge case (see
+    # _apply_factor_effects_to_company and
+    # _apply_timeline_factor_score_overrides in engine/orchestrator.py).
+    moat_score_base: Mapped[Optional[float]] = mapped_column(Numeric, nullable=True)
+    financial_quality_base: Mapped[Optional[float]] = mapped_column(Numeric, nullable=True)
 
     __table_args__ = (
-        UniqueConstraint("company_id", "fiscal_period", name="uq_company_factor_scores_company_period"),
+        UniqueConstraint(
+            "company_id", "fiscal_period", "timeline_id", name="uq_company_factor_scores_company_period"
+        ),
         CheckConstraint(
             "management_quality >= 0 and management_quality <= 100", name="ck_cfs_management_quality_range"
         ),
@@ -56,6 +68,7 @@ class MoatSubscore(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     company_id: Mapped[int] = mapped_column(ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    timeline_id: Mapped[int] = mapped_column(ForeignKey("timelines.id", ondelete="CASCADE"), nullable=False)
     subfactor_key: Mapped[str] = mapped_column(String(80), nullable=False)
     score: Mapped[float] = mapped_column(Numeric, nullable=False)
     # Undecayed value as of seed time / last explicit reset, never touched by
@@ -63,7 +76,9 @@ class MoatSubscore(Base, TimestampMixin):
     score_base: Mapped[Optional[float]] = mapped_column(Numeric, nullable=True)
 
     __table_args__ = (
-        UniqueConstraint("company_id", "subfactor_key", name="uq_moat_subscores_company_subfactor"),
+        UniqueConstraint(
+            "company_id", "subfactor_key", "timeline_id", name="uq_moat_subscores_company_subfactor"
+        ),
         CheckConstraint("score >= 0 and score <= 100", name="ck_moat_subscores_score_range"),
     )
 
@@ -73,6 +88,7 @@ class FinancialQualitySubscore(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     company_id: Mapped[int] = mapped_column(ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    timeline_id: Mapped[int] = mapped_column(ForeignKey("timelines.id", ondelete="CASCADE"), nullable=False)
     fiscal_period: Mapped[str] = mapped_column(String(10), nullable=False)
     subfactor_key: Mapped[str] = mapped_column(String(80), nullable=False)
     raw_metric_value: Mapped[float] = mapped_column(Numeric, nullable=False)
@@ -85,6 +101,7 @@ class FinancialQualitySubscore(Base, TimestampMixin):
             "company_id",
             "fiscal_period",
             "subfactor_key",
+            "timeline_id",
             name="uq_fq_subscores_company_period_subfactor",
         ),
         CheckConstraint("peer_percentile >= 0 and peer_percentile <= 100", name="ck_fq_subscores_percentile_range"),

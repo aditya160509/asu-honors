@@ -30,6 +30,7 @@ from db.models import (
     PriceHistory,
     SimulationState,
 )
+from db.timeline_resolver import get_latest_price, get_latest_prices, resolve_price_history_range
 
 
 def _prev_closes_by_company(
@@ -152,12 +153,17 @@ def get_market_grid(db: Session, timeline_id: int) -> MarketGridResponse:
     cycle_phase = latest_cycle.cycle_phase if latest_cycle else "expansion"
     last_two = _last_two_closes_by_company(db, timeline_id)
     price_stats = _price_52w_stats(db, timeline_id, sim_date)
+    # Fallback for companies with no PriceHistory rows on this exact timeline
+    # yet (e.g. a freshly forked Future Lab branch) -- resolves through the
+    # parent chain instead of the shared, timeline-agnostic
+    # Company.current_price cache (see db/timeline_resolver.py docstring).
+    fallback_prices = get_latest_prices(db, [c.id for c in companies], timeline_id)
 
     items: list[CompanyGridItem] = []
     for company in companies:
         industry = industries.get(company.industry_id)
         closes = last_two.get(company.id)
-        current_price = closes[0] if closes else (company.current_price if company.current_price else Decimal(0))
+        current_price = closes[0] if closes else fallback_prices.get(company.id, Decimal(0))
         prev_close = closes[1] if closes and closes[1] is not None else None
         day_change_pct = None
         if prev_close is not None and prev_close > 0:
@@ -220,9 +226,14 @@ def get_company_detail(db: Session, ticker: str, timeline_id: int) -> CompanyDet
         .order_by(PriceHistory.sim_date.desc())
         .first()
     )
-    latest_price = float(latest_price_row[0]) if latest_price_row else (
-        float(company.current_price) if company.current_price else None
-    )
+    if latest_price_row:
+        latest_price = float(latest_price_row[0])
+    else:
+        # Freshly forked timeline with no own PriceHistory yet -- resolve
+        # through the parent chain rather than the shared
+        # Company.current_price cache (see db/timeline_resolver.py).
+        fallback = get_latest_price(db, company.id, timeline_id)
+        latest_price = float(fallback) if fallback is not None else None
 
     pe_ratio = None
     if latest_price and company.fair_pe:
@@ -264,17 +275,17 @@ def get_price_history(
     from_date: Optional[date] = None,
     to_date: Optional[date] = None,
 ) -> list[PriceHistoryItem]:
-    """Query price_history rows for a company, optionally bounded by date range."""
+    """Query price_history rows for a company, optionally bounded by date range.
+
+    Resolved across the parent chain (db/timeline_resolver.py) so a Future
+    Lab branch's chart correctly shows its parent's pre-branch history
+    instead of appearing empty before the branch's own first tick.
+    """
     company = db.query(Company).filter_by(ticker=ticker.upper()).first()
     if company is None:
         raise NotFoundError(f"Company '{ticker}' not found")
 
-    query = db.query(PriceHistory).filter_by(company_id=company.id, timeline_id=timeline_id)
-    if from_date is not None:
-        query = query.filter(PriceHistory.sim_date >= from_date)
-    if to_date is not None:
-        query = query.filter(PriceHistory.sim_date <= to_date)
-    rows = query.order_by(PriceHistory.sim_date.asc()).all()
+    rows = resolve_price_history_range(db, timeline_id, company.id, from_date, to_date)
 
     return [
         PriceHistoryItem(
@@ -373,7 +384,7 @@ def get_valuation(db: Session, ticker: str, timeline_id: int) -> ValuationRespon
 
     cfs = (
         db.query(CompanyFactorScore)
-        .filter_by(company_id=company.id)
+        .filter_by(company_id=company.id, timeline_id=timeline_id)
         .order_by(CompanyFactorScore.fiscal_period.desc())
         .first()
     )

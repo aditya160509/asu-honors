@@ -46,9 +46,24 @@ PHASE_SENTIMENT: dict[str, float] = {
 }
 
 
-def advance_cycle_phase(current_phase: str, rng: random.Random) -> str:
-    """Section 6.I — transition to next phase using the stochastic transition matrix."""
-    transitions = CYCLE_TRANSITIONS.get(current_phase)
+def advance_cycle_phase(
+    current_phase: str,
+    rng: random.Random,
+    transition_overrides: "dict[str, list[tuple[str, float]]] | None" = None,
+) -> str:
+    """Section 6.I — transition to next phase using the stochastic transition matrix.
+
+    `transition_overrides`, when given, replaces CYCLE_TRANSITIONS for this
+    call only (module-level CYCLE_TRANSITIONS is never mutated, so this stays
+    safe to call concurrently from parallel ensemble runs — see
+    engine/overrides.py::build_cycle_transition_override, which is Future
+    Lab's Macro Shock primitive forcing a target phase). GDP growth, interest
+    rate, and sentiment are never set by the override — they are always
+    subsequently derived by compute_cycle_state() for whatever phase this
+    function returns.
+    """
+    table = transition_overrides if transition_overrides is not None else CYCLE_TRANSITIONS
+    transitions = table.get(current_phase)
     if transitions is None:
         return "expansion"
     phases, weights = zip(*transitions)

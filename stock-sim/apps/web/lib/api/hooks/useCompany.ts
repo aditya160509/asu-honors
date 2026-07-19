@@ -19,7 +19,13 @@ export function useCompany(ticker: string, timelineId?: number) {
   });
 }
 
-export function usePriceHistory(ticker: string, timelineId?: number, from?: string, to?: string) {
+export function usePriceHistory(
+  ticker: string,
+  timelineId?: number,
+  from?: string,
+  to?: string,
+  options?: { enabled?: boolean },
+) {
   return useQuery({
     queryKey: ["history", ticker, timelineId, from, to],
     queryFn: () =>
@@ -31,7 +37,15 @@ export function usePriceHistory(ticker: string, timelineId?: number, from?: stri
         to,
       }),
     staleTime: 30_000,
-    enabled: Boolean(ticker),
+    // Callers that omit timelineId want "whatever timeline the backend
+    // defaults to" (settings.default_timeline_id) -- that's a legitimate,
+    // widely-used call shape (company detail page, portfolio holdings,
+    // market preview), so timelineId being undefined must NOT disable the
+    // query on its own. `options.enabled` lets a caller with a fixed number
+    // of parallel slots (e.g. TimelineComparisonView, one useQuery call per
+    // color-palette entry regardless of how many are actually filled) opt
+    // a specific slot out explicitly instead.
+    enabled: Boolean(ticker) && (options?.enabled ?? true),
   });
 }
 

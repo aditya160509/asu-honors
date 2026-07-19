@@ -1,8 +1,6 @@
 """Simulation control: advance ticks, timeline branching, admin operations."""
 
-import hashlib
 import logging
-import time
 from datetime import date, timedelta
 from typing import Optional
 
@@ -61,48 +59,26 @@ def create_branch_timeline(
     parent_id: int,
     branch_date: date,
     rng_seed: Optional[int],
-    overrides: Optional[dict],
+    overrides: Optional[dict] = None,
 ) -> Timeline:
-    """Create a branched timeline copying the parent's current sim state."""
-    parent = db.query(Timeline).filter_by(id=parent_id).first()
-    if parent is None:
-        raise NotFoundError(f"Parent timeline {parent_id} not found")
+    """Deprecated thin wrapper — delegates to branch_service.create_branch.
 
-    parent_state = db.query(SimulationState).filter_by(timeline_id=parent_id).first()
-    if parent_state is None:
-        raise NotFoundError(f"No simulation state for parent timeline {parent_id}")
+    Retained for backward compatibility with any existing caller passing the
+    old untyped `overrides: dict` shape; new code should call
+    branch_service.create_branch directly with typed OverrideSpec rows via
+    the /api/v1/sim/timelines router. The old `overrides["config_overrides"]`
+    path this used to implement was never actually reachable (it inserted
+    ConfigParameter(scope="timeline", ...), which violates that table's own
+    CHECK constraint on `scope`) -- overrides are silently ignored here now
+    rather than raising, since no caller ever successfully exercised that
+    path in the first place.
+    """
+    from apps.api.services.branch_service import create_branch
 
-    seed = rng_seed
-    if seed is None:
-        digest = hashlib.sha256(f"{name}-{time.time()}".encode("utf-8")).hexdigest()
-        seed = int(digest[:8], 16)
-
-    timeline = Timeline(
-        name=name,
-        parent_timeline_id=parent_id,
-        branch_point_sim_date=branch_date,
-        owner_user_id=user_id,
-        rng_seed=seed,
-        is_live=False,
+    return create_branch(
+        db, user_id=user_id, name=name, parent_id=parent_id, branch_date=branch_date,
+        rng_seed=rng_seed, primitive="manual", overrides=None,
     )
-    db.add(timeline)
-    db.flush()
-
-    new_state = SimulationState(
-        timeline_id=timeline.id,
-        current_sim_date=parent_state.current_sim_date,
-        tick_count=parent_state.tick_count,
-        is_running=False,
-    )
-    db.add(new_state)
-
-    if overrides:  # pragma: no cover — scope="timeline" violates DB CHECK
-        config_overrides = overrides.get("config_overrides") or {}  # pragma: no cover
-        for key, value in config_overrides.items():  # pragma: no cover
-            db.add(ConfigParameter(key=key, value=str(value), scope="timeline", scope_id=timeline.id))  # pragma: no cover
-
-    db.flush()
-    return timeline
 
 
 def inject_event(

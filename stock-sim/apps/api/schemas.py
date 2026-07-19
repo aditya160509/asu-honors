@@ -469,12 +469,61 @@ class AdvanceResponse(BaseModel):
     cycle_phase: Optional[str] = None
 
 
+class BranchCostEstimateResponse(BaseModel):
+    fast_forward_days: int
+    company_count: int
+    estimated_compute_ms: int
+
+
+class TimelineOverrideSpec(BaseModel):
+    """One structural-override row (Section 11.2): target_type is restricted
+    to persisted engine state -- factor_score/config/event/cycle_transition/
+    driver_bias -- never a bare "driver" pin, since the 7 tick-loop drivers
+    are recomputed every tick (see engine/overrides.py's module docstring)."""
+
+    target_type: str
+    target_key: str
+    override_value: str
+    effective_from_sim_date: date
+    target_scope_id: Optional[int] = None
+    effective_to_sim_date: Optional[date] = None
+
+    @field_validator("target_type")
+    @classmethod
+    def _validate_target_type(cls, v: str) -> str:
+        allowed = {"factor_score", "config", "event", "cycle_transition", "driver_bias"}
+        if v not in allowed:
+            raise ValueError(f"target_type must be one of {sorted(allowed)}")
+        return v
+
+
 class TimelineCreateRequest(BaseModel):
     name: str
     parent_timeline_id: int
     branch_point_sim_date: date
     rng_seed: Optional[int] = None
-    scenario_overrides: Optional[dict] = None
+    primitive: str = "manual"
+    overrides: Optional[list[TimelineOverrideSpec]] = None
+    # Section 11.3 step 4: how many sim-days to fast-forward immediately
+    # after the branch is created. 0 (default) creates the branch frozen at
+    # branch_point_sim_date with no async job dispatched -- the caller can
+    # fast-forward later via POST /sim/timelines/{id}/extend.
+    fast_forward_days: int = 0
+
+    @field_validator("fast_forward_days")
+    @classmethod
+    def _validate_fast_forward_days(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError("fast_forward_days must be >= 0")
+        return v
+
+    @field_validator("primitive")
+    @classmethod
+    def _validate_primitive(cls, v: str) -> str:
+        allowed = {"manual", "structural_override", "macro_shock", "sensitivity_sweep", "monte_carlo", "liquidity_scenario"}
+        if v not in allowed:
+            raise ValueError(f"primitive must be one of {sorted(allowed)}")
+        return v
 
 
 class TimelineResponse(BaseModel):
@@ -483,6 +532,106 @@ class TimelineResponse(BaseModel):
     is_live: bool
     parent_timeline_id: Optional[int] = None
     branch_point_sim_date: Optional[date] = None
+    primitive: Optional[str] = None
+    status: str = "ready"
+    pinned: bool = False
+    timeline_group_id: Optional[int] = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class TimelineStatusResponse(BaseModel):
+    id: int
+    status: str
+    current_sim_date: Optional[date] = None
+    tick_count: Optional[int] = None
+    last_touched_at: Optional[datetime] = None
+
+
+class TimelineDiffEntry(BaseModel):
+    target_type: str
+    target_key: str
+    target_scope_id: Optional[int] = None
+    left_value: Optional[str] = None
+    right_value: Optional[str] = None
+
+
+class TimelineDiffResponse(BaseModel):
+    left_timeline_id: int
+    right_timeline_id: int
+    entries: list[TimelineDiffEntry]
+
+
+class TimelineExtendRequest(BaseModel):
+    days: int
+
+    @field_validator("days")
+    @classmethod
+    def _validate_days(cls, v: int) -> int:
+        if v <= 0:
+            raise ValueError("days must be positive")
+        return v
+
+
+class TimelineGroupResponse(BaseModel):
+    id: int
+    primitive: str
+    label: Optional[str] = None
+    owner_user_id: Optional[int] = None
+    created_at: datetime
+    member_timeline_ids: list[int] = []
+
+    model_config = {"from_attributes": True}
+
+
+class DistributionResponse(BaseModel):
+    metric: str
+    count: int
+    mean: Optional[float] = None
+    median: Optional[float] = None
+    percentiles: dict[str, float] = {}
+    histogram_bins: list[float] = []
+    histogram_counts: list[int] = []
+
+
+class ScenarioTemplateCreateRequest(BaseModel):
+    name: str
+    description: Optional[str] = None
+    category: str
+    effect_profile: dict
+    default_duration_days: Optional[int] = None
+    editable_params: Optional[dict] = None
+
+    @field_validator("category")
+    @classmethod
+    def _validate_category(cls, v: str) -> str:
+        allowed = {"macro", "sector", "company", "liquidity"}
+        if v not in allowed:
+            raise ValueError(f"category must be one of {sorted(allowed)}")
+        return v
+
+
+class ScenarioTemplateResponse(BaseModel):
+    id: int
+    name: str
+    description: Optional[str] = None
+    category: str
+    effect_profile: dict
+    default_duration_days: Optional[int] = None
+    editable_params: Optional[dict] = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class AuditLogEntryResponse(BaseModel):
+    id: int
+    actor_user_id: Optional[int] = None
+    action: str
+    timeline_id: Optional[int] = None
+    before_value: Optional[dict] = None
+    after_value: Optional[dict] = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

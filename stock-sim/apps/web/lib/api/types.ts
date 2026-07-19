@@ -402,12 +402,38 @@ export interface AdvanceResponse {
   cycle_phase: string | null;
 }
 
+export type TimelinePrimitive =
+  | "manual"
+  | "structural_override"
+  | "macro_shock"
+  | "sensitivity_sweep"
+  | "monte_carlo"
+  | "liquidity_scenario";
+
+export type TimelineOverrideTargetType =
+  | "factor_score"
+  | "config"
+  | "event"
+  | "cycle_transition"
+  | "driver_bias";
+
+export interface TimelineOverrideSpec {
+  target_type: TimelineOverrideTargetType;
+  target_key: string;
+  override_value: string;
+  effective_from_sim_date: string;
+  target_scope_id?: number | null;
+  effective_to_sim_date?: string | null;
+}
+
 export interface TimelineCreateRequest {
   name: string;
   parent_timeline_id: number;
   branch_point_sim_date: string;
   rng_seed?: number | null;
-  scenario_overrides?: Record<string, unknown> | null;
+  primitive?: TimelinePrimitive;
+  overrides?: TimelineOverrideSpec[] | null;
+  fast_forward_days?: number;
 }
 
 export interface TimelineResponse {
@@ -416,6 +442,93 @@ export interface TimelineResponse {
   is_live: boolean;
   parent_timeline_id: number | null;
   branch_point_sim_date: string | null;
+  primitive: TimelinePrimitive | null;
+  status: "pending" | "running" | "ready" | "failed" | "archived";
+  pinned: boolean;
+  timeline_group_id: number | null;
+  created_at: string;
+}
+
+export interface BranchCostEstimateResponse {
+  fast_forward_days: number;
+  company_count: number;
+  estimated_compute_ms: number;
+}
+
+export interface TimelineStatusResponse {
+  id: number;
+  status: TimelineResponse["status"];
+  current_sim_date: string | null;
+  tick_count: number | null;
+  last_touched_at: string | null;
+}
+
+export interface TimelineDiffEntry {
+  target_type: TimelineOverrideTargetType;
+  target_key: string;
+  target_scope_id: number | null;
+  left_value: string | null;
+  right_value: string | null;
+}
+
+export interface TimelineDiffResponse {
+  left_timeline_id: number;
+  right_timeline_id: number;
+  entries: TimelineDiffEntry[];
+}
+
+export interface TimelineExtendRequest {
+  days: number;
+}
+
+export interface TimelineGroupResponse {
+  id: number;
+  primitive: "sensitivity_sweep" | "monte_carlo";
+  label: string | null;
+  owner_user_id: number | null;
+  created_at: string;
+  member_timeline_ids: number[];
+}
+
+export interface DistributionResponse {
+  metric: string;
+  count: number;
+  mean: number | null;
+  median: number | null;
+  percentiles: Record<string, number>;
+  histogram_bins: number[];
+  histogram_counts: number[];
+}
+
+export type ScenarioTemplateCategory = "macro" | "sector" | "company" | "liquidity";
+
+export interface ScenarioTemplateResponse {
+  id: number;
+  name: string;
+  description: string | null;
+  category: ScenarioTemplateCategory;
+  effect_profile: Record<string, unknown>;
+  default_duration_days: number | null;
+  editable_params: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface ScenarioTemplateCreateRequest {
+  name: string;
+  description?: string | null;
+  category: ScenarioTemplateCategory;
+  effect_profile: Record<string, unknown>;
+  default_duration_days?: number | null;
+  editable_params?: Record<string, unknown> | null;
+}
+
+export interface AuditLogEntryResponse {
+  id: number;
+  actor_user_id: number | null;
+  action: string;
+  timeline_id: number | null;
+  before_value: Record<string, unknown> | null;
+  after_value: Record<string, unknown> | null;
   created_at: string;
 }
 

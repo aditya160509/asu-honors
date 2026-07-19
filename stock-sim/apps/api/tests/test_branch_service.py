@@ -1,0 +1,195 @@
+"""Tests for apps/api/services/branch_service.py — fork creation, cost
+estimate, extend, archive."""
+
+from datetime import date, timedelta
+
+import pytest
+
+from apps.api.exceptions import ConflictError, NotFoundError
+from apps.api.services import branch_service
+from db.models import PriceHistory, SimulationState, Timeline, TimelineOverride
+
+
+def test_create_branch_basic(test_db, test_timeline, test_user):
+    timeline = branch_service.create_branch(
+        test_db, user_id=test_user.id, name="My Branch", parent_id=test_timeline.id,
+        branch_date=date(2026, 1, 2), rng_seed=None, primitive="manual",
+    )
+    test_db.commit()
+
+    assert timeline.id is not None
+    assert timeline.parent_timeline_id == test_timeline.id
+    assert timeline.branch_point_sim_date == date(2026, 1, 2)
+    assert timeline.is_live is False
+    assert timeline.status == "pending"
+    assert timeline.primitive == "manual"
+    assert timeline.rng_seed is not None
+
+    state = test_db.query(SimulationState).filter_by(timeline_id=timeline.id).first()
+    assert state is not None
+    assert state.current_sim_date == date(2026, 1, 2)
+    assert state.tick_count == 0
+    assert state.is_running is False
+
+
+def test_create_branch_deterministic_seed_when_given(test_db, test_timeline, test_user):
+    timeline = branch_service.create_branch(
+        test_db, user_id=test_user.id, name="Seeded Branch", parent_id=test_timeline.id,
+        branch_date=date(2026, 1, 2), rng_seed=12345, primitive="manual",
+    )
+    assert timeline.rng_seed == 12345
+
+
+def test_create_branch_missing_parent_raises(test_db, test_user):
+    with pytest.raises(NotFoundError):
+        branch_service.create_branch(
+            test_db, user_id=test_user.id, name="Orphan", parent_id=999,
+            branch_date=date(2026, 1, 2), rng_seed=None, primitive="manual",
+        )
+
+
+def test_create_branch_missing_parent_state_raises(test_db, test_user):
+    parent = Timeline(id=50, name="No State", rng_seed=1, is_live=True)
+    test_db.add(parent)
+    test_db.commit()
+    with pytest.raises(NotFoundError):
+        branch_service.create_branch(
+            test_db, user_id=test_user.id, name="Orphan", parent_id=50,
+            branch_date=date(2026, 1, 2), rng_seed=None, primitive="manual",
+        )
+
+
+def test_create_branch_future_date_raises(test_db, test_timeline, test_user):
+    current = test_db.query(SimulationState).filter_by(timeline_id=test_timeline.id).first().current_sim_date
+    with pytest.raises(ConflictError):
+        branch_service.create_branch(
+            test_db, user_id=test_user.id, name="Time Traveler", parent_id=test_timeline.id,
+            branch_date=current + timedelta(days=30),
+            rng_seed=None, primitive="manual",
+        )
+
+
+def test_create_branch_invalid_primitive_raises(test_db, test_timeline, test_user):
+    with pytest.raises(ConflictError):
+        branch_service.create_branch(
+            test_db, user_id=test_user.id, name="Bad Primitive", parent_id=test_timeline.id,
+            branch_date=date(2026, 1, 2), rng_seed=None, primitive="not_a_real_primitive",
+        )
+
+
+def test_create_branch_with_overrides_persists_rows(test_db, test_timeline, test_user):
+    overrides = [
+        branch_service.OverrideSpec(
+            target_type="config", target_key="theta_default", override_value="0.08",
+            effective_from_sim_date=date(2026, 1, 2),
+        ),
+        branch_service.OverrideSpec(
+            target_type="driver_bias", target_key="guidance", override_value="0.2",
+            effective_from_sim_date=date(2026, 1, 2), target_scope_id=1,
+        ),
+    ]
+    timeline = branch_service.create_branch(
+        test_db, user_id=test_user.id, name="Override Branch", parent_id=test_timeline.id,
+        branch_date=date(2026, 1, 2), rng_seed=None, primitive="structural_override", overrides=overrides,
+    )
+    test_db.commit()
+
+    rows = test_db.query(TimelineOverride).filter_by(timeline_id=timeline.id).order_by(TimelineOverride.id).all()
+    assert len(rows) == 2
+    assert rows[0].target_type == "config"
+    assert rows[0].target_key == "theta_default"
+    assert rows[1].target_type == "driver_bias"
+    assert rows[1].target_scope_id == 1
+
+
+def test_create_branch_invalid_override_target_type_raises(test_db, test_timeline, test_user):
+    overrides = [
+        branch_service.OverrideSpec(
+            target_type="not_a_real_type", target_key="x", override_value="1",
+            effective_from_sim_date=date(2026, 1, 2),
+        ),
+    ]
+    with pytest.raises(ConflictError):
+        branch_service.create_branch(
+            test_db, user_id=test_user.id, name="Bad Override", parent_id=test_timeline.id,
+            branch_date=date(2026, 1, 2), rng_seed=None, primitive="manual", overrides=overrides,
+        )
+
+
+def test_estimate_branch_cost(test_db, test_timeline, test_company):
+    result = branch_service.estimate_branch_cost(test_db, test_timeline.id, fast_forward_days=100)
+    assert result["fast_forward_days"] == 100
+    assert result["company_count"] == 1
+    assert result["estimated_compute_ms"] > 0
+
+
+def test_estimate_branch_cost_negative_days_raises(test_db, test_timeline):
+    with pytest.raises(ConflictError):
+        branch_service.estimate_branch_cost(test_db, test_timeline.id, fast_forward_days=-1)
+
+
+def test_extend_timeline_missing_raises(test_db):
+    with pytest.raises(NotFoundError):
+        branch_service.extend_timeline(test_db, 999, additional_days=1)
+
+
+def test_extend_timeline_zero_days_raises(test_db, test_timeline):
+    with pytest.raises(ConflictError):
+        branch_service.extend_timeline(test_db, test_timeline.id, additional_days=0)
+
+
+def test_archive_timeline_missing_raises(test_db):
+    with pytest.raises(NotFoundError):
+        branch_service.archive_timeline(test_db, 999)
+
+
+def test_archive_timeline_live_raises(test_db, test_timeline):
+    with pytest.raises(ConflictError):
+        branch_service.archive_timeline(test_db, test_timeline.id)
+
+
+def test_archive_pinned_timeline_raises(test_db, test_timeline, test_user):
+    timeline = branch_service.create_branch(
+        test_db, user_id=test_user.id, name="Pinned Branch", parent_id=test_timeline.id,
+        branch_date=date(2026, 1, 2), rng_seed=None, primitive="manual",
+    )
+    timeline.pinned = True
+    test_db.commit()
+
+    with pytest.raises(ConflictError):
+        branch_service.archive_timeline(test_db, timeline.id)
+
+
+def test_archive_unpinned_branch_succeeds(test_db, test_timeline, test_user):
+    timeline = branch_service.create_branch(
+        test_db, user_id=test_user.id, name="Disposable Branch", parent_id=test_timeline.id,
+        branch_date=date(2026, 1, 2), rng_seed=None, primitive="manual",
+    )
+    test_db.commit()
+
+    archived = branch_service.archive_timeline(test_db, timeline.id)
+    assert archived.status == "archived"
+
+
+def test_extend_timeline_advances_ticks(test_db, test_timeline, test_user, test_company):
+    """Full round-trip: fork a branch, then extend it, and confirm its own
+    PriceHistory rows accumulate without touching the parent's."""
+    from apps.api.tests.test_simulation import _seed_tickable
+
+    _seed_tickable(test_db, test_company, test_timeline)
+    timeline = branch_service.create_branch(
+        test_db, user_id=test_user.id, name="Extend Me", parent_id=test_timeline.id,
+        branch_date=date(2026, 1, 1), rng_seed=99, primitive="manual",
+    )
+    test_db.commit()
+
+    result = branch_service.extend_timeline(test_db, timeline.id, additional_days=2)
+    test_db.commit()
+
+    assert result.status == "ready"
+    child_prices = test_db.query(PriceHistory).filter_by(timeline_id=timeline.id).all()
+    assert len(child_prices) == 2
+    parent_prices = test_db.query(PriceHistory).filter_by(timeline_id=test_timeline.id).all()
+    # Parent's own PriceHistory is untouched by the child's fast-forward --
+    # regression coverage for the live-data-corruption fix (Phase 1).
+    assert len(parent_prices) == 1

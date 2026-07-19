@@ -7,10 +7,23 @@ from typing import AsyncIterator
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from apps.api.database import check_migrations_up_to_date
 from apps.api.database import engine as db_engine
 from apps.api.exceptions import add_exception_handlers
 
-from apps.api.routers import auth, concalls, health, leaderboard, market, news, portfolio, simulation, trading
+from apps.api.routers import (
+    audit_log,
+    auth,
+    concalls,
+    health,
+    leaderboard,
+    market,
+    news,
+    portfolio,
+    scenario_library,
+    simulation,
+    trading,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -18,6 +31,10 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    # Fail loudly at startup rather than serving requests against a database
+    # that's behind on migrations -- see check_migrations_up_to_date's
+    # docstring for the production incident this prevents from recurring.
+    check_migrations_up_to_date()
     yield
     db_engine.dispose()
 
@@ -46,6 +63,8 @@ def create_app() -> FastAPI:
     application.include_router(trading.router)
     application.include_router(portfolio.router)
     application.include_router(simulation.router)
+    application.include_router(scenario_library.router)
+    application.include_router(audit_log.router)
     application.include_router(news.router)
     application.include_router(concalls.router)
     application.include_router(leaderboard.router)

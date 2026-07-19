@@ -179,12 +179,21 @@ def test_get_fee_rate_invalid_value(client, test_db, test_company, test_portfoli
 
 
 def test_place_order_no_sim_state(client, test_db, test_company, auth_headers, test_user, test_industry):
-    from db.models import Portfolio, Timeline
+    from datetime import date as date_cls
+    from db.models import Portfolio, PriceHistory, Timeline
     timeline = Timeline(id=2, name="No State Timeline", rng_seed=99, is_live=False)
     test_db.add(timeline)
     test_db.commit()
     portfolio = Portfolio(user_id=test_user.id, timeline_id=2, cash_balance=100_000.0, total_value=100_000.0)
     test_db.add(portfolio)
+    # get_latest_price (db/timeline_resolver.py) resolves price from
+    # PriceHistory scoped to this specific timeline -- timeline 2 has no
+    # parent and no ticks of its own, so it needs its own baseline row.
+    test_db.add(PriceHistory(
+        timeline_id=2, company_id=1, sim_date=date_cls(2026, 1, 1),
+        open=100.0, high=101.0, low=99.0, close=100.0,
+        volume=500_000, intrinsic_value=100.0, order_imbalance=0.0,
+    ))
     test_db.commit()
     resp = client.post(
         "/api/v1/orders",
@@ -494,7 +503,17 @@ def test_check_and_fill_limit_orders_fills_when_price_crosses(test_db, test_comp
     order = test_db.query(Order).filter_by(portfolio_id=test_portfolio.id).first()
     assert order.status == "open"
 
-    test_company.current_price = 88.0  # price now crosses the buy limit of 90
+    # price now crosses the buy limit of 90 -- write a new PriceHistory row
+    # rather than mutating test_company.current_price, since
+    # check_and_fill_limit_orders resolves price via get_latest_price
+    # (db/timeline_resolver.py), not the shared Company column.
+    from datetime import date as date_cls
+    from db.models import PriceHistory
+    test_db.add(PriceHistory(
+        timeline_id=1, company_id=1, sim_date=date_cls(2026, 1, 2),
+        open=95.0, high=96.0, low=87.0, close=88.0,
+        volume=500_000, intrinsic_value=100.0, order_imbalance=0.0,
+    ))
     test_db.commit()
 
     filled = check_and_fill_limit_orders(test_db, timeline_id=1)

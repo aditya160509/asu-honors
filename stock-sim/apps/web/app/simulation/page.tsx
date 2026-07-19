@@ -1,10 +1,10 @@
 import { TerminalShell } from "@/components/layout/TerminalShell";
-import { SimulationTradingView } from "@/components/simulation/SimulationTradingView";
+import { SimulationPageContent } from "@/components/simulation/SimulationPageContent";
 
 export default function SimulationPage() {
   return (
     <TerminalShell>
-      <SimulationTradingView />
+      <SimulationPageContent />
     </TerminalShell>
   );
 }

@@ -7,6 +7,7 @@ import math
 import os
 import random
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Optional
 
 import pytest
@@ -21,6 +22,7 @@ from db.models import (
     FinancialQualitySubscore, IncomeStatement, BalanceSheet, CashFlowStatement,
     ConsensusEstimate, Timeline, SimulationState, PriceHistory, EventInstance,
     MarketEvent, NewsTemplate, NewsFeed, User, Portfolio, Holding, ConCall,
+    TimelineOverride,
 )
 from db.models.events import MarketEvent, NewsTemplate
 from db.models.timeseries import EconomicCycleState, PriceDriverScore
@@ -60,17 +62,23 @@ def _seed_minimal(session: Session) -> int:
     """Seed just enough data to run one tick, using raw SQL for FK safety."""
     from sqlalchemy import text as sa_text
 
+    session.execute(sa_text("""INSERT INTO timelines (id, name, rng_seed, is_live, status, pinned, created_at, updated_at) VALUES (1, 'Live Market', 42, 1, 'ready', 0, datetime('now'), datetime('now'))"""))
     session.execute(sa_text("""INSERT INTO industries (id, name, description, base_volatility, cycle_sensitivity, sector_beta_default, subfactor_set, created_at, updated_at) VALUES (1, 'Test Industry', '', 20.0, 1.0, 0.8, 'standard', datetime('now'), datetime('now'))"""))
     session.execute(sa_text("""INSERT INTO companies (id, name, ticker, industry_id, shares_outstanding, free_float_pct, beta_market, beta_sector, current_price, intrinsic_value, intrinsic_score, fair_pe, market_cap, volatility, market_liquidity_score, created_at, updated_at) VALUES (1, 'Test Corp', 'TST', 1, 100000000, 0.8, 1.0, 0.5, 100.0, 100.0, 50.0, 15.0, 10000000000.0, 0.02, 80.0, datetime('now'), datetime('now'))"""))
     session.execute(sa_text("""INSERT INTO factor_definitions (key, display_name, factor_type, pillar, direction, formula_ref, default_weight, created_at, updated_at) VALUES ('test_fq', 'Test FQ', 'fq_sub', 'profitability', 'higher_better', 'test', 1.0, datetime('now'), datetime('now'))"""))
     session.execute(sa_text("""INSERT INTO industry_pillar_weights (industry_id, pillar, weight, created_at, updated_at) VALUES (1, 'profitability', 1.0, datetime('now'), datetime('now'))"""))
-    session.execute(sa_text("""INSERT INTO moat_subscores (company_id, subfactor_key, score, created_at, updated_at) VALUES (1, 'brand_strength', 70.0, datetime('now'), datetime('now'))"""))
-    session.execute(sa_text("""INSERT INTO company_factor_scores (company_id, fiscal_period, management_quality, moat_score, financial_quality, fcf_quality, growth_potential, intrinsic_score, fair_pe, intrinsic_value, computed_at, created_at, updated_at) VALUES (1, 'SEED', 50.0, 50.0, 50.0, 50.0, 50.0, 50.0, 15.0, 100.0, datetime('now'), datetime('now'), datetime('now'))"""))
-    session.execute(sa_text("""INSERT INTO income_statements (company_id, fiscal_period, revenue, cogs, gross_profit, operating_expenses, ebitda, depreciation_amortization, ebit, interest_expense, pretax_income, tax, net_profit, eps, shares_diluted, created_at, updated_at) VALUES (1, '2026Q1', 1000000, 600000, 400000, 200000, 200000, 50000, 150000, 20000, 130000, 32500, 97500, 0.975, 100000000, datetime('now'), datetime('now'))"""))
-    session.execute(sa_text("""INSERT INTO balance_sheets (company_id, fiscal_period, cash_and_equivalents, receivables, inventory, current_assets, ppe, intangibles, total_assets, payables, short_term_debt, current_liabilities, long_term_debt, total_debt, total_liabilities, shareholders_equity, invested_capital, created_at, updated_at) VALUES (1, '2026Q1', 500000, 200000, 300000, 1000000, 2000000, 500000, 5000000, 150000, 100000, 250000, 500000, 600000, 1500000, 3500000, 4100000, datetime('now'), datetime('now'))"""))
-    session.execute(sa_text("""INSERT INTO cash_flow_statements (company_id, fiscal_period, operating_cash_flow, capex, free_cash_flow, investing_cash_flow, financing_cash_flow, dividends_paid, buybacks, net_change_in_cash, created_at, updated_at) VALUES (1, '2026Q1', 120000, -50000, 70000, -50000, -20000, -30000, -10000, 50000, datetime('now'), datetime('now'))"""))
-    session.execute(sa_text("""INSERT INTO consensus_estimates (company_id, fiscal_period, consensus_eps, consensus_revenue, created_at, updated_at) VALUES (1, '2026Q1', 0.95, 980000, datetime('now'), datetime('now'))"""))
-    session.execute(sa_text("""INSERT INTO timelines (id, name, rng_seed, is_live, created_at, updated_at) VALUES (1, 'Live Market', 42, 1, datetime('now'), datetime('now'))"""))
+    session.execute(sa_text("""INSERT INTO moat_subscores (company_id, timeline_id, subfactor_key, score, created_at, updated_at) VALUES (1, 1, 'brand_strength', 70.0, datetime('now'), datetime('now'))"""))
+    session.execute(sa_text("""INSERT INTO company_factor_scores (company_id, timeline_id, fiscal_period, management_quality, moat_score, financial_quality, fcf_quality, growth_potential, intrinsic_score, fair_pe, intrinsic_value, computed_at, created_at, updated_at) VALUES (1, 1, 'SEED', 50.0, 50.0, 50.0, 50.0, 50.0, 50.0, 15.0, 100.0, datetime('now'), datetime('now'), datetime('now'))"""))
+    session.execute(sa_text("""INSERT INTO income_statements (company_id, timeline_id, fiscal_period, revenue, cogs, gross_profit, operating_expenses, ebitda, depreciation_amortization, ebit, interest_expense, pretax_income, tax, net_profit, eps, shares_diluted, created_at, updated_at) VALUES (1, 1, '2026Q1', 1000000, 600000, 400000, 200000, 200000, 50000, 150000, 20000, 130000, 32500, 97500, 0.975, 100000000, datetime('now'), datetime('now'))"""))
+    session.execute(sa_text("""INSERT INTO balance_sheets (company_id, timeline_id, fiscal_period, cash_and_equivalents, receivables, inventory, current_assets, ppe, intangibles, total_assets, payables, short_term_debt, current_liabilities, long_term_debt, total_debt, total_liabilities, shareholders_equity, invested_capital, created_at, updated_at) VALUES (1, 1, '2026Q1', 500000, 200000, 300000, 1000000, 2000000, 500000, 5000000, 150000, 100000, 250000, 500000, 600000, 1500000, 3500000, 4100000, datetime('now'), datetime('now'))"""))
+    session.execute(sa_text("""INSERT INTO cash_flow_statements (company_id, timeline_id, fiscal_period, operating_cash_flow, capex, free_cash_flow, investing_cash_flow, financing_cash_flow, dividends_paid, buybacks, net_change_in_cash, created_at, updated_at) VALUES (1, 1, '2026Q1', 120000, -50000, 70000, -50000, -20000, -30000, -10000, 50000, datetime('now'), datetime('now'))"""))
+    session.execute(sa_text("""INSERT INTO consensus_estimates (company_id, timeline_id, fiscal_period, consensus_eps, consensus_revenue, created_at, updated_at) VALUES (1, 1, '2026Q1', 0.95, 980000, datetime('now'), datetime('now'))"""))
+    # Day-0 baseline PriceHistory row, matching what seed_initial_prices.py
+    # writes in production -- price_overlay/iv_overlay (engine/orchestrator.py)
+    # resolve THIS timeline's price/IV from PriceHistory, not company.current_price/
+    # .intrinsic_value directly, so a timeline with no PriceHistory rows yet has
+    # nothing to compute the first tick from.
+    session.execute(sa_text("""INSERT INTO price_history (timeline_id, company_id, sim_date, open, high, low, close, volume, intrinsic_value, order_imbalance, created_at, updated_at) VALUES (1, 1, '2026-01-01', 100.0, 101.0, 99.0, 100.0, 500000, 100.0, 0.0, datetime('now'), datetime('now'))"""))
     session.execute(sa_text("""INSERT INTO simulation_state (timeline_id, current_sim_date, tick_count, is_running, created_at, updated_at) VALUES (1, '2026-01-02', 0, 0, datetime('now'), datetime('now'))"""))
     session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('theta_default', '0.05', 'global', datetime('now'), datetime('now'))"""))
     session.execute(sa_text("""INSERT INTO config_parameters (key, value, scope, created_at, updated_at) VALUES ('quality_mult_min', '0.6', 'global', datetime('now'), datetime('now'))"""))
@@ -151,7 +159,9 @@ def test_run_tick_idempotent(session):
     assert r3["status"] == "skipped"
 
     prices = session.query(PriceHistory).filter_by(timeline_id=timeline_id).all()
-    assert len(prices) == 2
+    # 1 day-0 baseline row (seeded by _seed_minimal, matching seed_initial_prices.py)
+    # + 2 real ticks (r1, r2) -- r3 is a skipped/idempotent replay and writes no row.
+    assert len(prices) == 3
 
 
 def test_run_tick_first_tick_skips_seeded_baseline_day(session):
@@ -210,10 +220,11 @@ def test_run_ticks_multiple_days(session):
     assert all(r["status"] == "completed" for r in results)
 
     prices = session.query(PriceHistory).filter_by(timeline_id=timeline_id).order_by(PriceHistory.sim_date).all()
-    assert len(prices) == 5
+    # +1 for the day-0 baseline row seeded by _seed_minimal.
+    assert len(prices) == 6
     dates = [p.sim_date for p in prices]
     assert dates == sorted(set(dates))
-    assert len(dates) == 5
+    assert len(dates) == 6
 
     sim_state = session.query(SimulationState).filter_by(timeline_id=timeline_id).first()
     assert sim_state.tick_count == 5
@@ -229,7 +240,8 @@ def test_run_ticks_produces_varying_prices(session):
     ).order_by(PriceHistory.sim_date).all()
 
     closes = [float(p.close) for p in prices]
-    assert len(closes) == 10
+    # +1 for the day-0 baseline row seeded by _seed_minimal.
+    assert len(closes) == 11
     assert max(closes) != min(closes)
 
 
@@ -376,18 +388,24 @@ def test_run_tick_no_simulation_state(session):
 
 
 def test_run_tick_company_no_price(session):
+    """_compute_drivers sources 'previous close' from state.price_overlay
+    (this timeline's own PriceHistory, via db/timeline_resolver.py), not
+    company.current_price -- so the no-price case must be exercised by
+    removing the PriceHistory row, not nulling the shared Company column."""
     timeline_id = _seed_minimal(session)
-    c = session.query(Company).first()
-    c.current_price = None
+    session.execute(text("DELETE FROM price_history WHERE timeline_id = :tid"), {"tid": timeline_id})
     session.commit()
     with pytest.raises(ValueError, match="No companies with valid pricing data"):
         run_tick(session, timeline_id)
 
 
 def test_run_tick_company_no_intrinsic_value(session):
+    """Same as test_run_tick_company_no_price but for iv_overlay: nulling
+    company.intrinsic_value no longer has any effect on pricing since
+    _compute_drivers reads state.iv_overlay (sourced from this timeline's
+    PriceHistory.intrinsic_value), so remove the PriceHistory row instead."""
     timeline_id = _seed_minimal(session)
-    c = session.query(Company).first()
-    c.intrinsic_value = None
+    session.execute(text("DELETE FROM price_history WHERE timeline_id = :tid"), {"tid": timeline_id})
     session.commit()
     with pytest.raises(ValueError, match="No companies with valid pricing data"):
         run_tick(session, timeline_id)
@@ -616,6 +634,54 @@ def test_mark_to_market_no_holdings(session):
 
     pf = session.query(Portfolio).filter_by(id=2).first()
     assert pf.total_value == 10000.0
+
+
+def test_mark_to_market_uses_this_timelines_own_price_not_shared_company_column(session):
+    """Regression test: _mark_to_market must value a non-live timeline's
+    holdings against THIS timeline's own tick close (ohlc_results), never
+    Company.current_price -- that column is a single shared cache only the
+    live timeline is allowed to write (_update_denormalized_fields). Before
+    the fix, a branch's portfolio was marked to whatever price the live (or
+    another branch's) timeline last wrote there, silently corrupting
+    portfolio valuation for every non-live timeline."""
+    from sqlalchemy import text as sa_text
+
+    live_id = _seed_minimal(session)
+
+    # Poison the shared Company.current_price far away from what this
+    # branch will actually compute, simulating "another timeline just
+    # ticked and overwrote the shared cache."
+    company = session.query(Company).filter_by(id=1).first()
+    company.current_price = 9999.0
+    session.commit()
+
+    branch = Timeline(id=99, name="Branch", rng_seed=7, is_live=False, parent_timeline_id=live_id)
+    session.add(branch)
+    session.commit()
+    session.add(SimulationState(timeline_id=branch.id, current_sim_date=date(2026, 1, 2), tick_count=0, is_running=False))
+    session.execute(sa_text(
+        "INSERT INTO price_history (timeline_id, company_id, sim_date, open, high, low, close, volume, "
+        "intrinsic_value, order_imbalance, created_at, updated_at) "
+        "VALUES (99, 1, '2026-01-01', 100.0, 101.0, 99.0, 100.0, 500000, 100.0, 0.0, datetime('now'), datetime('now'))"
+    ))
+    u = User(id=3, email="test3@test.com", hashed_password="x", display_name="Tester3", role="user", starting_cash=10000)
+    session.add(u)
+    session.flush()
+    pf = Portfolio(id=3, user_id=3, timeline_id=branch.id, cash_balance=5000.0, total_value=5000.0)
+    session.add(pf)
+    session.flush()
+    session.add(Holding(id=3, portfolio_id=3, company_id=1, quantity=10.0, avg_cost_basis=100.0))
+    session.commit()
+
+    result = run_tick(session, branch.id)
+    session.commit()
+    assert result["status"] == "completed"
+
+    pf = session.query(Portfolio).filter_by(id=3).first()
+    # The branch's own tick closed somewhere near its own ~100.0 baseline
+    # (bounded by the circuit breaker), never anywhere near the poisoned
+    # 9999.0 shared Company.current_price value.
+    assert pf.total_value < Decimal("15000.0")
 
 
 # ── _apply_event_factor_effects (lines 1099, 1103-1189) ───────────────────
@@ -881,42 +947,50 @@ def test_multiple_companies_tick(session):
         "datetime('now'), datetime('now'))"
     ))
     session.execute(text(
-        "INSERT INTO moat_subscores (company_id, subfactor_key, score, created_at, updated_at) "
-        "VALUES (2, 'brand_strength', 75.0, datetime('now'), datetime('now'))"
+        "INSERT INTO moat_subscores (company_id, timeline_id, subfactor_key, score, created_at, updated_at) "
+        "VALUES (2, 1, 'brand_strength', 75.0, datetime('now'), datetime('now'))"
     ))
     session.execute(text(
-        "INSERT INTO company_factor_scores (company_id, fiscal_period, management_quality, moat_score, "
+        "INSERT INTO company_factor_scores (company_id, timeline_id, fiscal_period, management_quality, moat_score, "
         "financial_quality, fcf_quality, growth_potential, intrinsic_score, fair_pe, intrinsic_value, "
         "computed_at, created_at, updated_at) "
-        "VALUES (2, 'SEED', 60.0, 60.0, 60.0, 60.0, 60.0, 60.0, 20.0, 50.0, "
+        "VALUES (2, 1, 'SEED', 60.0, 60.0, 60.0, 60.0, 60.0, 60.0, 20.0, 50.0, "
         "datetime('now'), datetime('now'), datetime('now'))"
     ))
     session.execute(text(
-        "INSERT INTO income_statements (company_id, fiscal_period, revenue, cogs, gross_profit, "
+        "INSERT INTO income_statements (company_id, timeline_id, fiscal_period, revenue, cogs, gross_profit, "
         "operating_expenses, ebitda, depreciation_amortization, ebit, interest_expense, pretax_income, "
         "tax, net_profit, eps, shares_diluted, created_at, updated_at) "
-        "VALUES (2, '2026Q1', 2000000, 1200000, 800000, 400000, 400000, 100000, 300000, 40000, "
+        "VALUES (2, 1, '2026Q1', 2000000, 1200000, 800000, 400000, 400000, 100000, 300000, 40000, "
         "260000, 65000, 195000, 3.9, 50000000, datetime('now'), datetime('now'))"
     ))
     session.execute(text(
-        "INSERT INTO balance_sheets (company_id, fiscal_period, cash_and_equivalents, receivables, "
+        "INSERT INTO balance_sheets (company_id, timeline_id, fiscal_period, cash_and_equivalents, receivables, "
         "inventory, current_assets, ppe, intangibles, total_assets, payables, short_term_debt, "
         "current_liabilities, long_term_debt, total_debt, total_liabilities, shareholders_equity, "
         "invested_capital, created_at, updated_at) "
-        "VALUES (2, '2026Q1', 1000000, 400000, 600000, 2000000, 4000000, 1000000, 10000000, 300000, "
+        "VALUES (2, 1, '2026Q1', 1000000, 400000, 600000, 2000000, 4000000, 1000000, 10000000, 300000, "
         "200000, 500000, 1000000, 1200000, 3000000, 7000000, 8200000, datetime('now'), datetime('now'))"
     ))
     session.execute(text(
-        "INSERT INTO cash_flow_statements (company_id, fiscal_period, operating_cash_flow, capex, "
+        "INSERT INTO cash_flow_statements (company_id, timeline_id, fiscal_period, operating_cash_flow, capex, "
         "free_cash_flow, investing_cash_flow, financing_cash_flow, dividends_paid, buybacks, "
         "net_change_in_cash, created_at, updated_at) "
-        "VALUES (2, '2026Q1', 240000, -100000, 140000, -100000, -40000, -60000, -20000, 100000, "
+        "VALUES (2, 1, '2026Q1', 240000, -100000, 140000, -100000, -40000, -60000, -20000, 100000, "
         "datetime('now'), datetime('now'))"
     ))
     session.execute(text(
-        "INSERT INTO consensus_estimates (company_id, fiscal_period, consensus_eps, consensus_revenue, "
+        "INSERT INTO consensus_estimates (company_id, timeline_id, fiscal_period, consensus_eps, consensus_revenue, "
         "created_at, updated_at) "
-        "VALUES (2, '2026Q1', 3.8, 1950000, datetime('now'), datetime('now'))"
+        "VALUES (2, 1, '2026Q1', 3.8, 1950000, datetime('now'), datetime('now'))"
+    ))
+    # Day-0 baseline PriceHistory row for company 2 (see _seed_minimal's
+    # equivalent row for company 1) -- without it, company 2 has no
+    # price_overlay/iv_overlay entry and _compute_drivers skips it.
+    session.execute(text(
+        "INSERT INTO price_history (timeline_id, company_id, sim_date, open, high, low, close, volume, "
+        "intrinsic_value, order_imbalance, created_at, updated_at) "
+        "VALUES (1, 2, '2026-01-01', 50.0, 50.5, 49.5, 50.0, 300000, 50.0, 0.0, datetime('now'), datetime('now'))"
     ))
 
     # Add pillar weight for new industry
@@ -932,7 +1006,8 @@ def test_multiple_companies_tick(session):
     assert result["companies_updated"] == 2
 
     phs = session.query(PriceHistory).filter_by(timeline_id=timeline_id).all()
-    assert len(phs) == 2
+    # 1 baseline (co 1, from _seed_minimal) + 1 baseline (co 2, above) + 2 tick rows.
+    assert len(phs) == 4
 
     companies = session.query(Company).order_by(Company.id).all()
     assert all(c.current_price is not None and float(c.current_price) > 0 for c in companies)
@@ -1026,42 +1101,47 @@ def test_quarter_boundary_multiple_companies(session):
         "10000000000.0, 0.02, 80.0, datetime('now'), datetime('now'))"
     ))
     session.execute(text(
-        "INSERT INTO moat_subscores (company_id, subfactor_key, score, created_at, updated_at) "
-        "VALUES (2, 'brand_strength', 70.0, datetime('now'), datetime('now'))"
+        "INSERT INTO moat_subscores (company_id, timeline_id, subfactor_key, score, created_at, updated_at) "
+        "VALUES (2, 1, 'brand_strength', 70.0, datetime('now'), datetime('now'))"
     ))
     session.execute(text(
-        "INSERT INTO company_factor_scores (company_id, fiscal_period, management_quality, moat_score, "
+        "INSERT INTO company_factor_scores (company_id, timeline_id, fiscal_period, management_quality, moat_score, "
         "financial_quality, fcf_quality, growth_potential, intrinsic_score, fair_pe, intrinsic_value, "
         "computed_at, created_at, updated_at) "
-        "VALUES (2, 'SEED', 50.0, 50.0, 50.0, 50.0, 50.0, 50.0, 15.0, 100.0, "
+        "VALUES (2, 1, 'SEED', 50.0, 50.0, 50.0, 50.0, 50.0, 50.0, 15.0, 100.0, "
         "datetime('now'), datetime('now'), datetime('now'))"
     ))
     session.execute(text(
-        "INSERT INTO income_statements (company_id, fiscal_period, revenue, cogs, gross_profit, "
+        "INSERT INTO income_statements (company_id, timeline_id, fiscal_period, revenue, cogs, gross_profit, "
         "operating_expenses, ebitda, depreciation_amortization, ebit, interest_expense, pretax_income, "
         "tax, net_profit, eps, shares_diluted, created_at, updated_at) "
-        "VALUES (2, '2026Q1', 1000000, 600000, 400000, 200000, 200000, 50000, 150000, 20000, "
+        "VALUES (2, 1, '2026Q1', 1000000, 600000, 400000, 200000, 200000, 50000, 150000, 20000, "
         "130000, 32500, 97500, 0.975, 100000000, datetime('now'), datetime('now'))"
     ))
     session.execute(text(
-        "INSERT INTO balance_sheets (company_id, fiscal_period, cash_and_equivalents, receivables, "
+        "INSERT INTO balance_sheets (company_id, timeline_id, fiscal_period, cash_and_equivalents, receivables, "
         "inventory, current_assets, ppe, intangibles, total_assets, payables, short_term_debt, "
         "current_liabilities, long_term_debt, total_debt, total_liabilities, shareholders_equity, "
         "invested_capital, created_at, updated_at) "
-        "VALUES (2, '2026Q1', 500000, 200000, 300000, 1000000, 2000000, 500000, 5000000, 150000, "
+        "VALUES (2, 1, '2026Q1', 500000, 200000, 300000, 1000000, 2000000, 500000, 5000000, 150000, "
         "100000, 250000, 500000, 600000, 1500000, 3500000, 4100000, datetime('now'), datetime('now'))"
     ))
     session.execute(text(
-        "INSERT INTO cash_flow_statements (company_id, fiscal_period, operating_cash_flow, capex, "
+        "INSERT INTO cash_flow_statements (company_id, timeline_id, fiscal_period, operating_cash_flow, capex, "
         "free_cash_flow, investing_cash_flow, financing_cash_flow, dividends_paid, buybacks, "
         "net_change_in_cash, created_at, updated_at) "
-        "VALUES (2, '2026Q1', 120000, -50000, 70000, -50000, -20000, -30000, -10000, 50000, "
+        "VALUES (2, 1, '2026Q1', 120000, -50000, 70000, -50000, -20000, -30000, -10000, 50000, "
         "datetime('now'), datetime('now'))"
     ))
     session.execute(text(
-        "INSERT INTO consensus_estimates (company_id, fiscal_period, consensus_eps, consensus_revenue, "
+        "INSERT INTO consensus_estimates (company_id, timeline_id, fiscal_period, consensus_eps, consensus_revenue, "
         "created_at, updated_at) "
-        "VALUES (2, '2026Q1', 0.95, 980000, datetime('now'), datetime('now'))"
+        "VALUES (2, 1, '2026Q1', 0.95, 980000, datetime('now'), datetime('now'))"
+    ))
+    session.execute(text(
+        "INSERT INTO price_history (timeline_id, company_id, sim_date, open, high, low, close, volume, "
+        "intrinsic_value, order_imbalance, created_at, updated_at) "
+        "VALUES (1, 2, '2026-01-01', 100.0, 101.0, 99.0, 100.0, 500000, 100.0, 0.0, datetime('now'), datetime('now'))"
     ))
     session.commit()
 
@@ -1075,7 +1155,7 @@ def test_quarter_boundary_multiple_companies(session):
     session.commit()
     assert result["status"] == "completed"
 
-    cfs_list = session.query(CompanyFactorScore).filter_by(fiscal_period="2026Q2").all()
+    cfs_list = session.query(CompanyFactorScore).filter_by(fiscal_period="2026Q2", timeline_id=timeline_id).all()
     assert len(cfs_list) == 2
 
 
@@ -1126,36 +1206,41 @@ def test_banking_sector_tick(session):
             ))
 
     session.execute(text(
-        "INSERT INTO moat_subscores (company_id, subfactor_key, score, created_at, updated_at) "
-        "VALUES (2, 'brand_strength', 70.0, datetime('now'), datetime('now'))"
+        "INSERT INTO moat_subscores (company_id, timeline_id, subfactor_key, score, created_at, updated_at) "
+        "VALUES (2, 1, 'brand_strength', 70.0, datetime('now'), datetime('now'))"
     ))
     session.execute(text(
-        "INSERT INTO company_factor_scores (company_id, fiscal_period, management_quality, moat_score, "
+        "INSERT INTO company_factor_scores (company_id, timeline_id, fiscal_period, management_quality, moat_score, "
         "financial_quality, fcf_quality, growth_potential, intrinsic_score, fair_pe, intrinsic_value, "
         "computed_at, created_at, updated_at) "
-        "VALUES (2, 'SEED', 50.0, 50.0, 50.0, 50.0, 50.0, 50.0, 12.0, 80.0, "
+        "VALUES (2, 1, 'SEED', 50.0, 50.0, 50.0, 50.0, 50.0, 50.0, 12.0, 80.0, "
         "datetime('now'), datetime('now'), datetime('now'))"
     ))
     session.execute(text(
-        "INSERT INTO income_statements (company_id, fiscal_period, revenue, cogs, gross_profit, "
+        "INSERT INTO income_statements (company_id, timeline_id, fiscal_period, revenue, cogs, gross_profit, "
         "operating_expenses, ebitda, depreciation_amortization, ebit, interest_expense, pretax_income, "
         "tax, net_profit, eps, shares_diluted, created_at, updated_at) "
-        "VALUES (2, '2026Q1', 5000000, 2000000, 3000000, 1500000, 1500000, 300000, 1200000, 800000, "
+        "VALUES (2, 1, '2026Q1', 5000000, 2000000, 3000000, 1500000, 1500000, 300000, 1200000, 800000, "
         "400000, 100000, 300000, 1.5, 200000000, datetime('now'), datetime('now'))"
     ))
     session.execute(text(
-        "INSERT INTO balance_sheets (company_id, fiscal_period, cash_and_equivalents, receivables, "
+        "INSERT INTO balance_sheets (company_id, timeline_id, fiscal_period, cash_and_equivalents, receivables, "
         "inventory, current_assets, ppe, intangibles, total_assets, payables, short_term_debt, "
         "current_liabilities, long_term_debt, total_debt, total_liabilities, shareholders_equity, "
         "invested_capital, created_at, updated_at) "
-        "VALUES (2, '2026Q1', 10000000, 5000000, 2000000, 17000000, 50000000, 10000000, 100000000, "
+        "VALUES (2, 1, '2026Q1', 10000000, 5000000, 2000000, 17000000, 50000000, 10000000, 100000000, "
         "3000000, 5000000, 8000000, 20000000, 25000000, 40000000, 60000000, 85000000, "
         "datetime('now'), datetime('now'))"
     ))
     session.execute(text(
-        "INSERT INTO consensus_estimates (company_id, fiscal_period, consensus_eps, consensus_revenue, "
+        "INSERT INTO consensus_estimates (company_id, timeline_id, fiscal_period, consensus_eps, consensus_revenue, "
         "created_at, updated_at) "
-        "VALUES (2, '2026Q1', 1.4, 4800000, datetime('now'), datetime('now'))"
+        "VALUES (2, 1, '2026Q1', 1.4, 4800000, datetime('now'), datetime('now'))"
+    ))
+    session.execute(text(
+        "INSERT INTO price_history (timeline_id, company_id, sim_date, open, high, low, close, volume, "
+        "intrinsic_value, order_imbalance, created_at, updated_at) "
+        "VALUES (1, 2, '2026-01-01', 80.0, 81.0, 79.0, 80.0, 300000, 80.0, 0.0, datetime('now'), datetime('now'))"
     ))
     # Add pillar weight for banking industry
     session.execute(text(
@@ -1343,48 +1428,54 @@ def test_one_company_no_price_other_valid(session):
         "10000000000.0, 0.02, 80.0, datetime('now'), datetime('now'))"
     ))
     session.execute(text(
-        "INSERT INTO moat_subscores (company_id, subfactor_key, score, created_at, updated_at) "
-        "VALUES (2, 'brand_strength', 70.0, datetime('now'), datetime('now'))"
+        "INSERT INTO moat_subscores (company_id, timeline_id, subfactor_key, score, created_at, updated_at) "
+        "VALUES (2, 1, 'brand_strength', 70.0, datetime('now'), datetime('now'))"
     ))
     session.execute(text(
-        "INSERT INTO company_factor_scores (company_id, fiscal_period, management_quality, moat_score, "
+        "INSERT INTO company_factor_scores (company_id, timeline_id, fiscal_period, management_quality, moat_score, "
         "financial_quality, fcf_quality, growth_potential, intrinsic_score, fair_pe, intrinsic_value, "
         "computed_at, created_at, updated_at) "
-        "VALUES (2, 'SEED', 50.0, 50.0, 50.0, 50.0, 50.0, 50.0, 15.0, 100.0, "
+        "VALUES (2, 1, 'SEED', 50.0, 50.0, 50.0, 50.0, 50.0, 50.0, 15.0, 100.0, "
         "datetime('now'), datetime('now'), datetime('now'))"
     ))
     session.execute(text(
-        "INSERT INTO income_statements (company_id, fiscal_period, revenue, cogs, gross_profit, "
+        "INSERT INTO income_statements (company_id, timeline_id, fiscal_period, revenue, cogs, gross_profit, "
         "operating_expenses, ebitda, depreciation_amortization, ebit, interest_expense, pretax_income, "
         "tax, net_profit, eps, shares_diluted, created_at, updated_at) "
-        "VALUES (2, '2026Q1', 1000000, 600000, 400000, 200000, 200000, 50000, 150000, 20000, "
+        "VALUES (2, 1, '2026Q1', 1000000, 600000, 400000, 200000, 200000, 50000, 150000, 20000, "
         "130000, 32500, 97500, 0.975, 100000000, datetime('now'), datetime('now'))"
     ))
     session.execute(text(
-        "INSERT INTO balance_sheets (company_id, fiscal_period, cash_and_equivalents, receivables, "
+        "INSERT INTO balance_sheets (company_id, timeline_id, fiscal_period, cash_and_equivalents, receivables, "
         "inventory, current_assets, ppe, intangibles, total_assets, payables, short_term_debt, "
         "current_liabilities, long_term_debt, total_debt, total_liabilities, shareholders_equity, "
         "invested_capital, created_at, updated_at) "
-        "VALUES (2, '2026Q1', 500000, 200000, 300000, 1000000, 2000000, 500000, 5000000, 150000, "
+        "VALUES (2, 1, '2026Q1', 500000, 200000, 300000, 1000000, 2000000, 500000, 5000000, 150000, "
         "100000, 250000, 500000, 600000, 1500000, 3500000, 4100000, datetime('now'), datetime('now'))"
     ))
     session.execute(text(
-        "INSERT INTO cash_flow_statements (company_id, fiscal_period, operating_cash_flow, capex, "
+        "INSERT INTO cash_flow_statements (company_id, timeline_id, fiscal_period, operating_cash_flow, capex, "
         "free_cash_flow, investing_cash_flow, financing_cash_flow, dividends_paid, buybacks, "
         "net_change_in_cash, created_at, updated_at) "
-        "VALUES (2, '2026Q1', 120000, -50000, 70000, -50000, -20000, -30000, -10000, 50000, "
+        "VALUES (2, 1, '2026Q1', 120000, -50000, 70000, -50000, -20000, -30000, -10000, 50000, "
         "datetime('now'), datetime('now'))"
     ))
     session.execute(text(
-        "INSERT INTO consensus_estimates (company_id, fiscal_period, consensus_eps, consensus_revenue, "
+        "INSERT INTO consensus_estimates (company_id, timeline_id, fiscal_period, consensus_eps, consensus_revenue, "
         "created_at, updated_at) "
-        "VALUES (2, '2026Q1', 0.95, 980000, datetime('now'), datetime('now'))"
+        "VALUES (2, 1, '2026Q1', 0.95, 980000, datetime('now'), datetime('now'))"
+    ))
+    session.execute(text(
+        "INSERT INTO price_history (timeline_id, company_id, sim_date, open, high, low, close, volume, "
+        "intrinsic_value, order_imbalance, created_at, updated_at) "
+        "VALUES (1, 2, '2026-01-01', 100.0, 101.0, 99.0, 100.0, 500000, 100.0, 0.0, datetime('now'), datetime('now'))"
     ))
     session.commit()
 
-    # Set first company's price to None - should be skipped (continue at line 182)
-    c1 = session.query(Company).filter_by(id=1).first()
-    c1.current_price = None
+    # Remove company 1's PriceHistory row - should be skipped (continue in
+    # _compute_drivers, which now reads state.price_overlay rather than
+    # company.current_price -- see db/timeline_resolver.py).
+    session.execute(text("DELETE FROM price_history WHERE timeline_id = 1 AND company_id = 1"))
     session.commit()
 
     result = run_tick(session, timeline_id)
@@ -1490,10 +1581,10 @@ def test_quarter_refresh_uses_real_eps_and_revenue_history_for_fq_subfactors(ses
     # Add a second historical income statement so there are 2+ periods of real
     # history by the time the quarter-boundary refresh computes raw FQ inputs.
     session.execute(text(
-        "INSERT INTO income_statements (company_id, fiscal_period, revenue, cogs, gross_profit, "
+        "INSERT INTO income_statements (company_id, timeline_id, fiscal_period, revenue, cogs, gross_profit, "
         "operating_expenses, ebitda, depreciation_amortization, ebit, interest_expense, pretax_income, "
         "tax, net_profit, eps, shares_diluted, created_at, updated_at) "
-        "VALUES (1, '2025Q4', 900000, 550000, 350000, 180000, 170000, 45000, 125000, 18000, "
+        "VALUES (1, 1, '2025Q4', 900000, 550000, 350000, 180000, 170000, 45000, 125000, 18000, "
         "107000, 26750, 80250, 0.8025, 100000000, datetime('now'), datetime('now'))"
     ))
     session.commit()
@@ -1677,3 +1768,165 @@ def test_quarter_boundary_concall_is_idempotent_on_retry(session):
 
     calls = session.query(ConCall).filter_by(company_id=1, fiscal_period="2026Q2").all()
     assert len(calls) == 1
+
+
+# ── Future Lab: config / factor_score TimelineOverride integration ────────
+
+
+def test_config_override_replaces_theta_default_for_tick(session):
+    """A target_type='config' TimelineOverride on theta_default must change
+    what _load_tick_state hands the tick loop -- proves apply_config_overrides
+    is actually wired into the live tick path, not just unit-tested in
+    isolation (tests/test_overrides.py)."""
+    timeline_id = _seed_minimal(session)
+    session.add(TimelineOverride(
+        timeline_id=timeline_id,
+        target_type="config",
+        target_key="theta_default",
+        override_value="0.5",  # far from the seeded 0.05 default
+        effective_from_sim_date=date(2026, 1, 1),
+    ))
+    session.commit()
+
+    from engine.orchestrator import _load_tick_state
+
+    state = _load_tick_state(session, timeline_id, date(2026, 1, 2))
+    assert state.params["theta_default"] == pytest.approx(0.5)
+
+
+def test_config_override_inactive_before_effective_date_is_ignored(session):
+    timeline_id = _seed_minimal(session)
+    session.add(TimelineOverride(
+        timeline_id=timeline_id,
+        target_type="config",
+        target_key="theta_default",
+        override_value="0.5",
+        effective_from_sim_date=date(2030, 1, 1),  # far in the future
+    ))
+    session.commit()
+
+    from engine.orchestrator import _load_tick_state
+
+    state = _load_tick_state(session, timeline_id, date(2026, 1, 2))
+    assert state.params["theta_default"] == pytest.approx(0.05)
+
+
+def test_factor_score_override_shifts_intrinsic_value(session):
+    """A target_type='factor_score' override on financial_quality must nudge
+    CompanyFactorScore.financial_quality and recompute intrinsic_value --
+    proves _apply_timeline_factor_score_overrides is wired into the tick
+    loop's event-execution step, not just a saved-but-inert row."""
+    timeline_id = _seed_minimal(session)
+
+    before = session.query(CompanyFactorScore).filter_by(
+        company_id=1, timeline_id=timeline_id,
+    ).order_by(CompanyFactorScore.id.desc()).first()
+    iv_before = float(before.intrinsic_value)
+    fq_before = float(before.financial_quality)
+
+    session.add(TimelineOverride(
+        timeline_id=timeline_id,
+        target_type="factor_score",
+        target_key="financial_quality",
+        override_value="-15",
+        effective_from_sim_date=date(2026, 1, 1),
+    ))
+    session.commit()
+
+    result = run_tick(session, timeline_id)
+    session.commit()
+    assert result["status"] == "completed"
+
+    after = session.query(CompanyFactorScore).filter_by(
+        company_id=1, timeline_id=timeline_id,
+    ).order_by(CompanyFactorScore.id.desc()).first()
+    assert float(after.financial_quality) == pytest.approx(fq_before - 15.0)
+    assert float(after.intrinsic_value) != pytest.approx(iv_before)
+
+
+def test_factor_score_override_does_not_compound_across_ticks(session):
+    """Regression test: a factor_score override is documented as a flat,
+    non-decaying nudge (see _apply_timeline_factor_score_overrides's
+    docstring), not a per-tick additive stack. Before the fix, this function
+    read CompanyFactorScore.financial_quality (already carrying the previous
+    tick's nudge) as "current value" and nudged it again every tick --
+    turning a flat -15 into -15*N after N ticks. Running several ticks with
+    the override active must leave financial_quality flat at
+    (natural_value - 15), not falling further each tick."""
+    timeline_id = _seed_minimal(session)
+
+    before = session.query(CompanyFactorScore).filter_by(
+        company_id=1, timeline_id=timeline_id,
+    ).order_by(CompanyFactorScore.id.desc()).first()
+    fq_before = float(before.financial_quality)
+
+    session.add(TimelineOverride(
+        timeline_id=timeline_id,
+        target_type="factor_score",
+        target_key="financial_quality",
+        override_value="-15",
+        effective_from_sim_date=date(2026, 1, 1),
+    ))
+    session.commit()
+
+    for _ in range(5):
+        result = run_tick(session, timeline_id)
+        session.commit()
+        assert result["status"] == "completed"
+
+    after = session.query(CompanyFactorScore).filter_by(
+        company_id=1, timeline_id=timeline_id,
+    ).order_by(CompanyFactorScore.id.desc()).first()
+    # Flat -15 nudge regardless of how many ticks it's been active for --
+    # NOT fq_before - 15*5, which is what the compounding bug would produce.
+    assert float(after.financial_quality) == pytest.approx(fq_before - 15.0)
+
+
+def test_factor_score_override_market_wide_applies_to_every_company(session):
+    """target_scope_id=None means the bias applies to every company, not
+    just one -- add a second company and confirm both are nudged."""
+    from sqlalchemy import text as sa_text
+
+    timeline_id = _seed_minimal(session)
+    session.execute(sa_text(
+        "INSERT INTO companies (id, name, ticker, industry_id, shares_outstanding, free_float_pct, "
+        "beta_market, beta_sector, current_price, intrinsic_value, intrinsic_score, fair_pe, market_cap, "
+        "volatility, market_liquidity_score, created_at, updated_at) "
+        "VALUES (2, 'Second Corp', 'SCD', 1, 100000000, 0.8, 1.0, 0.5, 100.0, 100.0, 50.0, 15.0, "
+        "10000000000.0, 0.02, 80.0, datetime('now'), datetime('now'))"
+    ))
+    session.execute(sa_text(
+        "INSERT INTO moat_subscores (company_id, timeline_id, subfactor_key, score, created_at, updated_at) "
+        "VALUES (2, 1, 'brand_strength', 70.0, datetime('now'), datetime('now'))"
+    ))
+    session.execute(sa_text(
+        "INSERT INTO company_factor_scores (company_id, timeline_id, fiscal_period, management_quality, "
+        "moat_score, financial_quality, fcf_quality, growth_potential, intrinsic_score, fair_pe, "
+        "intrinsic_value, computed_at, created_at, updated_at) "
+        "VALUES (2, 1, 'SEED', 50.0, 50.0, 50.0, 50.0, 50.0, 50.0, 15.0, 100.0, "
+        "datetime('now'), datetime('now'), datetime('now'))"
+    ))
+    session.execute(sa_text(
+        "INSERT INTO price_history (timeline_id, company_id, sim_date, open, high, low, close, volume, "
+        "intrinsic_value, order_imbalance, created_at, updated_at) "
+        "VALUES (1, 2, '2026-01-01', 100.0, 101.0, 99.0, 100.0, 500000, 100.0, 0.0, datetime('now'), datetime('now'))"
+    ))
+    session.add(TimelineOverride(
+        timeline_id=timeline_id,
+        target_type="factor_score",
+        target_key="moat_score",
+        override_value="10",
+        effective_from_sim_date=date(2026, 1, 1),
+        target_scope_id=None,
+    ))
+    session.commit()
+
+    result = run_tick(session, timeline_id)
+    session.commit()
+    assert result["status"] == "completed"
+
+    for cid in (1, 2):
+        cfs = session.query(CompanyFactorScore).filter_by(
+            company_id=cid, timeline_id=timeline_id,
+        ).order_by(CompanyFactorScore.id.desc()).first()
+        assert float(cfs.moat_score) == pytest.approx(60.0)

@@ -109,11 +109,24 @@ def test_get_db_exception():
 
 
 def test_database_postgres_pool_config():
+    """Reloading apps.api.database re-executes its module-level engine =
+    create_engine(...) line against whatever settings.database_url is at
+    reload time (to exercise the postgres pool_size/max_overflow branch) --
+    but that leaves the *real* apps.api.database.engine/SessionLocal module
+    attributes pointed at this fake URL for the rest of the test session
+    unless restored. Every other test (and apps.api.main's lifespan, which
+    reads apps.api.database.engine directly to check migration drift) shares
+    this same module object, so a stale reload here silently breaks
+    everything downstream that touches the module-level engine."""
     import importlib
     from apps.api import database as db_mod
     from apps.api.config import settings
 
     old_url = settings.database_url
-    settings.database_url = "postgresql+psycopg://localhost/test"
-    importlib.reload(db_mod)
-    settings.database_url = old_url
+    try:
+        settings.database_url = "postgresql+psycopg://localhost/test"
+        importlib.reload(db_mod)
+        assert db_mod.engine.dialect.name == "postgresql"
+    finally:
+        settings.database_url = old_url
+        importlib.reload(db_mod)

@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from apps.api.exceptions import ConflictError, InsufficientFundsError, InsufficientSharesError, NotFoundError
 from apps.api.schemas import OrderRequest, OrderResponse, PortfolioAnalyticsResponse, SectorAllocation
 from db.models import Company, ConfigParameter, Holding, Industry, Order, Portfolio, SimulationState, Transaction, User
+from db.timeline_resolver import get_latest_price, get_latest_prices
 from engine.liquidity import kyle_lambda_from_liquidity
 
 logger = logging.getLogger(__name__)
@@ -59,10 +60,17 @@ def _compute_impact_fraction(db: Session, company: Company, quantity: int) -> De
     return Decimal(str(impact_fraction))
 
 
-def _compute_execution_price(db: Session, company: Company, side: str, quantity: int) -> tuple[Decimal, Decimal]:
+def _compute_execution_price(
+    db: Session, company: Company, side: str, quantity: int, current_price: Decimal,
+) -> tuple[Decimal, Decimal]:
     """Kyle-lambda impact-adjusted execution price, before any limit-price clamp.
+
+    `current_price` must be resolved via db.timeline_resolver.get_latest_price
+    for the timeline this order belongs to (NOT company.current_price, which
+    is a shared, timeline-agnostic cache overwritten by whichever timeline's
+    tick ran most recently -- see db/timeline_resolver.py's module docstring).
+
     Returns (execution_price, impact_applied) where impact_applied is in $/share."""
-    current_price = Decimal(str(company.current_price))
     impact_fraction = _compute_impact_fraction(db, company, quantity)
     # Cap the fractional impact so a sell can never clear at <= 0 and a buy's
     # impact never exceeds the current price; an unbounded impact would
@@ -241,7 +249,8 @@ def place_order(db: Session, user: User, request: OrderRequest) -> OrderResponse
     company = db.query(Company).filter_by(ticker=request.ticker.upper()).first()
     if company is None:
         raise NotFoundError(f"Company '{request.ticker}' not found")
-    if company.current_price is None:
+    current_price = get_latest_price(db, company.id, timeline_id)
+    if current_price is None:
         raise NotFoundError(f"No price available for '{request.ticker}'")
 
     portfolio = db.query(Portfolio).filter_by(user_id=user.id, timeline_id=timeline_id).first()
@@ -249,7 +258,6 @@ def place_order(db: Session, user: User, request: OrderRequest) -> OrderResponse
         raise NotFoundError("Portfolio not found")
 
     holding = db.query(Holding).filter_by(portfolio_id=portfolio.id, company_id=company.id).first()
-    current_price = Decimal(str(company.current_price))
     sim_date = _current_sim_date(db, timeline_id)
 
     order = Order(
@@ -270,7 +278,9 @@ def place_order(db: Session, user: User, request: OrderRequest) -> OrderResponse
 
     realized_pnl: Optional[Decimal] = None
     if crosses_now:
-        execution_price, impact = _compute_execution_price(db, company, request.side, request.quantity)
+        execution_price, impact = _compute_execution_price(
+            db, company, request.side, request.quantity, current_price,
+        )
         if request.order_type == "limit":
             execution_price = _clamp_to_limit(request.side, execution_price, Decimal(str(request.limit_price)))
         fees = _compute_fees(db, request.quantity, execution_price)
@@ -347,15 +357,19 @@ def check_and_fill_limit_orders(db: Session, timeline_id: int) -> int:
     sim_date = _current_sim_date(db, timeline_id)
     for order in open_orders:
         company = db.query(Company).filter_by(id=order.company_id).first()
-        if company is None or company.current_price is None:
+        if company is None:
             continue
-        current_price = Decimal(str(company.current_price))
+        current_price = get_latest_price(db, company.id, timeline_id)
+        if current_price is None:
+            continue
         if not _limit_crosses(order.side, order.limit_price, current_price):
             continue
 
         portfolio = db.query(Portfolio).filter_by(id=order.portfolio_id).first()
         holding = db.query(Holding).filter_by(portfolio_id=portfolio.id, company_id=company.id).first()
-        execution_price, impact = _compute_execution_price(db, company, order.side, int(order.quantity))
+        execution_price, impact = _compute_execution_price(
+            db, company, order.side, int(order.quantity), current_price,
+        )
         execution_price = _clamp_to_limit(order.side, execution_price, Decimal(str(order.limit_price)))
         fees = _compute_fees(db, int(order.quantity), execution_price)
 
@@ -387,14 +401,16 @@ def get_portfolio_analytics(db: Session, user: User, timeline_id: int) -> Portfo
     ana_companies = {
         c.id: c for c in db.query(Company).filter(Company.id.in_(ana_company_ids)).all()
     } if ana_company_ids else {}
+    ana_prices = get_latest_prices(db, list(ana_company_ids), timeline_id) if ana_company_ids else {}
     holdings_value = Decimal(0)
     unrealized_pnl = Decimal(0)
     sector_values: dict[str, Decimal] = {}
     for h in holdings:
         company = ana_companies.get(h.company_id)
-        if company is None or company.current_price is None:
+        price = ana_prices.get(h.company_id)
+        if company is None or price is None:
             continue
-        price = Decimal(str(company.current_price))
+        price = Decimal(str(price))
         qty = Decimal(str(h.quantity))
         cost = Decimal(str(h.avg_cost_basis))
         mv = qty * price
