@@ -112,6 +112,8 @@ export function PriceChart({
   const ohlc = React.useMemo(() => toOHLC(data), [data]);
   const [range, setRange] = React.useState<VisibleRange>(() => defaultRange(ohlc.length));
   const [hover, setHover] = React.useState<{ x: number; y: number } | null>(null);
+  const hoverRef = React.useRef(hover);
+  hoverRef.current = hover;
   const isPanning = React.useRef(false);
   const panStartX = React.useRef(0);
   const panStartRange = React.useRef<VisibleRange>({ from: 0, to: 0 });
@@ -120,6 +122,8 @@ export function PriceChart({
   const prevLenRef = React.useRef(ohlc.length);
   const rangeRef = React.useRef(range);
   const lastReportedRangeRef = React.useRef(range);
+  const onRangeChangeRef = React.useRef(onRangeChange);
+  onRangeChangeRef.current = onRangeChange;
   rangeRef.current = range;
 
   const [placingPoints, setPlacingPoints] = React.useState<DrawingPoint[]>([]);
@@ -135,13 +139,15 @@ export function PriceChart({
       return resolved;
     });
   }, []);
+  const updateRangeRef = React.useRef(updateRange);
+  updateRangeRef.current = updateRange;
 
   React.useEffect(() => {
     const last = lastReportedRangeRef.current;
     if (last.from === range.from && last.to === range.to) return;
     lastReportedRangeRef.current = range;
-    onRangeChange?.(range);
-  }, [onRangeChange, range]);
+    onRangeChangeRef.current?.(range);
+  }, [range]);
 
   React.useEffect(() => {
     if (!drawingManager) return;
@@ -151,12 +157,12 @@ export function PriceChart({
   React.useEffect(() => {
     if (!externalRange) return;
     if (externalRange.to <= externalRange.from) return;
-    updateRange((current) => (
+    updateRangeRef.current((current) => (
       current.from === externalRange.from && current.to === externalRange.to
         ? current
         : externalRange
     ));
-  }, [externalRange, updateRange]);
+  }, [externalRange]);
 
   React.useEffect(() => {
     setPlacingPoints([]);
@@ -272,7 +278,8 @@ export function PriceChart({
   }, [ohlc, indicators]);
 
   const render = React.useCallback(
-    ({ ctx, width, height: h, dpr }: { ctx: CanvasRenderingContext2D; width: number; height: number; dpr: number }) => {
+    (args: { ctx: CanvasRenderingContext2D; width: number; height: number; dpr: number }) => {
+      const { ctx, width, height: h, dpr } = args;
       widthRef.current = width;
       if (ohlc.length === 0) return;
       const priceAreaHeight = h - PADDING.bottom - PADDING.top - VOLUME_HEIGHT;
@@ -505,17 +512,18 @@ export function PriceChart({
         drawTimeAxis({ ctx, width, height: h, padding: pricePadding, labels });
       }
 
-      if (hover && !activeDrawingTool) {
-        drawCrosshair({ ctx, width, height: h, dpr, padding: pricePadding, x: hover.x, y: hover.y });
+      const hov = hoverRef.current;
+      if (hov && !activeDrawingTool) {
+        drawCrosshair({ ctx, width, height: h, dpr, padding: pricePadding, x: hov.x, y: hov.y });
         const plotW = width - PADDING.left - PADDING.right;
-        const idx = range.from + Math.round(((hover.x - PADDING.left) / plotW) * (range.to - range.from));
+        const idx = range.from + Math.round(((hov.x - PADDING.left) / plotW) * (range.to - range.from));
         const candle = ohlc[Math.max(0, Math.min(ohlc.length - 1, idx))];
         const item = data[candle?.time ?? 0];
         if (candle && item) {
           drawCrosshairTooltip({
             ctx,
-            x: hover.x,
-            y: hover.y,
+            x: hov.x,
+            y: hov.y,
             lines: [
               item.sim_date,
               `O ${candle.open.toFixed(2)}  H ${candle.high.toFixed(2)}`,
@@ -526,7 +534,7 @@ export function PriceChart({
         }
       }
     },
-    [ohlc, range, hover, data, indicatorSeries, bollingerSeries, vwapSeries, ichimokuSeries, superTrendSeries, showVolumeProfile, chartType, drawingManager, placingPoints, previewPoint, activeDrawingTool, events]
+    [ohlc, range, data, indicatorSeries, bollingerSeries, vwapSeries, ichimokuSeries, superTrendSeries, showVolumeProfile, chartType, drawingManager, placingPoints, previewPoint, activeDrawingTool, events]
   );
 
   function handleWheel(deltaY: number, x: number) {

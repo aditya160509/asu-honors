@@ -171,6 +171,33 @@ def get_market_grid(db: Session, timeline_id: int, as_of_date: Optional[date] = 
     last_two = _last_two_closes_by_company(db, timeline_id, as_of_date=as_of_date)
     price_stats = _price_52w_stats(db, timeline_id, sim_date)
 
+    company_ids = [c.id for c in companies]
+    latest_cfs_by_company: dict[int, Decimal] = {}
+    if company_ids:
+        cfs_rows = (
+            db.query(
+                CompanyFactorScore.company_id,
+                func.max(CompanyFactorScore.fiscal_period).label("max_period"),
+            )
+            .filter(CompanyFactorScore.company_id.in_(company_ids))
+            .group_by(CompanyFactorScore.company_id)
+            .subquery()
+        )
+        cfs_data = (
+            db.query(CompanyFactorScore)
+            .join(
+                cfs_rows,
+                and_(
+                    CompanyFactorScore.company_id == cfs_rows.c.company_id,
+                    CompanyFactorScore.fiscal_period == cfs_rows.c.max_period,
+                ),
+            )
+            .all()
+        )
+        for cfs in cfs_data:
+            if cfs.intrinsic_value is not None:
+                latest_cfs_by_company[cfs.company_id] = cfs.intrinsic_value
+
     items: list[CompanyGridItem] = []
     for company in companies:
         industry = industries.get(company.industry_id)
@@ -181,6 +208,7 @@ def get_market_grid(db: Session, timeline_id: int, as_of_date: Optional[date] = 
         if prev_close is not None and prev_close > 0:
             day_change_pct = float((current_price - prev_close) / prev_close * Decimal("100"))
         stats = price_stats.get(company.id, {})
+        iv = latest_cfs_by_company.get(company.id, company.intrinsic_value)
         items.append(
             CompanyGridItem(
                 id=company.id,
@@ -190,7 +218,7 @@ def get_market_grid(db: Session, timeline_id: int, as_of_date: Optional[date] = 
                 current_price=current_price,
                 prev_close=prev_close,
                 day_change_pct=day_change_pct,
-                intrinsic_value=company.intrinsic_value,
+                intrinsic_value=iv,
                 market_cap=company.market_cap,
                 volatility=company.volatility,
                 avg_volume_20d=stats.get("avg_volume_20d"),
@@ -253,6 +281,14 @@ def get_company_detail(db: Session, ticker: str, timeline_id: int) -> CompanyDet
         if latest_inc and float(latest_inc.eps) != 0:
             pe_ratio = latest_price / float(latest_inc.eps)
 
+    latest_cfs = (
+        db.query(CompanyFactorScore)
+        .filter_by(company_id=company.id)
+        .order_by(CompanyFactorScore.fiscal_period.desc())
+        .first()
+    )
+    iv = latest_cfs.intrinsic_value if latest_cfs and latest_cfs.intrinsic_value is not None else company.intrinsic_value
+
     return CompanyDetail(
         id=company.id,
         ticker=company.ticker,
@@ -268,7 +304,7 @@ def get_company_detail(db: Session, ticker: str, timeline_id: int) -> CompanyDet
         shares_outstanding=company.shares_outstanding,
         free_float_pct=float(company.free_float_pct),
         latest_price=latest_price,
-        latest_iv=company.intrinsic_value,
+        latest_iv=iv,
         pe_ratio=pe_ratio,
         market_cap=company.market_cap,
         driver_breakdowns=breakdowns,

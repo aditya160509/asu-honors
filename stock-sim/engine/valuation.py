@@ -27,9 +27,9 @@ DEFAULT_M_MAX = 2.0
 DEFAULT_M_STEEPNESS = 0.11
 DEFAULT_M_INFLECTION = 60.0
 
-DEFAULT_GROWTH_RATE_MIN = 2.0
+DEFAULT_GROWTH_RATE_MIN = 1.0
 DEFAULT_GROWTH_RATE_MAX = 60.0
-DEFAULT_PE_MIN = 8.0
+DEFAULT_BASELINE_PE = 10.0
 
 
 def quality_multiplier(
@@ -73,15 +73,17 @@ def fair_peg(
 def fair_pe_from_peg(
     peg: float,
     long_term_growth_rate_pct: float,
-    pe_min: float = DEFAULT_PE_MIN,
+    baseline_pe: float = DEFAULT_BASELINE_PE,
 ) -> float:
-    """Fair P/E = baseline + Fair PEG x LongTermGrowthRate%, floored at pe_min.
+    """Fair P/E = baseline_pe + Fair PEG x LongTermGrowthRate%.
 
-    The PEG model breaks down at low growth rates — a company growing 2%/yr
-    would get PE = 0.68 x 2.0 = 1.4x, which is nonsense. The baseline floor
-    (default 8.0x) ensures existing earnings have value independent of growth.
+    The PEG model breaks down at low growth rates — a company growing 1%/yr
+    would give PE = 0.67 x 1.0 = 0.67x, which is nonsense. The additive
+    baseline (default 10.0x) represents the present value of $1 in zero-growth
+    perpetual earnings at a 10% discount rate (1/0.10 = 10), ensuring existing
+    earnings have independent value regardless of growth.
     """
-    return max(pe_min, peg * long_term_growth_rate_pct)
+    return baseline_pe + peg * long_term_growth_rate_pct
 
 
 def growth_score_to_rate(
@@ -89,17 +91,16 @@ def growth_score_to_rate(
     rate_min: float = DEFAULT_GROWTH_RATE_MIN,
     rate_max: float = DEFAULT_GROWTH_RATE_MAX,
 ) -> float:
-    """Linear map of the 0-100 growth_potential score to an estimated annual EPS growth rate (%).
+    """Non-linear (quadratic) map: score 0→rate_min, 50→~15%, 100→rate_max.
 
-    growth_potential=0 -> rate_min (~2%/yr, mature/declining); 100 ->
-    rate_max (~60%/yr, best-in-class hypergrowth). This is a fallback used
-    only where a company-specific, financials-and-industry-derived growth
-    estimate isn't available; prefer deriving the rate directly from a
-    company's own trailing fundamentals and industry context where possible
-    (see docs/valuation_dry_run.py for a worked real-company example).
+    A quadratic curve compresses low scores (mid company at score 50 gets
+    ~15% not the linear midpoint) and stretches high scores, reflecting that
+    genuine hypergrowth is rare and most companies cluster toward moderate
+    growth.
     """
     growth_potential = max(0.0, min(100.0, growth_potential))
-    return rate_min + (rate_max - rate_min) * (growth_potential / 100.0)
+    t = growth_potential / 100.0
+    return rate_min + (rate_max - rate_min) * t * t
 
 
 def compute_growth_potential_from_financials(

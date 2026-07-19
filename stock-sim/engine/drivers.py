@@ -4,10 +4,10 @@ import math
 from typing import Literal
 
 DEFAULT_DRIVER_WEIGHTS = {
-    "value_opportunity": 0.20,
+    "value_opportunity": 0.10,
     "earnings_surprise": 0.15,
-    "news_severity": 0.15,
-    "economic_outlook": 0.10,
+    "news_severity": 0.25,
+    "economic_outlook": 0.25,
     "guidance": 0.15,
     "technical_momentum": 0.10,
     "institutional_buying": 0.15,

@@ -10,12 +10,9 @@ from sqlalchemy.orm import Session
 from apps.api.exceptions import ConflictError, InsufficientFundsError, InsufficientSharesError, NotFoundError
 from apps.api.schemas import OrderRequest, OrderResponse, PortfolioAnalyticsResponse, SectorAllocation
 from db.models import Company, ConfigParameter, Holding, Industry, Order, Portfolio, SimulationState, Transaction, User
-from engine.liquidity import kyle_lambda_from_liquidity, kyle_lambda_impact
-
 logger = logging.getLogger(__name__)
 
 DEFAULT_FEE_RATE = 0.001
-DEFAULT_LIQUIDITY_SCORE = 50.0
 
 
 def _get_fee_rate(db: Session) -> float:
@@ -35,27 +32,9 @@ def _current_sim_date(db: Session, timeline_id: int) -> date:
     return sim_state.current_sim_date
 
 
-def _compute_impact(company: Company, quantity: int) -> tuple[Decimal, Decimal]:
-    """Kyle's-lambda price impact in $/share. Returns (impact, lambda_val)."""
-    liq_score = float(company.market_liquidity_score) if company.market_liquidity_score is not None else DEFAULT_LIQUIDITY_SCORE
-    lambda_val = kyle_lambda_from_liquidity(liq_score)
-    impact = kyle_lambda_impact(float(quantity), lambda_val)
-    return Decimal(str(impact)), Decimal(str(lambda_val))
-
-
 def _compute_execution_price(company: Company, side: str, quantity: int) -> tuple[Decimal, Decimal]:
-    """Kyle-lambda impact-adjusted execution price, before any limit-price clamp.
-    Returns (execution_price, impact_applied)."""
-    current_price = Decimal(str(company.current_price))
-    impact, _lambda_val = _compute_impact(company, quantity)
-    # Cap impact so a sell can never clear at <= 0 and a buy's impact never
-    # exceeds the current price; an unbounded impact would otherwise let the
-    # order silently reset to the undiscounted price, defeating the impact
-    # model entirely for large orders.
-    max_impact = current_price * Decimal("0.50") if side == "sell" else current_price * Decimal("0.99")
-    impact = min(impact, max_impact)
-    execution_price = current_price + (impact if side == "buy" else -impact)
-    return execution_price, impact
+    """Return (current_price, 0) — no market-impact adjustment."""
+    return Decimal(str(company.current_price)), Decimal(0)
 
 
 def _clamp_to_limit(side: str, execution_price: Decimal, limit_price: Decimal) -> Decimal:

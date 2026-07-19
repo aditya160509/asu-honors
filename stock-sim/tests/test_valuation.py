@@ -64,10 +64,10 @@ def test_fair_peg_strong_company_approaches_ceiling():
     assert result > 1.4 * 1.8
 
 
-def test_fair_pe_from_peg_multiplies_peg_by_growth_rate_percent():
-    # Fair P/E = Fair PEG * LongTermGrowthRate (growth entered as e.g. 18.0 for 18%).
+def test_fair_pe_from_peg_adds_baseline_to_peg_times_growth():
+    # Fair P/E = baseline_pe + Fair PEG * LongTermGrowthRate
     result = val.fair_pe_from_peg(peg=1.5, long_term_growth_rate_pct=18.0)
-    assert math.isclose(result, 27.0)
+    assert math.isclose(result, 37.0)
 
 
 def test_growth_score_to_rate_endpoints():
@@ -76,8 +76,9 @@ def test_growth_score_to_rate_endpoints():
 
 
 def test_growth_score_to_rate_midpoint():
+    # Quadratic: score 50 → 25% of the range above min, not 50%
     result = val.growth_score_to_rate(50, rate_min=2.0, rate_max=60.0)
-    assert math.isclose(result, 2.0 + (60.0 - 2.0) * 0.5)
+    assert math.isclose(result, 2.0 + (60.0 - 2.0) * 0.5 * 0.5)
 
 
 def test_growth_score_to_rate_clamps_out_of_range_input():
@@ -101,7 +102,7 @@ def test_full_peg_pipeline_matches_manual_computation():
     assert math.isclose(peg, neutral_peg * m)
 
     fpe = val.fair_pe_from_peg(peg, growth_rate_pct)
-    assert math.isclose(fpe, peg * growth_rate_pct)
+    assert fpe > peg * growth_rate_pct
 
     iv = val.intrinsic_value_per_share(fpe, eps)
     assert math.isclose(iv, fpe * eps)

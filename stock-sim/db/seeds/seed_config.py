@@ -19,7 +19,7 @@ def seed(session: Session) -> None:
         # Engine coefficients
         ConfigParameter(
             key="k_drift",
-            value="0.03",
+            value="0.10",
             scope="global",
             description="Scales price pressure into daily return",
         ),
@@ -53,7 +53,7 @@ def seed(session: Session) -> None:
         ),
         ConfigParameter(
             key="growth_rate_min",
-            value="2.0",
+            value="1.0",
             scope="global",
             description="growth_potential=0 maps to this estimated long-term annual EPS growth rate (%)",
         ),
@@ -62,6 +62,12 @@ def seed(session: Session) -> None:
             value="60.0",
             scope="global",
             description="growth_potential=100 maps to this estimated long-term annual EPS growth rate (%)",
+        ),
+        ConfigParameter(
+            key="fair_pe_baseline",
+            value="10.0",
+            scope="global",
+            description="Zero-growth perpetuity PE (1/discount_rate) — the additive baseline for Fair P/E = baseline + PEG * growth%",
         ),
         ConfigParameter(
             key="trading_days_per_year",
@@ -124,12 +130,6 @@ def seed(session: Session) -> None:
             description="Base bid-ask spread in basis points",
         ),
         ConfigParameter(
-            key="kyle_lambda_scale",
-            value="1.0",
-            scope="global",
-            description="Kyle's lambda scaling factor for market impact",
-        ),
-        ConfigParameter(
             key="r_cap",
             value="0.20",
             scope="global",
@@ -157,7 +157,7 @@ def seed(session: Session) -> None:
         # ── Price driver weights ──────────────────────────────────────
         ConfigParameter(
             key="w_vo",
-            value="0.20",
+            value="0.10",
             scope="global",
             description="Value opportunity driver weight",
         ),
@@ -169,13 +169,13 @@ def seed(session: Session) -> None:
         ),
         ConfigParameter(
             key="w_ns",
-            value="0.15",
+            value="0.25",
             scope="global",
             description="News severity driver weight",
         ),
         ConfigParameter(
             key="w_eo",
-            value="0.10",
+            value="0.25",
             scope="global",
             description="Economic outlook driver weight",
         ),
@@ -230,7 +230,7 @@ def seed(session: Session) -> None:
         ),
         ConfigParameter(
             key="vol_leverage_factor",
-            value="0.3",
+            value="0.2",
             scope="global",
             description="How much financial leverage multiplies stock volatility",
         ),

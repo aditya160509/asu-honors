@@ -92,13 +92,13 @@ from engine.scoring import (
 )
 from engine.tick import CompanyTickInput, CompanyTickOutput, TickResult, TickState, run_tick as engine_run_tick
 from engine.valuation import (
+    DEFAULT_BASELINE_PE,
     DEFAULT_GROWTH_RATE_MAX,
     DEFAULT_GROWTH_RATE_MIN,
     DEFAULT_M_INFLECTION,
     DEFAULT_M_MAX,
     DEFAULT_M_MIN,
     DEFAULT_M_STEEPNESS,
-    DEFAULT_PE_MIN,
     compute_growth_potential_from_financials,
     drift_iv,
     fair_pe_from_peg,
@@ -289,7 +289,7 @@ def run_ticks(
             companies=tick_inputs,
             pressure_scale=float(state.params.get("k_drift", 0.03)),
         )
-        tick_result = engine_run_tick(tick_state, k_drift=float(state.params.get("k_drift", 0.03)))
+        tick_result = engine_run_tick(tick_state, k_drift=1.0)
 
         # -- Circuit breaker + OHLC + volume --------------------------------
         ohlc_results, volume_results, imbalance_results = _update_prices_and_ohlc(
@@ -595,7 +595,10 @@ def _compute_drivers(
     iv = float(company.intrinsic_value)
 
     y = np.log(max(prev_close, 0.01) / max(iv, 0.01))
-    theta = float(state.params.get("theta_default", 0.05))
+    _mcap = max(float(company.market_cap or 1e9), 1e6)
+    _log_mcap = math.log(_mcap / 1e9)
+    theta_base = float(state.params.get("theta_default", 0.05))
+    theta = theta_base * (0.3 + 1.2 * (1 + math.tanh(_log_mcap / 2)) / 2)
     # Per-tick multiplicative jitter on beta_market/beta_sector: the seeded betas
     # (db/seeds/seed_companies.py) are fixed constants in a narrow 0.3-2.5 band and
     # ALL positive, so every company feels the same shared f_m/f_s in the same
@@ -615,10 +618,10 @@ def _compute_drivers(
     epsilon = state.rng.gauss(0, 1)
     s_factor = state.sector_shocks.get(company.industry_id, 0.0)
 
-    ind_base_vol = float(ind.base_volatility) / 100.0
+    ind_base_vol = float(ind.base_volatility) / math.sqrt(252)
     mcap = max(float(company.market_cap or 1e9), 1e6)
     log_mcap = math.log(mcap / 1e9)
-    f_size = 1.0 - 0.2 * math.tanh(log_mcap)
+    f_size = 1.3 - 0.3 * math.tanh(log_mcap / 1.5)
     sigma_val = ind_base_vol * f_size
     bal = state.latest_bal.get(company.id)
     if bal:
@@ -627,7 +630,7 @@ def _compute_drivers(
         if se > 0:
             leverage = td / se
             max_lev = float(state.params.get("vol_max_leverage", 5.0))
-            lev_factor = float(state.params.get("vol_leverage_factor", 0.3))
+            lev_factor = float(state.params.get("vol_leverage_factor", 0.2))
             f_lev = 1.0 + lev_factor * min(leverage, max_lev)
             sigma_val *= f_lev
 
@@ -734,10 +737,10 @@ def _compute_drivers(
                     )
 
     drv_weights = {
-        "value_opportunity": float(state.params.get("w_vo", 0.20)),
+        "value_opportunity": float(state.params.get("w_vo", 0.10)),
         "earnings_surprise": float(state.params.get("w_es", 0.15)),
-        "news_severity": float(state.params.get("w_ns", 0.15)),
-        "economic_outlook": float(state.params.get("w_eo", 0.10)),
+        "news_severity": float(state.params.get("w_ns", 0.25)),
+        "economic_outlook": float(state.params.get("w_eo", 0.25)),
         "guidance": float(state.params.get("w_g", 0.15)),
         "technical_momentum": float(state.params.get("w_tm", 0.10)),
         "institutional_buying": float(state.params.get("w_ib", 0.15)),
@@ -1032,8 +1035,8 @@ def _recompute_valuation(
     neutral_peg = neutral_industry_pegs.get(industry_id, 1.0)
     peg = fair_peg(neutral_peg, intrinsic_score, m_min, m_max, m_k, m_c)
     growth_rate_pct = growth_score_to_rate(growth_potential, growth_rate_min, growth_rate_max)
-    pe_min = float(params.get("fair_pe_min", DEFAULT_PE_MIN))
-    fpe = fair_pe_from_peg(peg, growth_rate_pct, pe_min)
+    baseline_pe = float(params.get("fair_pe_baseline", DEFAULT_BASELINE_PE))
+    fpe = fair_pe_from_peg(peg, growth_rate_pct, baseline_pe)
     iv = intrinsic_value_per_share(fpe, eps)
     return fpe, iv
 
@@ -2355,3 +2358,4 @@ def _apply_factor_effects_to_company(
 
     company_map[cid].intrinsic_score = round(iscore, 4)
     company_map[cid].fair_pe = round(fpe, 4)
+    company_map[cid].intrinsic_value = round(iv, 4)

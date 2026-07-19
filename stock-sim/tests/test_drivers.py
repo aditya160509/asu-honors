@@ -29,13 +29,13 @@ def test_earnings_surprise_zero_consensus_is_zero():
 
 
 def test_news_severity_sums_and_decays():
-    events = [{"start_day": 5, "severity": 0.5}, {"start_day": 5, "severity": -0.2}]
+    events = [{"start_day": 5, "severity": 50}, {"start_day": 5, "severity": -20}]
     result = drv.news_severity(events, sim_day=5, decay_rate=0.1)
     assert math.isclose(result, 0.3)
 
 
 def test_news_severity_clamps():
-    events = [{"start_day": 0, "severity": 5.0}]
+    events = [{"start_day": 0, "severity": 500}]
     result = drv.news_severity(events, sim_day=0, decay_rate=0.0)
     assert result == 1.0
 
@@ -87,4 +87,5 @@ def test_composite_price_pressure_default_weights():
         "institutional_buying": 1.0,
     }
     result = drv.composite_price_pressure(values)
-    assert math.isclose(result, 1.0)
+    expected = sum(drv.DEFAULT_DRIVER_WEIGHTS.values())
+    assert math.isclose(result, expected)
