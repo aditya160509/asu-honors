@@ -12,3 +12,4 @@ api.err.log
 apps/dev.out.log
 apps/dev.err.log
 dev-script.log
+*.db
