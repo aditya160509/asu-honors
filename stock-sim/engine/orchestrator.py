@@ -734,9 +734,9 @@ def _compute_drivers(
                     )
 
     drv_weights = {
-        "value_opportunity": float(state.params.get("w_vo", 0.20)),
+        "value_opportunity": float(state.params.get("w_vo", 0.10)),
         "earnings_surprise": float(state.params.get("w_es", 0.15)),
-        "news_severity": float(state.params.get("w_ns", 0.15)),
+        "news_severity": float(state.params.get("w_ns", 0.25)),
         "economic_outlook": float(state.params.get("w_eo", 0.10)),
         "guidance": float(state.params.get("w_g", 0.15)),
         "technical_momentum": float(state.params.get("w_tm", 0.10)),

@@ -157,7 +157,7 @@ def seed(session: Session) -> None:
         # ── Price driver weights ──────────────────────────────────────
         ConfigParameter(
             key="w_vo",
-            value="0.20",
+            value="0.10",
             scope="global",
             description="Value opportunity driver weight",
         ),
@@ -169,7 +169,7 @@ def seed(session: Session) -> None:
         ),
         ConfigParameter(
             key="w_ns",
-            value="0.15",
+            value="0.25",
             scope="global",
             description="News severity driver weight",
         ),
