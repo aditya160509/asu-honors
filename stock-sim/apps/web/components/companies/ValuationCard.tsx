@@ -3,11 +3,12 @@
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DashboardPanel } from "@/components/dashboard/primitives/DashboardPanel";
-import { cn } from "@/lib/utils";
+import { cn, formatPrice } from "@/lib/utils";
 import type { ValuationResponse } from "@/lib/api/types";
 
 export interface ValuationCardProps {
   valuation: ValuationResponse | undefined;
+  eps?: number | null;
   loading?: boolean;
 }
 
@@ -32,7 +33,7 @@ function ScoreBar({ label, value }: { label: string; value: number | string }) {
   );
 }
 
-export function ValuationCard({ valuation, loading }: ValuationCardProps) {
+export function ValuationCard({ valuation, eps, loading }: ValuationCardProps) {
   return (
     <DashboardPanel eyebrow="Fair Value Model" title="Valuation">
       <div className="flex flex-col gap-3">
@@ -50,9 +51,19 @@ export function ValuationCard({ valuation, loading }: ValuationCardProps) {
               <span className="text-mer-ink-secondary">Intrinsic Score</span>
               <span className="num font-semibold text-mer-ink-primary">{Number(valuation.intrinsic_score).toFixed(1)}</span>
             </div>
+            {eps != null && (
+              <div className="flex items-center justify-between text-small">
+                <span className="text-mer-ink-secondary">EPS (TTM)</span>
+                <span className="num text-mer-ink-primary">{formatPrice(eps)}</span>
+              </div>
+            )}
             <div className="flex items-center justify-between text-small">
               <span className="text-mer-ink-secondary">Fair P/E</span>
               <span className="num text-mer-ink-primary">{Number(valuation.fair_pe).toFixed(2)}</span>
+            </div>
+            <div className="flex items-center justify-between text-small">
+              <span className="text-mer-ink-secondary">Intrinsic Value</span>
+              <span className="num text-mer-ink-primary">{formatPrice(valuation.intrinsic_value)}</span>
             </div>
             <ScoreBar label="Moat Score" value={valuation.moat_score} />
             <ScoreBar label="Management Quality" value={valuation.management_quality} />

@@ -64,6 +64,12 @@ def seed(session: Session) -> None:
             description="growth_potential=100 maps to this estimated long-term annual EPS growth rate (%)",
         ),
         ConfigParameter(
+            key="fair_pe_baseline",
+            value="10.0",
+            scope="global",
+            description="Zero-growth perpetuity PE (1/discount_rate) — the additive baseline for Fair P/E = baseline + PEG * growth%",
+        ),
+        ConfigParameter(
             key="trading_days_per_year",
             value="252",
             scope="global",

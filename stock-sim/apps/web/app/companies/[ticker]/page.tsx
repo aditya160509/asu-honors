@@ -147,7 +147,11 @@ export default function CompanyDetailPage() {
           </div>
 
           <div className="flex flex-col gap-4">
-            <ValuationCard valuation={valuation.data} loading={valuation.isLoading} />
+            <ValuationCard
+              valuation={valuation.data}
+              eps={financials.data?.income_statement?.eps as number | undefined}
+              loading={valuation.isLoading}
+            />
             <OrderForm
               ticker={ticker}
               currentPrice={currentPrice}
