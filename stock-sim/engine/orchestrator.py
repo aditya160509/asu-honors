@@ -2358,3 +2358,4 @@ def _apply_factor_effects_to_company(
 
     company_map[cid].intrinsic_score = round(iscore, 4)
     company_map[cid].fair_pe = round(fpe, 4)
+    company_map[cid].intrinsic_value = round(iv, 4)
