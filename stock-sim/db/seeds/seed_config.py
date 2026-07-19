@@ -175,7 +175,7 @@ def seed(session: Session) -> None:
         ),
         ConfigParameter(
             key="w_eo",
-            value="0.10",
+            value="0.25",
             scope="global",
             description="Economic outlook driver weight",
         ),

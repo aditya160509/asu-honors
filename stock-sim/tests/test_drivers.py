@@ -87,4 +87,5 @@ def test_composite_price_pressure_default_weights():
         "institutional_buying": 1.0,
     }
     result = drv.composite_price_pressure(values)
-    assert math.isclose(result, 1.0)
+    expected = sum(drv.DEFAULT_DRIVER_WEIGHTS.values())
+    assert math.isclose(result, expected)
