@@ -27,9 +27,9 @@ DEFAULT_M_MAX = 2.0
 DEFAULT_M_STEEPNESS = 0.11
 DEFAULT_M_INFLECTION = 60.0
 
-DEFAULT_GROWTH_RATE_MIN = 2.0
-DEFAULT_GROWTH_RATE_MAX = 60.0
-DEFAULT_PE_MIN = 8.0
+DEFAULT_GROWTH_RATE_MIN = 1.0
+DEFAULT_GROWTH_RATE_MAX = 25.0
+DEFAULT_BASELINE_PE = 10.0
 
 
 def quality_multiplier(
@@ -73,15 +73,17 @@ def fair_peg(
 def fair_pe_from_peg(
     peg: float,
     long_term_growth_rate_pct: float,
-    pe_min: float = DEFAULT_PE_MIN,
+    baseline_pe: float = DEFAULT_BASELINE_PE,
 ) -> float:
-    """Fair P/E = baseline + Fair PEG x LongTermGrowthRate%, floored at pe_min.
+    """Fair P/E = baseline_pe + Fair PEG x LongTermGrowthRate%.
 
-    The PEG model breaks down at low growth rates — a company growing 2%/yr
-    would get PE = 0.68 x 2.0 = 1.4x, which is nonsense. The baseline floor
-    (default 8.0x) ensures existing earnings have value independent of growth.
+    The PEG model breaks down at low growth rates — a company growing 1%/yr
+    would give PE = 0.67 x 1.0 = 0.67x, which is nonsense. The additive
+    baseline (default 10.0x) represents the present value of $1 in zero-growth
+    perpetual earnings at a 10% discount rate (1/0.10 = 10), ensuring existing
+    earnings have independent value regardless of growth.
     """
-    return max(pe_min, peg * long_term_growth_rate_pct)
+    return baseline_pe + peg * long_term_growth_rate_pct
 
 
 def growth_score_to_rate(

@@ -92,13 +92,13 @@ from engine.scoring import (
 )
 from engine.tick import CompanyTickInput, CompanyTickOutput, TickResult, TickState, run_tick as engine_run_tick
 from engine.valuation import (
+    DEFAULT_BASELINE_PE,
     DEFAULT_GROWTH_RATE_MAX,
     DEFAULT_GROWTH_RATE_MIN,
     DEFAULT_M_INFLECTION,
     DEFAULT_M_MAX,
     DEFAULT_M_MIN,
     DEFAULT_M_STEEPNESS,
-    DEFAULT_PE_MIN,
     compute_growth_potential_from_financials,
     drift_iv,
     fair_pe_from_peg,
@@ -1035,8 +1035,8 @@ def _recompute_valuation(
     neutral_peg = neutral_industry_pegs.get(industry_id, 1.0)
     peg = fair_peg(neutral_peg, intrinsic_score, m_min, m_max, m_k, m_c)
     growth_rate_pct = growth_score_to_rate(growth_potential, growth_rate_min, growth_rate_max)
-    pe_min = float(params.get("fair_pe_min", DEFAULT_PE_MIN))
-    fpe = fair_pe_from_peg(peg, growth_rate_pct, pe_min)
+    baseline_pe = float(params.get("fair_pe_baseline", DEFAULT_BASELINE_PE))
+    fpe = fair_pe_from_peg(peg, growth_rate_pct, baseline_pe)
     iv = intrinsic_value_per_share(fpe, eps)
     return fpe, iv
 

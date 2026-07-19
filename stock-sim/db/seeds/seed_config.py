@@ -53,13 +53,13 @@ def seed(session: Session) -> None:
         ),
         ConfigParameter(
             key="growth_rate_min",
-            value="2.0",
+            value="1.0",
             scope="global",
             description="growth_potential=0 maps to this estimated long-term annual EPS growth rate (%)",
         ),
         ConfigParameter(
             key="growth_rate_max",
-            value="60.0",
+            value="25.0",
             scope="global",
             description="growth_potential=100 maps to this estimated long-term annual EPS growth rate (%)",
         ),
