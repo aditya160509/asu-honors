@@ -19,7 +19,7 @@ def seed(session: Session) -> None:
         # Engine coefficients
         ConfigParameter(
             key="k_drift",
-            value="0.03",
+            value="0.10",
             scope="global",
             description="Scales price pressure into daily return",
         ),
@@ -230,7 +230,7 @@ def seed(session: Session) -> None:
         ),
         ConfigParameter(
             key="vol_leverage_factor",
-            value="0.3",
+            value="0.2",
             scope="global",
             description="How much financial leverage multiplies stock volatility",
         ),

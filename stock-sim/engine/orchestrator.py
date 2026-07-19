@@ -289,7 +289,7 @@ def run_ticks(
             companies=tick_inputs,
             pressure_scale=float(state.params.get("k_drift", 0.03)),
         )
-        tick_result = engine_run_tick(tick_state, k_drift=float(state.params.get("k_drift", 0.03)))
+        tick_result = engine_run_tick(tick_state, k_drift=1.0)
 
         # -- Circuit breaker + OHLC + volume --------------------------------
         ohlc_results, volume_results, imbalance_results = _update_prices_and_ohlc(
@@ -615,10 +615,10 @@ def _compute_drivers(
     epsilon = state.rng.gauss(0, 1)
     s_factor = state.sector_shocks.get(company.industry_id, 0.0)
 
-    ind_base_vol = float(ind.base_volatility) / 100.0
+    ind_base_vol = float(ind.base_volatility) / math.sqrt(252)
     mcap = max(float(company.market_cap or 1e9), 1e6)
     log_mcap = math.log(mcap / 1e9)
-    f_size = 1.0 - 0.2 * math.tanh(log_mcap)
+    f_size = 1.3 - 0.3 * math.tanh(log_mcap / 1.5)
     sigma_val = ind_base_vol * f_size
     bal = state.latest_bal.get(company.id)
     if bal:
@@ -627,7 +627,7 @@ def _compute_drivers(
         if se > 0:
             leverage = td / se
             max_lev = float(state.params.get("vol_max_leverage", 5.0))
-            lev_factor = float(state.params.get("vol_leverage_factor", 0.3))
+            lev_factor = float(state.params.get("vol_leverage_factor", 0.2))
             f_lev = 1.0 + lev_factor * min(leverage, max_lev)
             sigma_val *= f_lev
 
