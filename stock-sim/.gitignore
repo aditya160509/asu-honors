@@ -13,3 +13,6 @@ apps/dev.out.log
 apps/dev.err.log
 dev-script.log
 *.db
+*.db-journal
+*.db-wal
+*.db-shm
