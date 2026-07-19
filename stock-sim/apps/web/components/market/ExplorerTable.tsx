@@ -589,7 +589,7 @@ export function ExplorerTable({
                   row={row}
                   columns={resolvedColumns}
                   rowHeight={rowHeight}
-                  top={getRowTop(idx) - topPadding}
+                  top={getRowTop(idx)}
                   focused={idx === focusedIndex}
                   selected={selectedTickers.has(row.ticker)}
                   watched={watchedTickers.has(row.ticker)}
@@ -608,7 +608,7 @@ export function ExplorerTable({
                 {idx === expandedIdx && (
                   <div
                     className="absolute left-0 right-0 overflow-hidden"
-                    style={{ top: getRowTop(idx) + rowHeight - topPadding, height: EXPANDED_HEIGHT }}
+                    style={{ top: getRowTop(idx) + rowHeight, height: EXPANDED_HEIGHT }}
                   >
                     <RowExpandedContent row={row} />
                   </div>
