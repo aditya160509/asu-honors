@@ -122,6 +122,8 @@ export function PriceChart({
   const prevLenRef = React.useRef(ohlc.length);
   const rangeRef = React.useRef(range);
   const lastReportedRangeRef = React.useRef(range);
+  const onRangeChangeRef = React.useRef(onRangeChange);
+  onRangeChangeRef.current = onRangeChange;
   rangeRef.current = range;
 
   const [placingPoints, setPlacingPoints] = React.useState<DrawingPoint[]>([]);
@@ -137,13 +139,15 @@ export function PriceChart({
       return resolved;
     });
   }, []);
+  const updateRangeRef = React.useRef(updateRange);
+  updateRangeRef.current = updateRange;
 
   React.useEffect(() => {
     const last = lastReportedRangeRef.current;
     if (last.from === range.from && last.to === range.to) return;
     lastReportedRangeRef.current = range;
-    onRangeChange?.(range);
-  }, [onRangeChange, range]);
+    onRangeChangeRef.current?.(range);
+  }, [range]);
 
   React.useEffect(() => {
     if (!drawingManager) return;
@@ -153,12 +157,12 @@ export function PriceChart({
   React.useEffect(() => {
     if (!externalRange) return;
     if (externalRange.to <= externalRange.from) return;
-    updateRange((current) => (
+    updateRangeRef.current((current) => (
       current.from === externalRange.from && current.to === externalRange.to
         ? current
         : externalRange
     ));
-  }, [externalRange, updateRange]);
+  }, [externalRange]);
 
   React.useEffect(() => {
     setPlacingPoints([]);
