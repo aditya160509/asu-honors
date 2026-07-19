@@ -10,6 +10,7 @@ import {
   Check,
   Columns3,
   Download,
+  Gauge,
   LayoutList,
   Rows3,
   SlidersHorizontal,
@@ -38,9 +39,13 @@ export interface ScreenerToolbarProps {
   onSort: (key: string, shiftKey?: boolean) => void;
   showHighlights: boolean;
   onToggleHighlights: () => void;
+  showSentiment: boolean;
+  onToggleSentiment: () => void;
   filtersOpen: boolean;
   onToggleFilters: () => void;
   activeFilterCount: number;
+  /** Right-aligned extra controls (e.g. the historical time-machine picker). */
+  rightSlot?: React.ReactNode;
 }
 
 function useOutsideClose(ref: React.RefObject<HTMLElement | null>, open: boolean, onClose: () => void) {
@@ -110,9 +115,12 @@ export function ScreenerToolbar({
   onSort,
   showHighlights,
   onToggleHighlights,
+  showSentiment,
+  onToggleSentiment,
   filtersOpen,
   onToggleFilters,
   activeFilterCount,
+  rightSlot,
 }: ScreenerToolbarProps) {
   const [sortOpen, setSortOpen] = React.useState(false);
   const [colsOpen, setColsOpen] = React.useState(false);
@@ -267,6 +275,14 @@ export function ScreenerToolbar({
         title="Toggle Most Volatile / Biggest IV Gap / Largest Cap strip"
       />
 
+      <ToolbarButton
+        active={showSentiment}
+        onClick={onToggleSentiment}
+        icon={<Gauge size={12} />}
+        label="Sentiment"
+        title="Toggle market sentiment (Fear/Greed) strip"
+      />
+
       <ToolbarButton active={false} onClick={onExport} icon={<Download size={12} />} label="Export" title="Export visible rows to CSV" />
 
       {compareCount > 0 && (
@@ -274,6 +290,7 @@ export function ScreenerToolbar({
       )}
 
       <div className="flex-1" />
+      {rightSlot}
     </div>
   );
 }

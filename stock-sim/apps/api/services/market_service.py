@@ -98,29 +98,31 @@ def _price_52w_stats(
 
 
 def _last_two_closes_by_company(
-    db: Session, timeline_id: int,
+    db: Session, timeline_id: int, as_of_date: Optional[date] = None,
 ) -> dict[int, tuple[Decimal, Optional[Decimal]]]:
     """Get the two most recent close prices for each company: (latest, previous).
 
     Returns a dict mapping company_id -> (latest_close, prev_close).
-    If only one row exists, prev_close is None.
+    If only one row exists, prev_close is None. When `as_of_date` is given,
+    "most recent" resolves against that historical date instead of live/latest
+    (powers the Market Explorer's historical snapshot view).
     """
     from sqlalchemy import func, literal_column
 
-    # Get the two most recent rows per company using a window function
-    subq = (
-        db.query(
-            PriceHistory.company_id,
-            PriceHistory.close,
-            PriceHistory.sim_date,
-            func.row_number().over(
-                partition_by=PriceHistory.company_id,
-                order_by=PriceHistory.sim_date.desc(),
-            ).label("rn"),
-        )
-        .filter(PriceHistory.timeline_id == timeline_id)
-        .subquery()
-    )
+    # Get the two most recent rows per company (as of as_of_date, if given)
+    # using a window function.
+    base_query = db.query(
+        PriceHistory.company_id,
+        PriceHistory.close,
+        PriceHistory.sim_date,
+        func.row_number().over(
+            partition_by=PriceHistory.company_id,
+            order_by=PriceHistory.sim_date.desc(),
+        ).label("rn"),
+    ).filter(PriceHistory.timeline_id == timeline_id)
+    if as_of_date is not None:
+        base_query = base_query.filter(PriceHistory.sim_date <= as_of_date)
+    subq = base_query.subquery()
     rows = db.query(subq).filter(subq.c.rn <= 2).all()
 
     result: dict[int, dict[int, Decimal]] = {}
@@ -137,20 +139,36 @@ def _last_two_closes_by_company(
     }
 
 
-def get_market_grid(db: Session, timeline_id: int) -> MarketGridResponse:
-    """Build the market grid: all companies with latest prices and day change."""
+def get_market_grid(db: Session, timeline_id: int, as_of_date: Optional[date] = None) -> MarketGridResponse:
+    """Build the market grid: all companies with latest prices and day change.
+
+    When `as_of_date` is given, resolves prices/cycle phase as they stood on
+    that historical sim date instead of live/latest — powers the Market
+    Explorer's "time machine" historical snapshot view. The live path
+    (as_of_date=None) is completely unchanged.
+    """
     companies = db.query(Company).order_by(Company.ticker).all()
     industries = {ind.id: ind for ind in db.query(Industry).all()}
     sim_state = db.query(SimulationState).filter_by(timeline_id=timeline_id).first()
-    latest_cycle = (
-        db.query(EconomicCycleState)
-        .filter_by(timeline_id=timeline_id)
-        .order_by(EconomicCycleState.sim_date.desc())
-        .first()
-    )
-    sim_date = sim_state.current_sim_date if sim_state else date.today()
+
+    if as_of_date is not None:
+        sim_date = as_of_date
+        latest_cycle = (
+            db.query(EconomicCycleState)
+            .filter(EconomicCycleState.timeline_id == timeline_id, EconomicCycleState.sim_date <= as_of_date)
+            .order_by(EconomicCycleState.sim_date.desc())
+            .first()
+        )
+    else:
+        sim_date = sim_state.current_sim_date if sim_state else date.today()
+        latest_cycle = (
+            db.query(EconomicCycleState)
+            .filter_by(timeline_id=timeline_id)
+            .order_by(EconomicCycleState.sim_date.desc())
+            .first()
+        )
     cycle_phase = latest_cycle.cycle_phase if latest_cycle else "expansion"
-    last_two = _last_two_closes_by_company(db, timeline_id)
+    last_two = _last_two_closes_by_company(db, timeline_id, as_of_date=as_of_date)
     price_stats = _price_52w_stats(db, timeline_id, sim_date)
 
     items: list[CompanyGridItem] = []

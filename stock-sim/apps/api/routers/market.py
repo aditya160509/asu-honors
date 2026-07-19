@@ -26,8 +26,12 @@ router = APIRouter(prefix="/api/v1", tags=["Market Data"])
 
 
 @router.get("/market", response_model=MarketGridResponse)
-def get_market(timeline_id: int = Query(default=settings.default_timeline_id), db: Session = Depends(get_db)) -> MarketGridResponse:
-    return market_service.get_market_grid(db, timeline_id)
+def get_market(
+    timeline_id: int = Query(default=settings.default_timeline_id),
+    as_of_date: Optional[date] = Query(default=None, description="Return the grid as it stood on this sim date instead of live/latest."),
+    db: Session = Depends(get_db),
+) -> MarketGridResponse:
+    return market_service.get_market_grid(db, timeline_id, as_of_date=as_of_date)
 
 
 @router.get("/market/cycle", response_model=CycleStateResponse)

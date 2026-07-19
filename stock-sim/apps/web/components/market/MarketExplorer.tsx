@@ -6,6 +6,7 @@ import { StatusLine } from "@/components/market/StatusLine";
 import { ScreenerToolbar } from "@/components/market/ScreenerToolbar";
 import { TopMoversBar } from "@/components/market/TopMoversBar";
 import { MarketTickerTape } from "@/components/market/MarketTickerTape";
+import { SentimentStrip } from "@/components/market/SentimentStrip";
 import { FilterOverlay } from "@/components/market/FilterOverlay";
 import { HelpOverlay } from "@/components/market/HelpOverlay";
 import { DetailPanel } from "@/components/market/DetailPanel";
@@ -86,9 +87,14 @@ export interface MarketExplorerProps {
   loading?: boolean;
   error?: boolean;
   onRetry?: () => void;
+  /** Set when showing a historical "time machine" snapshot instead of the
+   * live grid — surfaces via StatusLine's existing DELAYED-badge slot. */
+  historicalDate?: string | null;
+  /** Rendered at the right edge of the toolbar row (e.g. the time-machine picker). */
+  timeMachine?: React.ReactNode;
 }
 
-export function MarketExplorer({ companies, loading, error, onRetry }: MarketExplorerProps) {
+export function MarketExplorer({ companies, loading, error, onRetry, historicalDate, timeMachine }: MarketExplorerProps) {
   const enriched = React.useMemo(() => enrichCompanies(companies), [companies]);
   const bounds = React.useMemo(() => boundsFor(enriched), [enriched]);
   const industries = React.useMemo(() => industriesOf(enriched), [enriched]);
@@ -124,6 +130,7 @@ export function MarketExplorer({ companies, loading, error, onRetry }: MarketExp
   const [compareOpen, setCompareOpen] = React.useState(false);
   const [toolbarQuery, setToolbarQuery] = React.useState("");
   const [showHighlights, setShowHighlights] = React.useState(false);
+  const [showSentiment, setShowSentiment] = React.useState(false);
 
   const savedScreens = useSavedScreens();
   const columnState = useColumnVisibility(COLUMN_DEFS, DEFAULT_HIDDEN_KEYS);
@@ -364,9 +371,12 @@ export function MarketExplorer({ companies, loading, error, onRetry }: MarketExp
         onSort={toggleSort}
         showHighlights={showHighlights}
         onToggleHighlights={() => setShowHighlights((v) => !v)}
+        showSentiment={showSentiment}
+        onToggleSentiment={() => setShowSentiment((v) => !v)}
         filtersOpen={filterOverlayOpen}
         onToggleFilters={() => setFilterOverlayOpen((v) => !v)}
         activeFilterCount={activeFilterGroupCount(activeFilters, bounds)}
+        rightSlot={timeMachine}
       />
 
       <StatusLine
@@ -377,6 +387,9 @@ export function MarketExplorer({ companies, loading, error, onRetry }: MarketExp
         companies={sorted}
         compareCount={selectedTickers.size}
         onOpenCompare={() => setCompareOpen(true)}
+        stale={Boolean(historicalDate)}
+        staleSince={historicalDate ?? null}
+        staleLabel="HISTORICAL"
       />
 
       {showHighlights && (
@@ -387,6 +400,8 @@ export function MarketExplorer({ companies, loading, error, onRetry }: MarketExp
           </div>
         </>
       )}
+
+      {showSentiment && <SentimentStrip companies={sorted} />}
 
       <div className="relative flex flex-1 overflow-hidden">
         {filterOverlayOpen && (
