@@ -112,6 +112,8 @@ export function PriceChart({
   const ohlc = React.useMemo(() => toOHLC(data), [data]);
   const [range, setRange] = React.useState<VisibleRange>(() => defaultRange(ohlc.length));
   const [hover, setHover] = React.useState<{ x: number; y: number } | null>(null);
+  const hoverRef = React.useRef(hover);
+  hoverRef.current = hover;
   const isPanning = React.useRef(false);
   const panStartX = React.useRef(0);
   const panStartRange = React.useRef<VisibleRange>({ from: 0, to: 0 });
@@ -272,7 +274,8 @@ export function PriceChart({
   }, [ohlc, indicators]);
 
   const render = React.useCallback(
-    ({ ctx, width, height: h, dpr }: { ctx: CanvasRenderingContext2D; width: number; height: number; dpr: number }) => {
+    (args: { ctx: CanvasRenderingContext2D; width: number; height: number; dpr: number }) => {
+      const { ctx, width, height: h, dpr } = args;
       widthRef.current = width;
       if (ohlc.length === 0) return;
       const priceAreaHeight = h - PADDING.bottom - PADDING.top - VOLUME_HEIGHT;
@@ -505,17 +508,18 @@ export function PriceChart({
         drawTimeAxis({ ctx, width, height: h, padding: pricePadding, labels });
       }
 
-      if (hover && !activeDrawingTool) {
-        drawCrosshair({ ctx, width, height: h, dpr, padding: pricePadding, x: hover.x, y: hover.y });
+      const hov = hoverRef.current;
+      if (hov && !activeDrawingTool) {
+        drawCrosshair({ ctx, width, height: h, dpr, padding: pricePadding, x: hov.x, y: hov.y });
         const plotW = width - PADDING.left - PADDING.right;
-        const idx = range.from + Math.round(((hover.x - PADDING.left) / plotW) * (range.to - range.from));
+        const idx = range.from + Math.round(((hov.x - PADDING.left) / plotW) * (range.to - range.from));
         const candle = ohlc[Math.max(0, Math.min(ohlc.length - 1, idx))];
         const item = data[candle?.time ?? 0];
         if (candle && item) {
           drawCrosshairTooltip({
             ctx,
-            x: hover.x,
-            y: hover.y,
+            x: hov.x,
+            y: hov.y,
             lines: [
               item.sim_date,
               `O ${candle.open.toFixed(2)}  H ${candle.high.toFixed(2)}`,
@@ -526,7 +530,7 @@ export function PriceChart({
         }
       }
     },
-    [ohlc, range, hover, data, indicatorSeries, bollingerSeries, vwapSeries, ichimokuSeries, superTrendSeries, showVolumeProfile, chartType, drawingManager, placingPoints, previewPoint, activeDrawingTool, events]
+    [ohlc, range, data, indicatorSeries, bollingerSeries, vwapSeries, ichimokuSeries, superTrendSeries, showVolumeProfile, chartType, drawingManager, placingPoints, previewPoint, activeDrawingTool, events]
   );
 
   function handleWheel(deltaY: number, x: number) {
