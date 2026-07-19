@@ -595,7 +595,10 @@ def _compute_drivers(
     iv = float(company.intrinsic_value)
 
     y = np.log(max(prev_close, 0.01) / max(iv, 0.01))
-    theta = float(state.params.get("theta_default", 0.05))
+    _mcap = max(float(company.market_cap or 1e9), 1e6)
+    _log_mcap = math.log(_mcap / 1e9)
+    theta_base = float(state.params.get("theta_default", 0.05))
+    theta = theta_base * (0.3 + 1.2 * (1 + math.tanh(_log_mcap / 2)) / 2)
     # Per-tick multiplicative jitter on beta_market/beta_sector: the seeded betas
     # (db/seeds/seed_companies.py) are fixed constants in a narrow 0.3-2.5 band and
     # ALL positive, so every company feels the same shared f_m/f_s in the same
