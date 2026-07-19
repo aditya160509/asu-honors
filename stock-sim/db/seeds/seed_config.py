@@ -130,12 +130,6 @@ def seed(session: Session) -> None:
             description="Base bid-ask spread in basis points",
         ),
         ConfigParameter(
-            key="kyle_lambda_scale",
-            value="0.00005",
-            scope="global",
-            description="Kyle's lambda scaling factor for market impact (fractional price impact per share, before the 1/(1+liquidity) liquidity discount)",
-        ),
-        ConfigParameter(
             key="r_cap",
             value="0.20",
             scope="global",

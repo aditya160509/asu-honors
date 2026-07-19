@@ -10,17 +10,9 @@ from sqlalchemy.orm import Session
 from apps.api.exceptions import ConflictError, InsufficientFundsError, InsufficientSharesError, NotFoundError
 from apps.api.schemas import OrderRequest, OrderResponse, PortfolioAnalyticsResponse, SectorAllocation
 from db.models import Company, ConfigParameter, Holding, Industry, Order, Portfolio, SimulationState, Transaction, User
-from engine.liquidity import kyle_lambda_from_liquidity
-
 logger = logging.getLogger(__name__)
 
 DEFAULT_FEE_RATE = 0.001
-DEFAULT_LIQUIDITY_SCORE = 50.0
-# kyle_lambda_from_liquidity() returns O(1) values; used as a *fractional*
-# price-impact coefficient (see trade_price_with_impact) that must be scaled
-# down to basis-points-per-share, or a routine order size would move the
-# execution price by 100%+ of the quote.
-DEFAULT_KYLE_LAMBDA_SCALE = 0.00005
 
 
 def _get_fee_rate(db: Session) -> float:
@@ -33,16 +25,6 @@ def _get_fee_rate(db: Session) -> float:
         return DEFAULT_FEE_RATE
 
 
-def _get_kyle_lambda_scale(db: Session) -> float:
-    row = db.query(ConfigParameter).filter_by(key="kyle_lambda_scale", scope="global").first()
-    if row is None:
-        return DEFAULT_KYLE_LAMBDA_SCALE
-    try:
-        return float(row.value)
-    except ValueError:
-        return DEFAULT_KYLE_LAMBDA_SCALE
-
-
 def _current_sim_date(db: Session, timeline_id: int) -> date:
     sim_state = db.query(SimulationState).filter_by(timeline_id=timeline_id).first()
     if sim_state is None:
@@ -50,29 +32,9 @@ def _current_sim_date(db: Session, timeline_id: int) -> date:
     return sim_state.current_sim_date
 
 
-def _compute_impact_fraction(db: Session, company: Company, quantity: int) -> Decimal:
-    """Kyle's-lambda price impact as a fraction of price (e.g. 0.01 = 1%)."""
-    liq_score = float(company.market_liquidity_score) if company.market_liquidity_score is not None else DEFAULT_LIQUIDITY_SCORE
-    scale = _get_kyle_lambda_scale(db)
-    lambda_val = kyle_lambda_from_liquidity(liq_score, scale=scale)
-    impact_fraction = lambda_val * float(quantity)
-    return Decimal(str(impact_fraction))
-
-
-def _compute_execution_price(db: Session, company: Company, side: str, quantity: int) -> tuple[Decimal, Decimal]:
-    """Kyle-lambda impact-adjusted execution price, before any limit-price clamp.
-    Returns (execution_price, impact_applied) where impact_applied is in $/share."""
-    current_price = Decimal(str(company.current_price))
-    impact_fraction = _compute_impact_fraction(db, company, quantity)
-    # Cap the fractional impact so a sell can never clear at <= 0 and a buy's
-    # impact never exceeds the current price; an unbounded impact would
-    # otherwise let the order silently reset to the undiscounted price,
-    # defeating the impact model entirely for large orders.
-    max_fraction = Decimal("0.50") if side == "sell" else Decimal("0.99")
-    impact_fraction = min(impact_fraction, max_fraction)
-    delta = current_price * impact_fraction
-    execution_price = current_price + (delta if side == "buy" else -delta)
-    return execution_price, delta
+def _compute_execution_price(company: Company, side: str, quantity: int) -> tuple[Decimal, Decimal]:
+    """Return (current_price, 0) — no market-impact adjustment."""
+    return Decimal(str(company.current_price)), Decimal(0)
 
 
 def _clamp_to_limit(side: str, execution_price: Decimal, limit_price: Decimal) -> Decimal:
@@ -270,7 +232,7 @@ def place_order(db: Session, user: User, request: OrderRequest) -> OrderResponse
 
     realized_pnl: Optional[Decimal] = None
     if crosses_now:
-        execution_price, impact = _compute_execution_price(db, company, request.side, request.quantity)
+        execution_price, impact = _compute_execution_price(company, request.side, request.quantity)
         if request.order_type == "limit":
             execution_price = _clamp_to_limit(request.side, execution_price, Decimal(str(request.limit_price)))
         fees = _compute_fees(db, request.quantity, execution_price)
@@ -355,7 +317,7 @@ def check_and_fill_limit_orders(db: Session, timeline_id: int) -> int:
 
         portfolio = db.query(Portfolio).filter_by(id=order.portfolio_id).first()
         holding = db.query(Holding).filter_by(portfolio_id=portfolio.id, company_id=company.id).first()
-        execution_price, impact = _compute_execution_price(db, company, order.side, int(order.quantity))
+        execution_price, impact = _compute_execution_price(company, order.side, int(order.quantity))
         execution_price = _clamp_to_limit(order.side, execution_price, Decimal(str(order.limit_price)))
         fees = _compute_fees(db, int(order.quantity), execution_price)
 

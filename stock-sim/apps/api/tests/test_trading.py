@@ -86,13 +86,7 @@ def test_place_sell_excess_shares(client, test_db, test_company, test_portfolio,
     assert resp.status_code == 400
 
 
-def test_order_price_impact(client, test_db, test_company, test_portfolio, auth_headers):
-    resp = client.post(
-        "/api/v1/orders",
-        json={"ticker": "TST", "side": "buy", "quantity": 100_000},
-        headers=auth_headers,
-    )
-    # insufficient funds at this size, so use a smaller size but still check impact vs current price
+def test_order_execution_at_current_price(client, test_db, test_company, test_portfolio, auth_headers):
     resp = client.post(
         "/api/v1/orders",
         json={"ticker": "TST", "side": "buy", "quantity": 50},
@@ -100,7 +94,7 @@ def test_order_price_impact(client, test_db, test_company, test_portfolio, auth_
     )
     assert resp.status_code == 201
     body = resp.json()
-    assert float(body["price"]) != 100.0  # current_price is 100.0; impact should move it
+    assert float(body["price"]) == 100.0  # fills at current_price, no market-impact
 
 
 def test_get_transactions(client, test_db, test_company, test_portfolio, auth_headers):
