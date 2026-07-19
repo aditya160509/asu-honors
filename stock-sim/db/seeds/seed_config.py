@@ -125,9 +125,9 @@ def seed(session: Session) -> None:
         ),
         ConfigParameter(
             key="kyle_lambda_scale",
-            value="1.0",
+            value="0.00005",
             scope="global",
-            description="Kyle's lambda scaling factor for market impact",
+            description="Kyle's lambda scaling factor for market impact (fractional price impact per share, before the 1/(1+liquidity) liquidity discount)",
         ),
         ConfigParameter(
             key="r_cap",

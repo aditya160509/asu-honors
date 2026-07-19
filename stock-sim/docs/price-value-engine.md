@@ -4,7 +4,9 @@
 >
 > **Maintenance contract.** This file must be kept in sync with the code. **Any commit that adds, removes, or changes a function/formula/config-key related to price or value movement (files under `engine/`, `_recompute_valuation`/`_apply_event_factor_effects`/`_compute_drivers`/etc. in `engine/orchestrator.py`, or the corresponding rows in `db/seeds/seed_config.py`) must update this file in the same commit.** See [Maintenance Protocol](#maintenance-protocol) at the bottom for the exact procedure. `done.md` tracks project phases; this file tracks the math itself — update both when a price/value-affecting change lands.
 >
-> Last synced with code: 2026-07-18 (quarterly financial generation now driven by trailing trend/management quality/FQ momentum/price/events/con-call guidance instead of a random walk; con-call subsystem added, then extended with moat-score/market-performance tone tie-breakers and backfilled for all pre-existing quarters; per-company jitter added to beta_market/beta_sector, economic_outlook, sector shocks, and event severity to reduce cycle-phase lockstep correlation; see §2.5, §2.5a, §4, §4.2, §6.4).
+> Last synced with code: 2026-07-19 (Kyle-lambda trading price impact fixed from a raw additive dollar amount to a fractional multiplicative adjustment; `kyle_lambda_scale` recalibrated from `1.0` to `0.00005`; see §5, §8).
+>
+> Previously synced: 2026-07-18 (quarterly financial generation now driven by trailing trend/management quality/FQ momentum/price/events/con-call guidance instead of a random walk; con-call subsystem added, then extended with moat-score/market-performance tone tie-breakers and backfilled for all pre-existing quarters; per-company jitter added to beta_market/beta_sector, economic_outlook, sector shocks, and event severity to reduce cycle-phase lockstep correlation; see §2.5, §2.5a, §4, §4.2, §6.4).
 
 ---
 
@@ -211,7 +213,7 @@ if balance sheet has equity > 0:
 - **Order imbalance** — `order_imbalance(demand, supply) = (demand−supply)/(demand+supply)`; `demand`/`supply` scale with `price_pressure` via `demand_from_pressure`/`supply_from_pressure` (asymmetric — only ever scale volume *up*, floor at 1.0×).
 - **Liquidity score** — `market_liquidity_score(free_float_pct, avg_daily_volume, market_cap) = clamp(100 × free_float_pct × (volume/market_cap), 0, 100)`.
 - **Bid-ask spread** — `bid_ask_spread(base_spread_bps, liquidity_score)` widens as liquidity falls.
-- **Kyle-lambda price impact** (used by the *trading* API, not the tick engine) — `kyle_lambda_impact = λ × order_size`, `λ = scale/(1+liquidity_score)`; `trade_price_with_impact` applies it ± depending on buy/sell side. Impact is capped at 99% (buys) / 50% (sells) of current price per the Phase 5 audit fixes (see `done.md`).
+- **Kyle-lambda price impact** (used by the *trading* API, not the tick engine) — `λ = scale/(1+liquidity_score)`; `impact_fraction = λ × order_size`, applied to price **multiplicatively** (`execution_price = current_price × (1 ± impact_fraction)`), ± depending on buy/sell side. Impact is capped at 99% (buys) / 50% (sells) of current price per the Phase 5 audit fixes (see `done.md`). **Fixed 2026-07-19:** `apps/api/services/trade_service.py` was previously applying `λ × order_size` as a **raw dollar amount added to price** instead of a fraction, and `kyle_lambda_scale` was seeded at `1.0` — together this let a routine order on a low-liquidity stock execute near double the quoted price (visible as an instant fake unrealized loss right after a buy, since `avg_cost_basis` was set from the inflated fill price while `current_price` stayed at the real quote). Now applied fractionally, matching `engine/liquidity.py`'s `trade_price_with_impact` design; `kyle_lambda_scale` default recalibrated to `0.00005`.
 
 `daily_volume()` (a simpler, older volume formula) is kept but unused — the live path is `compute_volume_prd` (Phase A cleanup).
 
@@ -303,7 +305,7 @@ Fix also **persists to the real `CompanyFactorScore` row**, not just the denorma
 | `vol_turnover_rate`, `vol_coeff_return/news/earnings`, `vol_noise_sigma` | volume formula coefficients |
 | `vol_leverage_factor`, `vol_max_leverage` | σ leverage multiplier |
 | `liquidity_sensitivity` | demand/supply pressure sensitivity |
-| `kyle_lambda_scale`, `base_spread_bps` | trading-side price impact / spread (not tick engine) |
+| `kyle_lambda_scale` (default `0.00005`, fixed 2026-07-19 — was `1.0`), `base_spread_bps` | trading-side price impact / spread (not tick engine) |
 | `ma_window` | technical_momentum moving-average window (days) |
 | `expected_annual_growth` | IV daily drift target — **not currently seeded**, silently falls back to hardcoded 0.08 in `run_ticks()` |
 

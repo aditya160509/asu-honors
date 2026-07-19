@@ -15,6 +15,7 @@ UPDATES = {
     'w_vo': '0.10',
     'w_ns': '0.25',
     'w_eo': '0.25',
+    'kyle_lambda_scale': '0.00005',
 }
 
 engine = create_engine(DATABASE_URL)
