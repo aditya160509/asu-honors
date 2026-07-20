@@ -158,19 +158,13 @@ def generate_news(
     if not templates:
         return None
 
-    # For earnings events, select beat vs miss template based on actual EPS
-    # vs consensus EPS instead of random choice.
-    if event.category == "earnings" and extra_replacements:
-        eps_str = extra_replacements.get("{eps}", "")
-        consensus_str = extra_replacements.get("{consensus}", "")
-        if eps_str and consensus_str:
-            try:
-                eps_val = float(eps_str.replace("$", ""))
-                consensus_val = float(consensus_str.replace("$", ""))
-                beat = eps_val >= consensus_val
-                templates = [t for t in templates if t.sentiment == ("positive" if beat else "negative")]
-            except (ValueError, AttributeError):
-                pass
+    # Filter templates whose tone matches the event sentiment, so a positive
+    # event (e.g. "Patent Granted") doesn't pick a negative-sounding template
+    # (e.g. "Class-action lawsuit filed") just because they share a category.
+    matching = [t for t in templates if t.sentiment == event.sentiment]
+    if matching:
+        templates = matching
+
     template = rng.choice(templates) if templates else None
     if template is None:
         return None

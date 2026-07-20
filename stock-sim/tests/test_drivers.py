@@ -29,13 +29,22 @@ def test_earnings_surprise_zero_consensus_is_zero():
 
 
 def test_news_severity_sums_and_decays():
-    events = [{"start_day": 5, "severity": 50}, {"start_day": 5, "severity": -20}]
+    events = [
+        {"start_day": 5, "severity": 50, "effect_profile": {"news_severity": 0.4}},
+        {"start_day": 5, "severity": 20, "effect_profile": {"news_severity": -0.4}},
+    ]
     result = drv.news_severity(events, sim_day=5, decay_rate=0.1)
     assert math.isclose(result, 0.3)
 
 
+def test_news_severity_skips_structural_events():
+    events = [{"start_day": 0, "severity": 50, "effect_profile": {"moat_score": 0.3}}]
+    result = drv.news_severity(events, sim_day=0, decay_rate=0.0)
+    assert result == 0.0
+
+
 def test_news_severity_clamps():
-    events = [{"start_day": 0, "severity": 500}]
+    events = [{"start_day": 0, "severity": 500, "effect_profile": {"news_severity": 0.4}}]
     result = drv.news_severity(events, sim_day=0, decay_rate=0.0)
     assert result == 1.0
 
