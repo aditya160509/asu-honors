@@ -254,6 +254,7 @@ def run_ticks(
             "epsilon": [], "intrinsic_value": [],
         }
         company_ns: dict[int, float] = {}
+        company_sigma: dict[int, float] = {}
 
         for company in companies:
             result = _compute_drivers(session, company, state, timeline_id, sim_date, tick_count)
@@ -271,6 +272,7 @@ def run_ticks(
             pricing_data["epsilon"].append(result["epsilon"])
             pricing_data["intrinsic_value"].append(result["intrinsic_value"])
             company_ns[company.id] = result["news_severity"]
+            company_sigma[company.id] = result["sigma"]
 
         if not pricing_data["company_ids"]:
             raise ValueError("No companies with valid pricing data")
@@ -321,7 +323,7 @@ def run_ticks(
 
         # -- Update denormalized Company fields (live timeline only) --------
         _update_denormalized_fields(
-            company_by_id, ohlc_results, volume_results, tick_result, state.timeline.is_live,
+            company_by_id, ohlc_results, volume_results, tick_result, company_sigma, state.timeline.is_live,
         )
 
         # -- Mark to market -------------------------------------------------
@@ -1015,9 +1017,10 @@ def _update_denormalized_fields(
     ohlc_results: dict[int, dict],
     volume_results: dict[int, int],
     tick_result: TickResult,
+    company_sigma: dict[int, float],
     is_live: bool,
 ) -> None:
-    """Update Company.current_price, .intrinsic_value, .market_cap, .market_liquidity_score.
+    """Update Company.current_price, .intrinsic_value, .market_cap, .market_liquidity_score, .volatility.
 
     These are a single shared, timeline-agnostic cache -- only the live
     timeline is allowed to persist its tick result here (`is_live`). A
@@ -1046,6 +1049,16 @@ def _update_denormalized_fields(
             float(company.free_float_pct), vol_val, float(company.market_cap or 1e9),
         )
         company.market_liquidity_score = round(liq_score, 4)
+        sigma_val = company_sigma.get(cid)
+        if sigma_val is not None:
+            # sigma_val is the engine's real per-company/per-tick DAILY volatility
+            # (industry base vol scaled by company size/leverage). Company.volatility
+            # is displayed/filtered everywhere as an annualized percentage (e.g. "25.00%"
+            # for a 25% annualized vol) -- the same units industry.base_volatility itself
+            # is defined in (see seed_industries.py) -- so annualize and convert to a
+            # percent-scale number here rather than storing the raw daily fraction.
+            annualized_pct = float(sigma_val) * math.sqrt(TRADING_DAYS_PER_YEAR) * 100.0
+            company.volatility = round(annualized_pct, 4)
 
 
 def _execute_events(

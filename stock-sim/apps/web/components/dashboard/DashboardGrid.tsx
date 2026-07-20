@@ -6,6 +6,7 @@ import { KpiCardsSection } from "@/components/dashboard/KpiCardsSection";
 import { LiveMarketTickerSection } from "@/components/dashboard/LiveMarketTickerSection";
 import { GlobalMarketsSection } from "@/components/dashboard/GlobalMarketsSection";
 import { MarketOverviewSection } from "@/components/dashboard/MarketOverviewSection";
+import { MarketSentimentSection } from "@/components/dashboard/MarketSentimentSection";
 import { PortfolioPerformanceSection } from "@/components/dashboard/PortfolioPerformanceSection";
 import { AiInsightSection } from "@/components/dashboard/AiInsightSection";
 import { TrendingCompaniesSection } from "@/components/dashboard/TrendingCompaniesSection";
@@ -34,6 +35,7 @@ export function DashboardGrid() {
 
       <GlobalMarketsSection />
       <MarketOverviewSection />
+      <MarketSentimentSection />
 
       <PortfolioPerformanceSection />
       <AiInsightSection />

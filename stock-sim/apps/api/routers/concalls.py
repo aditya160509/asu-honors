@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from apps.api.database import get_db
 from apps.api.schemas import ConCallItem
-from db.models import Company, ConCall
+from db.models import Company, ConCall, ConsensusEstimate, IncomeStatement
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +34,22 @@ def get_concalls(
         .all()
     )
 
+    fiscal_periods = [r.fiscal_period for r in rows]
+    actual_eps_by_period: dict[str, float] = {
+        inc.fiscal_period: float(inc.eps)
+        for inc in db.query(IncomeStatement).filter(
+            IncomeStatement.company_id == company.id,
+            IncomeStatement.fiscal_period.in_(fiscal_periods),
+        )
+    }
+    consensus_eps_by_period: dict[str, float] = {
+        ce.fiscal_period: float(ce.consensus_eps)
+        for ce in db.query(ConsensusEstimate).filter(
+            ConsensusEstimate.company_id == company.id,
+            ConsensusEstimate.fiscal_period.in_(fiscal_periods),
+        )
+    }
+
     return [
         ConCallItem(
             id=r.id,
@@ -45,6 +61,8 @@ def get_concalls(
             tone_score=float(r.tone_score),
             guidance_revenue_growth=float(r.guidance_revenue_growth),
             statements=r.statements,
+            actual_eps=actual_eps_by_period.get(r.fiscal_period),
+            consensus_eps=consensus_eps_by_period.get(r.fiscal_period),
         )
         for r in rows
     ]

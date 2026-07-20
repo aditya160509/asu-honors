@@ -13,6 +13,9 @@ export interface StatusLineProps {
   companies: EnrichedCompany[];
   stale?: boolean;
   staleSince?: string | null;
+  /** Overrides the default "DELAYED" label (e.g. "HISTORICAL" for a
+   * deliberate time-machine view rather than an actual data-freshness lag). */
+  staleLabel?: string;
   compareCount?: number;
   onOpenCompare?: () => void;
 }
@@ -34,6 +37,7 @@ export function StatusLine({
   companies,
   stale = false,
   staleSince = null,
+  staleLabel = "DELAYED",
   compareCount = 0,
   onOpenCompare,
 }: StatusLineProps) {
@@ -106,7 +110,7 @@ export function StatusLine({
       <div className="flex-1" />
 
       {stale ? (
-        <span className="shrink-0 text-[var(--term-amber)]">DELAYED {staleSince ?? "—"}</span>
+        <span className="shrink-0 text-[var(--term-amber)]">{staleLabel} {staleSince ?? "—"}</span>
       ) : (
         <span className="flex shrink-0 items-center gap-1.5">
           <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-[var(--term-up)] motion-safe:animate-pulse" />

@@ -35,14 +35,23 @@ def earnings_surprise(actual_eps: float, consensus_eps: float, days_since: int, 
 def news_severity(active_events: list[dict], sim_day: int, decay_rate: float) -> float:
     """Section 6.G — NS = sum of each active event's signed severity, decayed by elapsed days, clamped.
 
+    The sign for each event is taken from its effect_profile's ``news_severity``
+    value (positive => good news pushes price up).  Events without a
+    ``news_severity`` key (structural-only) are excluded — they affect
+    fundamental scores but not daily price drivers.
+
     NOTE: severity is divided by 100 because the raw severity values (typically
     10-80) are on a 0-100 scale, but the driver range is [-1, 1]. Without this
     normalization, even a single event with severity > 100 saturates the clamp.
     """
     total = 0.0
     for event in active_events:
+        ns_effect = event.get("effect_profile", {}).get("news_severity")
+        if ns_effect is None:
+            continue  # structural-only events don't drive daily price
+        sign = 1.0 if ns_effect >= 0 else -1.0
         days_elapsed = sim_day - event["start_day"]
-        total += (event["severity"] / 100.0) * math.exp(-decay_rate * days_elapsed)
+        total += sign * (event["severity"] / 100.0) * math.exp(-decay_rate * days_elapsed)
     return _clamp(total)
 
 

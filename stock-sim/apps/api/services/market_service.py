@@ -99,29 +99,31 @@ def _price_52w_stats(
 
 
 def _last_two_closes_by_company(
-    db: Session, timeline_id: int,
+    db: Session, timeline_id: int, as_of_date: Optional[date] = None,
 ) -> dict[int, tuple[Decimal, Optional[Decimal]]]:
     """Get the two most recent close prices for each company: (latest, previous).
 
     Returns a dict mapping company_id -> (latest_close, prev_close).
-    If only one row exists, prev_close is None.
+    If only one row exists, prev_close is None. When `as_of_date` is given,
+    "most recent" resolves against that historical date instead of live/latest
+    (powers the Market Explorer's historical snapshot view).
     """
     from sqlalchemy import func, literal_column
 
-    # Get the two most recent rows per company using a window function
-    subq = (
-        db.query(
-            PriceHistory.company_id,
-            PriceHistory.close,
-            PriceHistory.sim_date,
-            func.row_number().over(
-                partition_by=PriceHistory.company_id,
-                order_by=PriceHistory.sim_date.desc(),
-            ).label("rn"),
-        )
-        .filter(PriceHistory.timeline_id == timeline_id)
-        .subquery()
-    )
+    # Get the two most recent rows per company (as of as_of_date, if given)
+    # using a window function.
+    base_query = db.query(
+        PriceHistory.company_id,
+        PriceHistory.close,
+        PriceHistory.sim_date,
+        func.row_number().over(
+            partition_by=PriceHistory.company_id,
+            order_by=PriceHistory.sim_date.desc(),
+        ).label("rn"),
+    ).filter(PriceHistory.timeline_id == timeline_id)
+    if as_of_date is not None:
+        base_query = base_query.filter(PriceHistory.sim_date <= as_of_date)
+    subq = base_query.subquery()
     rows = db.query(subq).filter(subq.c.rn <= 2).all()
 
     result: dict[int, dict[int, Decimal]] = {}
@@ -138,26 +140,69 @@ def _last_two_closes_by_company(
     }
 
 
-def get_market_grid(db: Session, timeline_id: int) -> MarketGridResponse:
-    """Build the market grid: all companies with latest prices and day change."""
+def get_market_grid(db: Session, timeline_id: int, as_of_date: Optional[date] = None) -> MarketGridResponse:
+    """Build the market grid: all companies with latest prices and day change.
+
+    When `as_of_date` is given, resolves prices/cycle phase as they stood on
+    that historical sim date instead of live/latest — powers the Market
+    Explorer's "time machine" historical snapshot view. The live path
+    (as_of_date=None) is completely unchanged.
+    """
     companies = db.query(Company).order_by(Company.ticker).all()
     industries = {ind.id: ind for ind in db.query(Industry).all()}
     sim_state = db.query(SimulationState).filter_by(timeline_id=timeline_id).first()
-    latest_cycle = (
-        db.query(EconomicCycleState)
-        .filter_by(timeline_id=timeline_id)
-        .order_by(EconomicCycleState.sim_date.desc())
-        .first()
-    )
-    sim_date = sim_state.current_sim_date if sim_state else date.today()
+
+    if as_of_date is not None:
+        sim_date = as_of_date
+        latest_cycle = (
+            db.query(EconomicCycleState)
+            .filter(EconomicCycleState.timeline_id == timeline_id, EconomicCycleState.sim_date <= as_of_date)
+            .order_by(EconomicCycleState.sim_date.desc())
+            .first()
+        )
+    else:
+        sim_date = sim_state.current_sim_date if sim_state else date.today()
+        latest_cycle = (
+            db.query(EconomicCycleState)
+            .filter_by(timeline_id=timeline_id)
+            .order_by(EconomicCycleState.sim_date.desc())
+            .first()
+        )
     cycle_phase = latest_cycle.cycle_phase if latest_cycle else "expansion"
-    last_two = _last_two_closes_by_company(db, timeline_id)
+    last_two = _last_two_closes_by_company(db, timeline_id, as_of_date=as_of_date)
     price_stats = _price_52w_stats(db, timeline_id, sim_date)
     # Fallback for companies with no PriceHistory rows on this exact timeline
     # yet (e.g. a freshly forked Future Lab branch) -- resolves through the
     # parent chain instead of the shared, timeline-agnostic
     # Company.current_price cache (see db/timeline_resolver.py docstring).
     fallback_prices = get_latest_prices(db, [c.id for c in companies], timeline_id)
+
+    company_ids = [c.id for c in companies]
+    latest_cfs_by_company: dict[int, Decimal] = {}
+    if company_ids:
+        cfs_rows = (
+            db.query(
+                CompanyFactorScore.company_id,
+                func.max(CompanyFactorScore.fiscal_period).label("max_period"),
+            )
+            .filter(CompanyFactorScore.company_id.in_(company_ids))
+            .group_by(CompanyFactorScore.company_id)
+            .subquery()
+        )
+        cfs_data = (
+            db.query(CompanyFactorScore)
+            .join(
+                cfs_rows,
+                and_(
+                    CompanyFactorScore.company_id == cfs_rows.c.company_id,
+                    CompanyFactorScore.fiscal_period == cfs_rows.c.max_period,
+                ),
+            )
+            .all()
+        )
+        for cfs in cfs_data:
+            if cfs.intrinsic_value is not None:
+                latest_cfs_by_company[cfs.company_id] = cfs.intrinsic_value
 
     items: list[CompanyGridItem] = []
     for company in companies:
@@ -169,6 +214,7 @@ def get_market_grid(db: Session, timeline_id: int) -> MarketGridResponse:
         if prev_close is not None and prev_close > 0:
             day_change_pct = float((current_price - prev_close) / prev_close * Decimal("100"))
         stats = price_stats.get(company.id, {})
+        iv = latest_cfs_by_company.get(company.id, company.intrinsic_value)
         items.append(
             CompanyGridItem(
                 id=company.id,
@@ -178,9 +224,10 @@ def get_market_grid(db: Session, timeline_id: int) -> MarketGridResponse:
                 current_price=current_price,
                 prev_close=prev_close,
                 day_change_pct=day_change_pct,
-                intrinsic_value=company.intrinsic_value,
+                intrinsic_value=iv,
                 market_cap=company.market_cap,
                 volatility=company.volatility,
+                market_liquidity_score=company.market_liquidity_score,
                 avg_volume_20d=stats.get("avg_volume_20d"),
                 high_52w=stats.get("high_52w"),
                 low_52w=stats.get("low_52w"),
@@ -246,6 +293,14 @@ def get_company_detail(db: Session, ticker: str, timeline_id: int) -> CompanyDet
         if latest_inc and float(latest_inc.eps) != 0:
             pe_ratio = latest_price / float(latest_inc.eps)
 
+    latest_cfs = (
+        db.query(CompanyFactorScore)
+        .filter_by(company_id=company.id)
+        .order_by(CompanyFactorScore.fiscal_period.desc())
+        .first()
+    )
+    iv = latest_cfs.intrinsic_value if latest_cfs and latest_cfs.intrinsic_value is not None else company.intrinsic_value
+
     return CompanyDetail(
         id=company.id,
         ticker=company.ticker,
@@ -261,9 +316,11 @@ def get_company_detail(db: Session, ticker: str, timeline_id: int) -> CompanyDet
         shares_outstanding=company.shares_outstanding,
         free_float_pct=float(company.free_float_pct),
         latest_price=latest_price,
-        latest_iv=company.intrinsic_value,
+        latest_iv=iv,
         pe_ratio=pe_ratio,
         market_cap=company.market_cap,
+        volatility=company.volatility,
+        market_liquidity_score=company.market_liquidity_score,
         driver_breakdowns=breakdowns,
     )
 
@@ -340,6 +397,16 @@ def get_driver_breakdowns(
     ]
 
 
+def _statement_row_to_dict(row) -> Optional[dict]:
+    if row is None:
+        return None
+    return {
+        c.name: float(getattr(row, c.name)) if isinstance(getattr(row, c.name), (int, float)) else getattr(row, c.name)
+        for c in row.__table__.columns
+        if c.name not in ("id", "company_id", "created_at", "updated_at")
+    }
+
+
 def get_financials(db: Session, ticker: str, period: Optional[str] = None) -> FinancialStatementResponse:
     """Get income/balance/cashflow statements for the latest (or specified) fiscal period."""
     company = db.query(Company).filter_by(ticker=ticker.upper()).first()
@@ -359,21 +426,53 @@ def get_financials(db: Session, ticker: str, period: Optional[str] = None) -> Fi
     bal = db.query(BalanceSheet).filter_by(company_id=company.id, fiscal_period=fiscal_period).first()
     cf = db.query(CashFlowStatement).filter_by(company_id=company.id, fiscal_period=fiscal_period).first()
 
-    def _row_to_dict(row) -> Optional[dict]:
-        if row is None:
-            return None
-        return {
-            c.name: float(getattr(row, c.name)) if isinstance(getattr(row, c.name), (int, float)) else getattr(row, c.name)
-            for c in row.__table__.columns
-            if c.name not in ("id", "company_id", "created_at", "updated_at")
-        }
-
     return FinancialStatementResponse(
         fiscal_period=fiscal_period,
-        income_statement=_row_to_dict(inc),
-        balance_sheet=_row_to_dict(bal),
-        cash_flow_statement=_row_to_dict(cf),
+        income_statement=_statement_row_to_dict(inc),
+        balance_sheet=_statement_row_to_dict(bal),
+        cash_flow_statement=_statement_row_to_dict(cf),
     )
+
+
+def get_financials_history(db: Session, ticker: str, limit: int = 8) -> list[FinancialStatementResponse]:
+    """Get income/balance/cashflow statements for the last `limit` fiscal periods, most recent first."""
+    company = db.query(Company).filter_by(ticker=ticker.upper()).first()
+    if company is None:
+        raise NotFoundError(f"Company '{ticker}' not found")
+
+    incs = (
+        db.query(IncomeStatement)
+        .filter_by(company_id=company.id)
+        .order_by(IncomeStatement.fiscal_period.desc())
+        .limit(limit)
+        .all()
+    )
+    if not incs:
+        raise NotFoundError(f"No financial statements found for '{ticker}'")
+
+    periods = [inc.fiscal_period for inc in incs]
+    bal_by_period = {
+        b.fiscal_period: b
+        for b in db.query(BalanceSheet).filter(
+            BalanceSheet.company_id == company.id, BalanceSheet.fiscal_period.in_(periods)
+        )
+    }
+    cf_by_period = {
+        c.fiscal_period: c
+        for c in db.query(CashFlowStatement).filter(
+            CashFlowStatement.company_id == company.id, CashFlowStatement.fiscal_period.in_(periods)
+        )
+    }
+
+    return [
+        FinancialStatementResponse(
+            fiscal_period=inc.fiscal_period,
+            income_statement=_statement_row_to_dict(inc),
+            balance_sheet=_statement_row_to_dict(bal_by_period.get(inc.fiscal_period)),
+            cash_flow_statement=_statement_row_to_dict(cf_by_period.get(inc.fiscal_period)),
+        )
+        for inc in incs
+    ]
 
 
 def get_valuation(db: Session, ticker: str, timeline_id: int) -> ValuationResponse:

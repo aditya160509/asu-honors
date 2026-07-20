@@ -3,6 +3,7 @@
 import * as React from "react";
 import { Star } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Avatar } from "@/components/ui/avatar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { MiniAreaSpark } from "@/components/dashboard/primitives/MiniAreaSpark";
 import { DeltaBadge } from "@/components/dashboard/primitives/DeltaBadge";
@@ -68,6 +69,7 @@ export function CompanyHeader({ company, dayChangePct, history }: CompanyHeaderP
           />
         </button>
 
+        <Avatar displayName={company.name} colorSeed={company.ticker} className="h-9 w-9 text-base" />
         <span className="num text-h2 font-bold text-mer-ink-primary">{company.ticker}</span>
         <span className="max-w-[280px] truncate text-base text-mer-ink-secondary">{company.name}</span>
         <Badge>{company.industry_name}</Badge>

@@ -11,17 +11,10 @@ from apps.api.exceptions import ConflictError, InsufficientFundsError, Insuffici
 from apps.api.schemas import OrderRequest, OrderResponse, PortfolioAnalyticsResponse, SectorAllocation
 from db.models import Company, ConfigParameter, Holding, Industry, Order, Portfolio, SimulationState, Transaction, User
 from db.timeline_resolver import get_latest_price, get_latest_prices
-from engine.liquidity import kyle_lambda_from_liquidity
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_FEE_RATE = 0.001
-DEFAULT_LIQUIDITY_SCORE = 50.0
-# kyle_lambda_from_liquidity() returns O(1) values; used as a *fractional*
-# price-impact coefficient (see trade_price_with_impact) that must be scaled
-# down to basis-points-per-share, or a routine order size would move the
-# execution price by 100%+ of the quote.
-DEFAULT_KYLE_LAMBDA_SCALE = 0.00005
 
 
 def _get_fee_rate(db: Session) -> float:
@@ -34,16 +27,6 @@ def _get_fee_rate(db: Session) -> float:
         return DEFAULT_FEE_RATE
 
 
-def _get_kyle_lambda_scale(db: Session) -> float:
-    row = db.query(ConfigParameter).filter_by(key="kyle_lambda_scale", scope="global").first()
-    if row is None:
-        return DEFAULT_KYLE_LAMBDA_SCALE
-    try:
-        return float(row.value)
-    except ValueError:
-        return DEFAULT_KYLE_LAMBDA_SCALE
-
-
 def _current_sim_date(db: Session, timeline_id: int) -> date:
     sim_state = db.query(SimulationState).filter_by(timeline_id=timeline_id).first()
     if sim_state is None:
@@ -51,36 +34,21 @@ def _current_sim_date(db: Session, timeline_id: int) -> date:
     return sim_state.current_sim_date
 
 
-def _compute_impact_fraction(db: Session, company: Company, quantity: int) -> Decimal:
-    """Kyle's-lambda price impact as a fraction of price (e.g. 0.01 = 1%)."""
-    liq_score = float(company.market_liquidity_score) if company.market_liquidity_score is not None else DEFAULT_LIQUIDITY_SCORE
-    scale = _get_kyle_lambda_scale(db)
-    lambda_val = kyle_lambda_from_liquidity(liq_score, scale=scale)
-    impact_fraction = lambda_val * float(quantity)
-    return Decimal(str(impact_fraction))
-
-
 def _compute_execution_price(
     db: Session, company: Company, side: str, quantity: int, current_price: Decimal,
 ) -> tuple[Decimal, Decimal]:
-    """Kyle-lambda impact-adjusted execution price, before any limit-price clamp.
+    """Return (current_price, 0) — no market-impact adjustment.
 
     `current_price` must be resolved via db.timeline_resolver.get_latest_price
     for the timeline this order belongs to (NOT company.current_price, which
     is a shared, timeline-agnostic cache overwritten by whichever timeline's
     tick ran most recently -- see db/timeline_resolver.py's module docstring).
-
-    Returns (execution_price, impact_applied) where impact_applied is in $/share."""
-    impact_fraction = _compute_impact_fraction(db, company, quantity)
-    # Cap the fractional impact so a sell can never clear at <= 0 and a buy's
-    # impact never exceeds the current price; an unbounded impact would
-    # otherwise let the order silently reset to the undiscounted price,
-    # defeating the impact model entirely for large orders.
-    max_fraction = Decimal("0.50") if side == "sell" else Decimal("0.99")
-    impact_fraction = min(impact_fraction, max_fraction)
-    delta = current_price * impact_fraction
-    execution_price = current_price + (delta if side == "buy" else -delta)
-    return execution_price, delta
+    Kept as a (db, company, side, quantity, current_price) signature -- same
+    shape the impact-adjusted version had -- purely so call sites don't need
+    their own timeline-aware price lookup duplicated; `db`/`side`/`quantity`
+    are currently unused now that there's no impact model to compute.
+    """
+    return current_price, Decimal(0)
 
 
 def _clamp_to_limit(side: str, execution_price: Decimal, limit_price: Decimal) -> Decimal:

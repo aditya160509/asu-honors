@@ -11,6 +11,7 @@ from apps.api.config import settings
 from apps.api.database import get_db
 from apps.api.schemas import (
     CompanyDetail,
+    CompanyDividendsResponse,
     CycleStateResponse,
     DriverBreakdown,
     FinancialStatementResponse,
@@ -18,7 +19,7 @@ from apps.api.schemas import (
     PriceHistoryItem,
     ValuationResponse,
 )
-from apps.api.services import market_service
+from apps.api.services import dividend_service, market_service
 
 logger = logging.getLogger(__name__)
 
@@ -26,8 +27,12 @@ router = APIRouter(prefix="/api/v1", tags=["Market Data"])
 
 
 @router.get("/market", response_model=MarketGridResponse)
-def get_market(timeline_id: int = Query(default=settings.default_timeline_id), db: Session = Depends(get_db)) -> MarketGridResponse:
-    return market_service.get_market_grid(db, timeline_id)
+def get_market(
+    timeline_id: int = Query(default=settings.default_timeline_id),
+    as_of_date: Optional[date] = Query(default=None, description="Return the grid as it stood on this sim date instead of live/latest."),
+    db: Session = Depends(get_db),
+) -> MarketGridResponse:
+    return market_service.get_market_grid(db, timeline_id, as_of_date=as_of_date)
 
 
 @router.get("/market/cycle", response_model=CycleStateResponse)
@@ -70,8 +75,24 @@ def get_company_financials(
     return market_service.get_financials(db, ticker, period)
 
 
+@router.get("/companies/{ticker}/financials/history", response_model=list[FinancialStatementResponse])
+def get_company_financials_history(
+    ticker: str,
+    limit: int = Query(default=8, ge=1, le=40),
+    db: Session = Depends(get_db),
+) -> list[FinancialStatementResponse]:
+    return market_service.get_financials_history(db, ticker, limit)
+
+
 @router.get("/companies/{ticker}/valuation", response_model=ValuationResponse)
 def get_company_valuation(
     ticker: str, timeline_id: int = Query(default=settings.default_timeline_id), db: Session = Depends(get_db)
 ) -> ValuationResponse:
     return market_service.get_valuation(db, ticker, timeline_id)
+
+
+@router.get("/companies/{ticker}/dividends", response_model=CompanyDividendsResponse)
+def get_company_dividends(
+    ticker: str, timeline_id: int = Query(default=settings.default_timeline_id), db: Session = Depends(get_db)
+) -> CompanyDividendsResponse:
+    return dividend_service.get_company_dividends(db, ticker, timeline_id)

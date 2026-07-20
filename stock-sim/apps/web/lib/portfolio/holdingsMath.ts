@@ -30,6 +30,25 @@ export function withDayChange(
   return holdings.map((h) => ({ ...h, dayChange: byTicker.get(h.ticker) ?? null }));
 }
 
+/** Hypothetical post-trade single-name weight -- reuses the same weight = value / totalValue * 100
+ * formula as withWeights(). Buying/selling only shifts value between cash and this one holding, so
+ * totalValue (cash + holdings) itself does not change; only this ticker's market_value does. */
+export function hypotheticalPostTradeWeight(
+  holdings: HoldingResponse[],
+  totalValue: number,
+  ticker: string,
+  price: number,
+  side: "buy" | "sell",
+  quantity: number
+): number | null {
+  if (totalValue <= 0 || price <= 0 || quantity <= 0) return null;
+  const existing = holdings.find((h) => h.ticker === ticker);
+  const existingValue = existing ? Number(existing.market_value) : 0;
+  const delta = quantity * price * (side === "buy" ? 1 : -1);
+  const newValue = Math.max(0, existingValue + delta);
+  return (newValue / totalValue) * 100;
+}
+
 export function largestPositions<T extends HoldingWithWeight>(holdings: T[], n = 5): T[] {
   return [...holdings].sort((a, b) => b.weight - a.weight).slice(0, n);
 }

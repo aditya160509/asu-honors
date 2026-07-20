@@ -12,7 +12,14 @@ from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
-from apps.api.schemas import DividendReceipt, PortfolioDividendsResponse, UpcomingDividend
+from apps.api.exceptions import NotFoundError
+from apps.api.schemas import (
+    CompanyDividendItem,
+    CompanyDividendsResponse,
+    DividendReceipt,
+    PortfolioDividendsResponse,
+    UpcomingDividend,
+)
 from db.models import Company, Dividend, Holding, Portfolio, SimulationState, Transaction, User
 
 logger = logging.getLogger(__name__)
@@ -126,3 +133,40 @@ def get_portfolio_dividends(db: Session, user: User, timeline_id: int) -> Portfo
         total_received=total_received,
         trailing_12m_received=trailing_12m,
     )
+
+
+def get_company_dividends(db: Session, ticker: str, timeline_id: int) -> CompanyDividendsResponse:
+    """Company-level dividend schedule + trailing-12m yield -- independent of any user's holdings
+    (dividend_service's other function is portfolio-scoped and can't answer "what does this
+    company pay" on its own)."""
+    company = db.query(Company).filter_by(ticker=ticker.upper()).first()
+    if company is None:
+        raise NotFoundError(f"Company '{ticker}' not found")
+
+    current = _current_sim_date(db, timeline_id)
+    twelve_months_ago = current - timedelta(days=365)
+
+    divs = (
+        db.query(Dividend)
+        .filter(Dividend.company_id == company.id, Dividend.timeline_id == timeline_id, Dividend.ex_date <= current)
+        .order_by(Dividend.ex_date.desc())
+        .all()
+    )
+
+    history = [
+        CompanyDividendItem(
+            declared_date=d.declared_date,
+            ex_date=d.ex_date,
+            payment_date=d.payment_date,
+            amount_per_share=Decimal(str(d.amount_per_share)),
+        )
+        for d in divs
+    ]
+
+    trailing_sum = sum(
+        float(d.amount_per_share) for d in divs if d.ex_date >= twelve_months_ago
+    )
+    price = float(company.current_price) if company.current_price else None
+    yield_pct = (trailing_sum / price * 100.0) if price and price > 0 and trailing_sum > 0 else None
+
+    return CompanyDividendsResponse(history=history, trailing_12m_yield_pct=yield_pct)
