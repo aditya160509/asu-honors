@@ -161,13 +161,13 @@ def generate_news(
     # Filter templates whose tone matches the event sentiment, so a positive
     # event (e.g. "Patent Granted") doesn't pick a negative-sounding template
     # (e.g. "Class-action lawsuit filed") just because they share a category.
-    matching = [t for t in templates if t.sentiment == event.sentiment]
-    if matching:
-        templates = matching
-
-    template = rng.choice(templates) if templates else None
-    if template is None:
+    # When no matching template exists, skip news generation entirely — it's
+    # better to show nothing than a headline whose tone contradicts the event.
+    templates = [t for t in templates if t.sentiment == event.sentiment]
+    if not templates:
         return None
+
+    template = rng.choice(templates)
     severity = float(event_instance.resolved_severity)
 
     # MarketEvent.sentiment is the correctly-authored positive/negative/neutral
