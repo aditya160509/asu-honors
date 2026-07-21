@@ -1,14 +1,17 @@
 "use client";
 
 import * as React from "react";
-import { Trash2 } from "lucide-react";
+import { CornerDownRight, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn, formatDateFull } from "@/lib/utils";
 import { useDeleteTimeline, useTimelines } from "@/lib/api/hooks/useSimulation";
 import { ApiError } from "@/lib/api/client";
+import { buildTimelineTree, flattenTimelineTree } from "@/lib/simulation/timelineTree";
 import { BranchWizard } from "./branch-wizard/BranchWizard";
+
+const INDENT_PX = 20;
 
 export function TimelineBranch() {
   const { data: timelines, isLoading } = useTimelines();
@@ -19,6 +22,8 @@ export function TimelineBranch() {
   // confirm-dialog primitive for one destructive action.
   const [armedId, setArmedId] = React.useState<number | null>(null);
   const [errorByTimelineId, setErrorByTimelineId] = React.useState<Record<number, string>>({});
+
+  const rows = React.useMemo(() => flattenTimelineTree(buildTimelineTree(timelines ?? [])), [timelines]);
 
   if (isLoading) return <Skeleton width="100%" height={120} />;
 
@@ -55,15 +60,17 @@ export function TimelineBranch() {
         <EmptyState title="No timelines yet." description="Create one to start." />
       ) : (
         <div className="flex flex-col gap-1.5">
-          {timelines.map((t) => (
+          {rows.map(({ timeline: t, depth }) => (
             <div key={t.id} className="flex flex-col gap-0.5">
               <div
                 className={cn(
                   "flex items-center justify-between px-3 py-2 rounded-sm text-small",
                   t.is_live && "border-l-2 border-accent bg-bg-tertiary"
                 )}
+                style={depth > 0 ? { marginLeft: depth * INDENT_PX } : undefined}
               >
                 <div className="flex items-center gap-2">
+                  {depth > 0 && <CornerDownRight size={12} className="shrink-0 text-text-tertiary" />}
                   <span className="text-text-primary">{t.name}</span>
                   {!t.is_live && t.status !== "ready" && (
                     <span

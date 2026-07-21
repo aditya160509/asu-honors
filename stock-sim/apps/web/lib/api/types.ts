@@ -242,6 +242,7 @@ export interface PortfolioAnalyticsResponse {
   sharpe_ratio: number | null;
   volatility_pct: number | null;
   max_drawdown_pct: number | null;
+  value_at_risk_pct: number | null;
 }
 
 export interface TransactionItem {
@@ -589,4 +590,39 @@ export interface SimulationStateResponse {
   current_sim_date: string;
   tick_count: number;
   is_running: boolean;
+}
+
+export type NotificationType = "branch_ready" | "branch_failed" | "price_alert" | "watchlist_mover";
+
+export interface NotificationResponse {
+  id: number;
+  notification_type: NotificationType;
+  payload: Record<string, unknown>;
+  sim_date: string;
+  read_at: string | null;
+  created_at: string;
+}
+
+export interface MarkAllReadResponse {
+  marked_count: number;
+}
+
+export type PriceAlertDirection = "above" | "below";
+
+export interface PriceAlertCreateRequest {
+  company_id: number;
+  timeline_id: number;
+  target_price: number;
+  direction: PriceAlertDirection;
+}
+
+export interface PriceAlertResponse {
+  id: number;
+  company_id: number;
+  timeline_id: number;
+  target_price: number;
+  direction: PriceAlertDirection;
+  is_active: boolean;
+  triggered_at: string | null;
+  created_at: string;
 }

@@ -1,7 +1,9 @@
 "use client";
 
 import * as React from "react";
-import { AlertTriangle, Download, X } from "lucide-react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { AlertTriangle, Download, Link2, X } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -50,10 +52,25 @@ interface SeriesEntry {
   isIncomplete: boolean;
 }
 
+function parseIdsParam(raw: string | null): number[] {
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((s) => Number(s))
+    .filter((n) => Number.isInteger(n) && n > 0);
+}
+
 export function TimelineComparisonView() {
   const { data: timelines } = useTimelines();
-  const [selectedIds, setSelectedIds] = React.useState<number[]>([]);
-  const [ticker, setTicker] = React.useState("");
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  // Seeded once from the URL on first render (a link like
+  // ?mode=future-lab&ticker=TST&timelines=1,2 reproduces the exact
+  // comparison being shared) -- subsequent user changes update the URL
+  // below, but re-reading searchParams on every render would fight the
+  // user's own edits (add/remove timeline) with whatever's still in the URL.
+  const [selectedIds, setSelectedIds] = React.useState<number[]>(() => parseIdsParam(searchParams.get("timelines")));
+  const [ticker, setTicker] = React.useState(() => searchParams.get("ticker") ?? "");
   const [metric] = React.useState<Metric>("price");
   const [hoverX, setHoverX] = React.useState<number | null>(null);
   const canvasContainerRef = React.useRef<HTMLDivElement>(null);
@@ -62,6 +79,25 @@ export function TimelineComparisonView() {
     const live = timelines?.find((t) => t.is_live);
     if (live && selectedIds.length === 0) setSelectedIds([live.id]);
   }, [timelines, selectedIds.length]);
+
+  // Keep the URL in sync (shallow replace, no navigation/reload) so the
+  // "Copy link" button always reflects whatever's currently selected.
+  React.useEffect(() => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (ticker) params.set("ticker", ticker);
+    else params.delete("ticker");
+    if (selectedIds.length > 0) params.set("timelines", selectedIds.join(","));
+    else params.delete("timelines");
+    router.replace(`/simulation?${params.toString()}`, { scroll: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ticker, selectedIds]);
+
+  function handleCopyLink() {
+    navigator.clipboard.writeText(window.location.href).then(
+      () => toast("Link copied", { description: "Anyone with this link sees the same comparison." }),
+      () => toast.error("Couldn't copy the link"),
+    );
+  }
 
   const availableToAdd = timelines?.filter((t) => !selectedIds.includes(t.id)) ?? [];
 
@@ -156,6 +192,10 @@ export function TimelineComparisonView() {
 
         <div className="flex-1" />
 
+        <Button variant="outline" size="sm" onClick={handleCopyLink} disabled={series.length === 0}>
+          <Link2 size={14} />
+          Copy link
+        </Button>
         <Button variant="outline" size="sm" onClick={handleExportCsv} disabled={series.length === 0}>
           <Download size={14} />
           CSV

@@ -14,6 +14,7 @@ import { WatchlistPreviewSection } from "@/components/dashboard/WatchlistPreview
 import { SectorPerformanceSection } from "@/components/dashboard/SectorPerformanceSection";
 import { TopMoversSection } from "@/components/dashboard/TopMoversSection";
 import { RecentActivitySection } from "@/components/dashboard/RecentActivitySection";
+import { RecentlyViewedSection } from "@/components/dashboard/RecentlyViewedSection";
 import { MarketHeatmapSection } from "@/components/dashboard/MarketHeatmapSection";
 import { QuickActionsSection } from "@/components/dashboard/QuickActionsSection";
 import { EconomicCalendarSection } from "@/components/dashboard/EconomicCalendarSection";
@@ -46,6 +47,7 @@ export function DashboardGrid() {
 
       <TopMoversSection />
       <RecentActivitySection />
+      <RecentlyViewedSection />
 
       <MarketHeatmapSection />
       <QuickActionsSection />

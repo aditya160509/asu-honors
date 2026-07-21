@@ -10,7 +10,7 @@ import { usePortfolioAnalytics } from "@/lib/api/hooks/usePortfolio";
 import { formatPrice } from "@/lib/utils";
 
 interface MetricDef {
-  key: "beta" | "sharpe_ratio" | "volatility_pct" | "max_drawdown_pct" | "win_rate";
+  key: "beta" | "sharpe_ratio" | "volatility_pct" | "max_drawdown_pct" | "win_rate" | "value_at_risk_pct";
   label: string;
   definition: string;
   formula: string;
@@ -58,6 +58,14 @@ const METRICS: MetricDef[] = [
     formula: "wins / closed trades × 100",
     format: (v) => `${v.toFixed(0)}%`,
     accent: "positive",
+  },
+  {
+    key: "value_at_risk_pct",
+    label: "VaR (95%)",
+    definition: "Expected max one-day loss, 95% of the time, from historical daily returns.",
+    formula: "VaR₉₅ = −percentile₅(daily returns)",
+    format: (v) => `${v.toFixed(1)}%`,
+    accent: "negative",
   },
 ];
 
@@ -223,7 +231,7 @@ export function AnalyticsMetricsPanel() {
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         {METRICS.map((m) => {
           const raw = data?.[m.key];
           const value = raw == null ? null : Number(raw);

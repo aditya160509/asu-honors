@@ -4,6 +4,7 @@ from db.models.concalls import ConCall
 from db.models.events import EventInstance, MarketEvent, NewsFeed, NewsTemplate
 from db.models.factor_scores import CompanyFactorScore, FinancialQualitySubscore, MoatSubscore
 from db.models.financials import BalanceSheet, CashFlowStatement, ConsensusEstimate, IncomeStatement
+from db.models.price_alerts import PriceAlert
 from db.models.reference import (
     Company,
     ConfigParameter,
@@ -68,6 +69,7 @@ __all__ = [
     "Goal",
     "Dividend",
     "Notification",
+    "PriceAlert",
     "UserSession",
     "PasswordResetToken",
     "OtpCode",

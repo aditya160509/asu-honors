@@ -200,7 +200,8 @@ def _std(xs: list[float]) -> float:
 
 
 def compute_risk_metrics(history: PortfolioHistoryResponse) -> dict[str, Optional[float]]:
-    """Beta, Sharpe (risk-free rate 0), annualized volatility %, max drawdown %.
+    """Beta, Sharpe (risk-free rate 0), annualized volatility %, max drawdown %,
+    historical 95% VaR %.
 
     Every metric individually degrades to None when the series is too short —
     the UI renders a contained 'needs more history' state instead of a number.
@@ -215,6 +216,7 @@ def compute_risk_metrics(history: PortfolioHistoryResponse) -> dict[str, Optiona
         "sharpe_ratio": None,
         "volatility_pct": None,
         "max_drawdown_pct": None,
+        "value_at_risk_pct": None,
     }
 
     if len(values) >= 2:
@@ -231,6 +233,16 @@ def compute_risk_metrics(history: PortfolioHistoryResponse) -> dict[str, Optiona
         metrics["volatility_pct"] = vol * math.sqrt(TRADING_DAYS_PER_YEAR) * 100.0
         if vol > 0:
             metrics["sharpe_ratio"] = _mean(port_returns) / vol * math.sqrt(TRADING_DAYS_PER_YEAR)
+
+        # Simple historical VaR (Section 12): the empirical 5th-percentile daily
+        # return, reported as a positive "expected max one-day loss at 95%
+        # confidence" percentage. Nearest-rank method (no interpolation) --
+        # consistent with this module's other metrics, which favor a plain,
+        # auditable calculation over a smoothed/interpolated one.
+        sorted_returns = sorted(port_returns)
+        percentile_idx = min(len(sorted_returns) - 1, int(0.05 * len(sorted_returns)))
+        var_return = sorted_returns[percentile_idx]
+        metrics["value_at_risk_pct"] = max(0.0, -var_return * 100.0)
 
     bench_returns = _daily_returns(bench)
     n = min(len(port_returns), len(bench_returns))

@@ -11,6 +11,7 @@ import { ErrorState } from "@/components/ui/error-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/components/layout/AuthContext";
 import { useConfigParameters, useInjectEvent, useUpdateConfig } from "@/lib/api/hooks/useAdmin";
+import { ScenarioTemplateForm } from "@/components/admin/ScenarioTemplateForm";
 
 function ConfigEditor() {
   const { data, isLoading, isError, refetch } = useConfigParameters();
@@ -127,6 +128,14 @@ export default function AdminPage() {
           </CardContent>
         </Card>
       </div>
+      <Card className="mt-4">
+        <CardHeader>
+          <CardTitle>Scenario Library — New Template</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ScenarioTemplateForm />
+        </CardContent>
+      </Card>
     </TerminalShell>
   );
 }

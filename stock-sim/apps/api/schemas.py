@@ -281,6 +281,7 @@ class PortfolioAnalyticsResponse(BaseModel):
     sharpe_ratio: Optional[float] = None
     volatility_pct: Optional[float] = None
     max_drawdown_pct: Optional[float] = None
+    value_at_risk_pct: Optional[float] = None
 
 
 class TransactionItem(BaseModel):
@@ -698,3 +699,57 @@ class SimulationStateResponse(BaseModel):
     current_sim_date: date
     tick_count: int
     is_running: bool
+
+
+# --------------------------------------------------------------------------
+# Notifications
+# --------------------------------------------------------------------------
+
+
+class NotificationResponse(BaseModel):
+    id: int
+    notification_type: str
+    payload: dict
+    sim_date: date
+    read_at: Optional[datetime] = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class MarkAllReadResponse(BaseModel):
+    marked_count: int
+
+
+class PriceAlertCreateRequest(BaseModel):
+    company_id: int
+    timeline_id: int
+    target_price: Decimal
+    direction: str
+
+    @field_validator("target_price")
+    @classmethod
+    def _validate_target_price(cls, v: Decimal) -> Decimal:
+        if v <= 0:
+            raise ValueError("target_price must be positive")
+        return v
+
+    @field_validator("direction")
+    @classmethod
+    def _validate_direction(cls, v: str) -> str:
+        if v not in ("above", "below"):
+            raise ValueError("direction must be 'above' or 'below'")
+        return v
+
+
+class PriceAlertResponse(BaseModel):
+    id: int
+    company_id: int
+    timeline_id: int
+    target_price: Decimal
+    direction: str
+    is_active: bool
+    triggered_at: Optional[datetime] = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}

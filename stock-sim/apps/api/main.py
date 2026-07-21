@@ -19,10 +19,12 @@ from apps.api.routers import (
     leaderboard,
     market,
     news,
+    notifications,
     portfolio,
     scenario_library,
     simulation,
     trading,
+    ws,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -68,6 +70,8 @@ def create_app() -> FastAPI:
     application.include_router(news.router)
     application.include_router(concalls.router)
     application.include_router(leaderboard.router)
+    application.include_router(notifications.router)
+    application.include_router(ws.router)
 
     add_exception_handlers(application)
 

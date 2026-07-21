@@ -21,6 +21,7 @@ import { FinancialTabs } from "@/components/companies/FinancialTabs";
 import { PeerCompaniesSection } from "@/components/companies/PeerCompaniesSection";
 import { CompanyNewsSection } from "@/components/companies/CompanyNewsSection";
 import { OrderForm } from "@/components/trading/OrderForm";
+import { PriceAlertPanel } from "@/components/trading/PriceAlertPanel";
 import { DashboardPanel } from "@/components/dashboard/primitives/DashboardPanel";
 import { ErrorState } from "@/components/ui/error-state";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -30,6 +31,7 @@ import { useConCalls } from "@/lib/api/hooks/useConCalls";
 import { useMarketGrid } from "@/lib/api/hooks/useMarket";
 import { buildConCallMarkers } from "@/lib/companies/conCallMarkers";
 import { computeRiskTierCutoffs, riskTierFor } from "@/lib/market/riskTier";
+import { logCompanyView } from "@/lib/companies/useRecentlyViewed";
 import { ApiError } from "@/lib/api/client";
 
 export default function CompanyDetailPage() {
@@ -75,6 +77,13 @@ export default function CompanyDetailPage() {
     [marketGrid.data]
   );
   const riskTier = riskTierFor(company.data?.volatility != null ? Number(company.data.volatility) : null, riskTierCutoffs);
+
+  React.useEffect(() => {
+    // Keyed on ticker/name (not the whole company.data object) so this fires
+    // once per navigation, not on every background refetch of live price data.
+    if (company.data) logCompanyView(company.data.ticker, company.data.name);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [company.data?.ticker, company.data?.name]);
 
   const chartData = React.useMemo(() => sliceByTimeframe(history.data ?? [], timeframe), [history.data, timeframe]);
   const conCallMarkers = React.useMemo(
@@ -224,6 +233,7 @@ export default function CompanyDetailPage() {
                 portfolio.refetch();
               }}
             />
+            <PriceAlertPanel companyId={company.data.id} ticker={ticker} currentPrice={currentPrice} />
           </div>
         </div>
       )}

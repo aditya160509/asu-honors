@@ -68,6 +68,33 @@ def get_latest_price(session: Session, company_id: int, timeline_id: int) -> Opt
     return None
 
 
+def get_latest_two_closes(
+    session: Session, company_id: int, timeline_id: int
+) -> tuple[Optional[Decimal], Optional[Decimal]]:
+    """(latest_close, prior_close) for (company_id, timeline_id), for
+    day-over-day comparisons (e.g. watchlist mover alerts). Same parent-chain
+    fallback as get_latest_price, but resolved as a single chain walk: the
+    first timeline in the chain with >= 2 rows supplies both values, so a
+    freshly-forked child with only 1 (or 0) rows of its own still reports the
+    parent's most recent prior close instead of a false "no prior day" gap.
+    Returns (None, None) if no ancestor has any rows at all; (close, None)
+    if only one row exists across the whole chain.
+    """
+    for tid in get_timeline_chain(session, timeline_id):
+        rows = (
+            session.query(PriceHistory.close)
+            .filter_by(company_id=company_id, timeline_id=tid)
+            .order_by(PriceHistory.sim_date.desc())
+            .limit(2)
+            .all()
+        )
+        if rows:
+            latest = rows[0][0]
+            prior = rows[1][0] if len(rows) > 1 else None
+            return latest, prior
+    return None, None
+
+
 def get_latest_prices(session: Session, company_ids: list[int], timeline_id: int) -> dict[int, Decimal]:
     """Batch form of get_latest_price for a set of companies on one timeline.
 

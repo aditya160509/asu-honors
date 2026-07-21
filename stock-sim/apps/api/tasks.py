@@ -18,7 +18,7 @@ import logging
 
 from apps.api.celery_app import celery_app
 from apps.api.database import SessionLocal
-from apps.api.services import audit_service, branch_service
+from apps.api.services import audit_service, branch_service, notification_service
 from db.models import Timeline
 
 logger = logging.getLogger(__name__)
@@ -62,6 +62,7 @@ def run_fast_forward_job(self, timeline_id: int, target_days: int) -> dict:
             timeline = status_db.query(Timeline).filter_by(id=timeline_id).first()
             if timeline is not None:
                 timeline.status = "failed"
+                notification_service.notify_branch_failed(status_db, timeline, error=str(exc))
             audit_service.record(
                 status_db, actor_user_id=None, action="create_timeline", timeline_id=timeline_id,
                 after_value={"status": "failed", "error": str(exc)},
