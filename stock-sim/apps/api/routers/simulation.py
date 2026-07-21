@@ -27,7 +27,7 @@ from apps.api.schemas import (
     TimelineResponse,
     TimelineStatusResponse,
 )
-from apps.api.services import audit_service, branch_service, sim_service, timeline_group_service
+from apps.api.services import audit_service, branch_service, notification_service, sim_service, timeline_group_service
 from db.models import ConfigParameter, EventInstance, SimulationState, Timeline, User
 
 logger = logging.getLogger(__name__)
@@ -128,6 +128,9 @@ def create_timeline(
                 timeline.id,
             )
             timeline.status = "failed"
+            notification_service.notify_branch_failed(
+                db, timeline, error="no Celery worker available at dispatch time",
+            )
             audit_service.record(
                 db, actor_user_id=user.id, action="create_timeline", timeline_id=timeline.id,
                 after_value={"status": "failed", "reason": "no Celery worker available at dispatch time"},
@@ -173,9 +176,34 @@ def extend_timeline(
     timeline_id: int,
     request: TimelineExtendRequest,
     db: Session = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ) -> Timeline:
-    timeline = branch_service.extend_timeline(db, timeline_id, request.days)
+    try:
+        timeline = branch_service.extend_timeline(db, timeline_id, request.days)
+    except HTTPException:
+        # NotFoundError/ConflictError are raised before extend_timeline ever
+        # touches timeline.status -- nothing to persist, just propagate as-is.
+        raise
+    except Exception as exc:
+        # branch_service.extend_timeline flips timeline.status = "failed" and
+        # flushes (not commits) that change before re-raising. get_db's
+        # rollback-on-unhandled-exception would otherwise discard the flushed
+        # flip along with the partial simulation writes -- the same incident
+        # apps/api/tasks.py's run_fast_forward_job was fixed to avoid for the
+        # async path, but this synchronous route hits the identical failure
+        # mode. Roll back the bad writes, then persist just the status flip +
+        # audit log + notification as their own transaction before re-raising.
+        db.rollback()
+        timeline_row = db.query(Timeline).filter_by(id=timeline_id).first()
+        if timeline_row is not None:
+            timeline_row.status = "failed"
+            notification_service.notify_branch_failed(db, timeline_row, error=str(exc))
+        audit_service.record(
+            db, actor_user_id=user.id, action="create_timeline", timeline_id=timeline_id,
+            after_value={"status": "failed"},
+        )
+        db.commit()
+        raise
     db.commit()
     return timeline
 

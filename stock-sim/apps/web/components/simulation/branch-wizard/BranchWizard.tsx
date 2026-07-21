@@ -106,6 +106,12 @@ export function BranchWizard() {
       }
       case 1:
         return Boolean(state.primitive);
+      case 2:
+        // ConfigureStep blocks sensitivity_sweep/monte_carlo with a "not yet
+        // available" message since the API only supports single-branch
+        // creation today -- Next must not let the user click past that dead
+        // end and submit a request the backend can't fulfill.
+        return state.primitive !== "sensitivity_sweep" && state.primitive !== "monte_carlo";
       default:
         return true;
     }

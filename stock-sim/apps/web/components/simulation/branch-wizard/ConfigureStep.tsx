@@ -6,88 +6,18 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { ScenarioTemplateResponse, TimelineOverrideSpec, TimelineOverrideTargetType } from "@/lib/api/types";
+import {
+  CONFIG_KEY_SUGGESTIONS,
+  OVERRIDE_TARGET_TYPES,
+  keyOptionsFor,
+  valueHelpFor,
+} from "@/lib/scenario/overrideVocabulary";
 import type { BranchWizardState } from "./BranchWizard";
 
 interface Props {
   state: BranchWizardState;
   scenarioLibrary: ScenarioTemplateResponse[] | undefined;
   onChange: (patch: Partial<BranchWizardState>) => void;
-}
-
-const OVERRIDE_TARGET_TYPES: TimelineOverrideTargetType[] = [
-  "config",
-  "factor_score",
-  "event",
-  "cycle_transition",
-  "driver_bias",
-];
-
-// Which engine keys each target_type actually reads (engine/overrides.py).
-// "event" has no fixed key list -- it's not wired into the tick loop yet
-// (target_key would be a MarketEvent name if/when it is), so it stays free
-// text with a warning label rather than a dropdown of options that don't do
-// anything.
-const CYCLE_PHASE_OPTIONS = [
-  { value: "expansion", label: "Expansion" },
-  { value: "peak", label: "Peak" },
-  { value: "contraction", label: "Contraction (recession)" },
-  { value: "trough", label: "Trough" },
-];
-
-const DRIVER_BIAS_OPTIONS = [
-  { value: "value_opportunity", label: "Value opportunity" },
-  { value: "earnings_surprise", label: "Earnings surprise" },
-  { value: "news_severity", label: "News severity" },
-  { value: "economic_outlook", label: "Economic outlook" },
-  { value: "guidance", label: "Guidance" },
-  { value: "technical_momentum", label: "Technical momentum" },
-  { value: "institutional_buying", label: "Institutional buying" },
-];
-
-const FACTOR_SCORE_OPTIONS = [
-  { value: "management_quality", label: "Management quality" },
-  { value: "moat_score", label: "Moat score" },
-  { value: "financial_quality", label: "Financial quality" },
-  { value: "fcf_quality", label: "FCF quality" },
-  { value: "growth_potential", label: "Growth potential" },
-];
-
-// config keys are open-ended (any ConfigParameter key), but these are the
-// ones Future Lab scenarios actually reference today (theta_default drives
-// mean-reversion speed, kyle_lambda_scale drives trade-impact size) --
-// offered as suggestions via a datalist rather than a closed dropdown, since
-// unlike cycle_transition/driver_bias/factor_score, config keys aren't a
-// fixed enum in the engine.
-const CONFIG_KEY_SUGGESTIONS = [
-  "theta_default",
-  "kyle_lambda_scale",
-  "r_cap",
-  "growth_rate_min",
-  "growth_rate_max",
-];
-
-function keyOptionsFor(targetType: TimelineOverrideTargetType): { value: string; label: string }[] | null {
-  if (targetType === "cycle_transition") return CYCLE_PHASE_OPTIONS;
-  if (targetType === "driver_bias") return DRIVER_BIAS_OPTIONS;
-  if (targetType === "factor_score") return FACTOR_SCORE_OPTIONS;
-  return null; // config (datalist suggestions) / event (free text)
-}
-
-function valueHelpFor(targetType: TimelineOverrideTargetType): string {
-  switch (targetType) {
-    case "cycle_transition":
-      return "Strength 0.0–1.0 (1.0 = hard-force this phase for the override's duration)";
-    case "driver_bias":
-      return "Additive delta, e.g. -0.3 (clamped to [-1, 1] after applying)";
-    case "factor_score":
-      return "Additive delta in points, e.g. -15 (clamped to [0, 100] after applying)";
-    case "config":
-      return "The new value itself (replaces the current setting), e.g. 0.08";
-    case "event":
-      return "Not wired into the simulation yet — saved but currently has no effect";
-    default:
-      return "";
-  }
 }
 
 function addDays(isoDate: string, days: number): string {
@@ -97,6 +27,19 @@ function addDays(isoDate: string, days: number): string {
 }
 
 export function ConfigureStep({ state, scenarioLibrary, onChange }: Props) {
+  // selectTemplate materializes effective_from/to_sim_date from
+  // state.branchPointSimDate at the moment a template is picked. If the user
+  // then goes back to step 0 and changes the branch date, those baked-in
+  // dates go stale (no longer match the actual branch point) unless we
+  // re-derive them here. Runs before the primitive-gated early returns below
+  // per Rules of Hooks (must fire unconditionally on every render).
+  React.useEffect(() => {
+    if (state.scenarioTemplateId !== null) {
+      selectTemplate(state.scenarioTemplateId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.branchPointSimDate]);
+
   // Backend POST /sim/timelines creates exactly one timeline per call — N-branch
   // fan-out for sweeps/ensembles (a timeline_groups-creating endpoint) doesn't
   // exist yet, only read-only aggregation for groups that already exist. Rather

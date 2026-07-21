@@ -18,8 +18,10 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from apps.api.exceptions import ConflictError, NotFoundError
+from apps.api.services import notification_service
 from db.models import (
     Company,
+    CompanyFactorScore,
     FinancialQualitySubscore,
     MoatSubscore,
     SimulationState,
@@ -103,11 +105,17 @@ def create_branch(
     db.flush()
 
     # New timeline starts frozen at the branch point -- the caller enqueues
-    # the fast-forward job (Phase 4) to advance it from here.
+    # the fast-forward job (Phase 4) to advance it from here. tick_count is
+    # inherited from the parent (not reset to 0): _compute_fiscal_period
+    # (engine/orchestrator.py) treats tick_count as an absolute day-count
+    # since a single global epoch shared by every timeline, so a branch
+    # forked after its parent's first year must keep the parent's count or
+    # its fiscal-period labeling (and quarter-boundary cadence) desyncs from
+    # its own real current_sim_date.
     new_state = SimulationState(
         timeline_id=timeline.id,
         current_sim_date=branch_date,
-        tick_count=0,
+        tick_count=parent_state.tick_count,
         is_running=False,
     )
     db.add(new_state)
@@ -142,6 +150,35 @@ def create_branch(
             peer_percentile=fqs.peer_percentile,
             subscore=fqs.subscore,
             applied_weight=fqs.applied_weight,
+        ))
+
+    # CompanyFactorScore is also timeline-scoped (migration 0015) and is what
+    # engine/orchestrator.py actually reads for growth_potential/moat_score/
+    # financial_quality on every tick (_load_tick_state's latest_cfs,
+    # _refresh_fundamentals's latest_cfs_by_company). Without cloning it here,
+    # a fresh branch has zero rows until its own first quarter boundary (up
+    # to 63 ticks away): growth_potential silently falls back to a flat 50.0
+    # for every company, and any factor_score-type TimelineOverride has no
+    # row to apply itself against, so it silently no-ops the whole time.
+    for cfs in db.query(CompanyFactorScore).filter_by(timeline_id=parent_id).all():
+        db.add(CompanyFactorScore(
+            company_id=cfs.company_id,
+            timeline_id=timeline.id,
+            fiscal_period=cfs.fiscal_period,
+            management_quality=cfs.management_quality,
+            moat_score=cfs.moat_score,
+            financial_quality=cfs.financial_quality,
+            fcf_quality=cfs.fcf_quality,
+            growth_potential=cfs.growth_potential,
+            intrinsic_score=cfs.intrinsic_score,
+            fair_pe=cfs.fair_pe,
+            intrinsic_value=cfs.intrinsic_value,
+            computed_at=cfs.computed_at,
+            management_quality_base=cfs.management_quality_base,
+            growth_potential_base=cfs.growth_potential_base,
+            fcf_quality_base=cfs.fcf_quality_base,
+            moat_score_base=cfs.moat_score_base,
+            financial_quality_base=cfs.financial_quality_base,
         ))
 
     for spec in overrides or []:
@@ -191,12 +228,15 @@ def extend_timeline(db: Session, timeline_id: int, additional_days: int) -> Time
     db.flush()
     try:
         run_ticks(db, timeline_id, num_ticks=additional_days)
+        notification_service.evaluate_price_alerts(db, timeline_id)
+        notification_service.evaluate_watchlist_movers(db, timeline_id)
     except Exception:
         timeline.status = "failed"
         db.flush()
         raise
     timeline.status = "ready"
     timeline.last_touched_at = datetime.now(timezone.utc)
+    notification_service.notify_branch_ready(db, timeline)
     db.flush()
     return timeline
 

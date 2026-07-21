@@ -35,7 +35,54 @@ describe("PrimitiveStep", () => {
 
     await user.click(screen.getByText("Macro shock"));
 
-    expect(onChange).toHaveBeenCalledWith({ primitive: "macro_shock" });
+    expect(onChange).toHaveBeenCalledWith({
+      primitive: "macro_shock",
+      scenarioTemplateId: null,
+      overrides: [],
+    });
+  });
+
+  it("clears scenarioTemplateId and overrides when switching to a different primitive", async () => {
+    // Regression test: overrides materialized from a macro_shock scenario
+    // template must not silently carry over into e.g. a "manual" branch,
+    // which the Configure step claims needs no overrides at all.
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      <PrimitiveStep
+        state={baseState({
+          primitive: "macro_shock",
+          scenarioTemplateId: 7,
+          overrides: [
+            {
+              target_type: "driver_bias",
+              target_key: "economic_outlook",
+              override_value: "-0.4",
+              effective_from_sim_date: "2026-01-02",
+            },
+          ],
+        })}
+        onChange={onChange}
+      />
+    );
+
+    await user.click(screen.getByText("Manual / freeform"));
+
+    expect(onChange).toHaveBeenCalledWith({
+      primitive: "manual",
+      scenarioTemplateId: null,
+      overrides: [],
+    });
+  });
+
+  it("does not call onChange when re-clicking the already-selected primitive", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<PrimitiveStep state={baseState({ primitive: "macro_shock" })} onChange={onChange} />);
+
+    await user.click(screen.getByText("Macro shock"));
+
+    expect(onChange).not.toHaveBeenCalled();
   });
 
   it("visually marks the currently-selected primitive as active", () => {

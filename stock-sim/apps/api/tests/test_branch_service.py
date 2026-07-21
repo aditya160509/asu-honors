@@ -8,6 +8,7 @@ import pytest
 from apps.api.exceptions import ConflictError, NotFoundError
 from apps.api.services import branch_service
 from db.models import (
+    CompanyFactorScore,
     FinancialQualitySubscore,
     MoatSubscore,
     PriceHistory,
@@ -166,6 +167,53 @@ def test_create_branch_copies_parent_fq_subscores(test_db, test_timeline, test_u
     assert child_rows[0].fiscal_period == "2026Q1"
     assert child_rows[0].subfactor_key == "roic"
     assert child_rows[0].subscore == 80.0
+
+
+def test_create_branch_copies_parent_company_factor_scores(test_db, test_timeline, test_user, test_company):
+    """Regression test: without this, a fresh branch has zero CompanyFactorScore
+    rows until its own first quarter boundary (up to 63 ticks), so
+    growth_potential silently falls back to 50.0 for every company and any
+    factor_score override has nothing to apply itself against."""
+    test_db.add(CompanyFactorScore(
+        company_id=test_company.id, timeline_id=test_timeline.id, fiscal_period="2026Q1",
+        management_quality=60.0, moat_score=55.0, financial_quality=70.0, fcf_quality=65.0,
+        growth_potential=72.0, intrinsic_score=68.0, fair_pe=16.0, intrinsic_value=105.0,
+    ))
+    test_db.commit()
+
+    timeline = branch_service.create_branch(
+        test_db, user_id=test_user.id, name="CFS Branch", parent_id=test_timeline.id,
+        branch_date=date(2026, 1, 2), rng_seed=None, primitive="manual",
+    )
+    test_db.commit()
+
+    child_rows = test_db.query(CompanyFactorScore).filter_by(timeline_id=timeline.id).all()
+    assert len(child_rows) == 1
+    assert child_rows[0].company_id == test_company.id
+    assert child_rows[0].fiscal_period == "2026Q1"
+    assert float(child_rows[0].growth_potential) == 72.0
+    assert float(child_rows[0].financial_quality) == 70.0
+
+
+def test_create_branch_inherits_parent_tick_count(test_db, test_timeline, test_user):
+    """Regression test: tick_count must carry over from the parent, not reset
+    to 0 -- _compute_fiscal_period (engine/orchestrator.py) treats tick_count
+    as an absolute day-count since a single global epoch shared by every
+    timeline, so resetting it desyncs the branch's fiscal-period labeling
+    from its own real current_sim_date once the parent has run past its
+    first year."""
+    parent_state = test_db.query(SimulationState).filter_by(timeline_id=test_timeline.id).first()
+    parent_state.tick_count = 300
+    test_db.commit()
+
+    timeline = branch_service.create_branch(
+        test_db, user_id=test_user.id, name="Tick Branch", parent_id=test_timeline.id,
+        branch_date=date(2026, 1, 2), rng_seed=None, primitive="manual",
+    )
+    test_db.commit()
+
+    state = test_db.query(SimulationState).filter_by(timeline_id=timeline.id).first()
+    assert state.tick_count == 300
 
 
 def test_estimate_branch_cost(test_db, test_timeline, test_company):

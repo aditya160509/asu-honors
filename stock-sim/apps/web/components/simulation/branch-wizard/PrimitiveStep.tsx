@@ -51,7 +51,15 @@ export function PrimitiveStep({ state, onChange }: Props) {
           <button
             key={p.value}
             type="button"
-            onClick={() => onChange({ primitive: p.value })}
+            onClick={() => {
+              // Configuration from a different primitive means nothing here --
+              // e.g. macro_shock overrides materialized from a scenario
+              // template shouldn't silently ride along into a "manual"
+              // branch (which the Configure step claims needs no overrides
+              // at all) or a template picked for a different category.
+              if (p.value === state.primitive) return;
+              onChange({ primitive: p.value, scenarioTemplateId: null, overrides: [] });
+            }}
             className={cn(
               "text-left rounded-sm border px-3 py-2.5 transition-colors",
               active ? "border-accent bg-bg-tertiary" : "border-border hover:bg-bg-hover"

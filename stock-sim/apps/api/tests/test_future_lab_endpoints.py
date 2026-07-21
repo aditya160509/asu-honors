@@ -117,12 +117,60 @@ def test_extend_timeline_endpoint(client, test_db, test_timeline, test_company, 
     assert resp.status_code == 200
     assert resp.json()["status"] == "ready"
 
+    from db.models import Notification
+    notifications = test_db.query(Notification).filter_by(
+        user_id=test_user.id, notification_type="branch_ready",
+    ).all()
+    assert len(notifications) == 1
+    assert notifications[0].payload["timeline_id"] == child.id
+
 
 def test_extend_timeline_invalid_days(client, test_db, test_timeline, auth_headers):
     resp = client.post(
         f"/api/v1/sim/timelines/{test_timeline.id}/extend", json={"days": 0}, headers=auth_headers,
     )
     assert resp.status_code == 422
+
+
+def test_extend_timeline_endpoint_persists_failed_status_on_error(
+    client, test_db, test_timeline, test_company, auth_headers, test_user, base_config, monkeypatch,
+):
+    """Regression test: a run_ticks failure mid-fast-forward must leave
+    Timeline.status durably at "failed", not stuck at "running" forever.
+    branch_service.extend_timeline only flushes (not commits) the failed
+    flip before re-raising -- get_db's rollback-on-unhandled-exception used
+    to discard that flip along with the partial simulation writes, since the
+    router had no except clause of its own (the same incident
+    apps/api/tasks.py's run_fast_forward_job was already fixed to avoid for
+    the async path)."""
+    _seed_tickable(test_db, test_company, test_timeline)
+    from apps.api.services import branch_service
+    child = branch_service.create_branch(
+        test_db, user_id=test_user.id, name="Failing Branch",
+        parent_id=test_timeline.id, branch_date=date(2026, 1, 1), rng_seed=7, primitive="manual",
+    )
+    test_db.commit()
+    child_id = child.id
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("simulated run_ticks failure")
+
+    monkeypatch.setattr(branch_service, "run_ticks", _boom)
+
+    # TestClient's default raise_server_exceptions=True re-raises an unhandled
+    # endpoint exception into the test process rather than returning a 500.
+    with pytest.raises(RuntimeError):
+        client.post(f"/api/v1/sim/timelines/{child_id}/extend", json={"days": 2}, headers=auth_headers)
+
+    status_resp = client.get(f"/api/v1/sim/timelines/{child_id}/status", headers=auth_headers)
+    assert status_resp.json()["status"] == "failed"
+
+    from db.models import Notification
+    notifications = test_db.query(Notification).filter_by(
+        user_id=test_user.id, notification_type="branch_failed",
+    ).all()
+    assert len(notifications) == 1
+    assert notifications[0].payload["timeline_id"] == child_id
 
 
 # ── DELETE /sim/timelines/{id} ───────────────────────────────────────────
