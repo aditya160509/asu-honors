@@ -18,7 +18,14 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from apps.api.exceptions import ConflictError, NotFoundError
-from db.models import Company, SimulationState, Timeline, TimelineOverride
+from db.models import (
+    Company,
+    FinancialQualitySubscore,
+    MoatSubscore,
+    SimulationState,
+    Timeline,
+    TimelineOverride,
+)
 from engine.orchestrator import run_ticks
 
 VALID_TARGET_TYPES = frozenset({"factor_score", "config", "event", "cycle_transition", "driver_bias"})
@@ -104,6 +111,38 @@ def create_branch(
         is_running=False,
     )
     db.add(new_state)
+
+    # MoatSubscore/FinancialQualitySubscore are timeline-scoped tables that
+    # only ever get rows via db/seeds/seed_companies.py (live timeline) or
+    # event write-back (engine/orchestrator.py's _apply_factor_effects_to_
+    # company). A freshly created branch has neither, so
+    # _refresh_fundamentals's moat_composite/financial_quality_composite
+    # calls saw an empty subscore dict for every company on the branch's
+    # first fast-forwarded quarter -- moat_composite crashed outright with
+    # ZeroDivisionError (see engine/scoring.py), and financial_quality_
+    # composite silently zeroed out FQ instead. Cloning the parent's rows
+    # onto the child's timeline_id at fork time gives the branch the same
+    # starting subscore state as its parent, exactly like SimulationState
+    # above.
+    for ms in db.query(MoatSubscore).filter_by(timeline_id=parent_id).all():
+        db.add(MoatSubscore(
+            company_id=ms.company_id,
+            timeline_id=timeline.id,
+            subfactor_key=ms.subfactor_key,
+            score=ms.score,
+            score_base=ms.score_base,
+        ))
+    for fqs in db.query(FinancialQualitySubscore).filter_by(timeline_id=parent_id).all():
+        db.add(FinancialQualitySubscore(
+            company_id=fqs.company_id,
+            timeline_id=timeline.id,
+            fiscal_period=fqs.fiscal_period,
+            subfactor_key=fqs.subfactor_key,
+            raw_metric_value=fqs.raw_metric_value,
+            peer_percentile=fqs.peer_percentile,
+            subscore=fqs.subscore,
+            applied_weight=fqs.applied_weight,
+        ))
 
     for spec in overrides or []:
         if spec.target_type not in VALID_TARGET_TYPES:

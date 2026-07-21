@@ -67,6 +67,8 @@ def moat_composite(subscores: dict[str, float], weights: dict[str, float]) -> fl
     """Section 6.C precursor — Moat Score = weighted average of moat subfactors."""
     weighted_sum = sum(weights[key] * score for key, score in subscores.items())
     weight_total = sum(weights[key] for key in subscores)
+    if weight_total == 0:
+        return 0.0
     return weighted_sum / weight_total
 
 

@@ -13,12 +13,14 @@ import { ChartSurface } from "@/lib/charts/core/ChartSurface";
 import { drawGrid } from "@/lib/charts/core/Grid";
 import { drawPriceAxis, drawTimeAxis } from "@/lib/charts/core/Axis";
 import { drawLineSeries, lineYDomain } from "@/lib/charts/series/LineSeries";
-import { formatDateAxis, formatPriceAxis } from "@/lib/charts/core/utils";
+import { formatPriceAxis } from "@/lib/charts/core/utils";
 import type { LinePoint } from "@/lib/charts/types";
 import { StructuralDiffTable } from "./StructuralDiffTable";
 import { exportComparisonCsv } from "@/lib/charts/export/exportCsv";
 import { exportCanvasPng } from "@/lib/charts/export/exportPng";
 import { findDivergenceIndex } from "@/lib/charts/comparison/divergence";
+import { relativeDayAxisLabels } from "@/lib/charts/comparison/axisLabels";
+import { nearestIndexForX } from "@/lib/charts/comparison/hoverLookup";
 
 type Metric = "price";
 
@@ -53,6 +55,7 @@ export function TimelineComparisonView() {
   const [selectedIds, setSelectedIds] = React.useState<number[]>([]);
   const [ticker, setTicker] = React.useState("");
   const [metric] = React.useState<Metric>("price");
+  const [hoverX, setHoverX] = React.useState<number | null>(null);
   const canvasContainerRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
@@ -193,7 +196,12 @@ export function TimelineComparisonView() {
         <EmptyState title="No data yet" description="Select at least one timeline with price history for this ticker." />
       ) : (
         <div ref={canvasContainerRef} className="card-flat">
-          <ChartSurface height={360} padding={PADDING}>
+          <ChartSurface
+            height={360}
+            padding={PADDING}
+            onPointerMove={(x) => setHoverX(x)}
+            onPointerLeave={() => setHoverX(null)}
+          >
             {({ ctx, width, height, dpr }) => {
               drawGrid({ ctx, width, height, dpr, padding: PADDING });
 
@@ -230,15 +238,68 @@ export function TimelineComparisonView() {
               }
 
               drawPriceAxis({ ctx, width, height, padding: PADDING, yDomain, formatY: formatPriceAxis });
+              // Every series is plotted by shared array index, not calendar date
+              // (a branch's index 0 is its own branch point, not the parent's) --
+              // see relativeDayAxisLabels for why "Day N" is the only label
+              // that's simultaneously true for every series on this axis.
+              const plotW = width - PADDING.left - PADDING.right;
               const labelStep = Math.max(1, Math.floor(maxLen / 6));
-              const timeLabels = series[0]?.dates
-                .map((d, i) => ({ x: i, text: d }))
-                .filter((_, i) => i % labelStep === 0)
-                .map((l) => ({
-                  x: PADDING.left + (l.x / (maxLen - 1 || 1)) * (width - PADDING.left - PADDING.right),
-                  text: formatDateAxis(new Date(l.text).getTime() / 1000),
-                }));
-              if (timeLabels) drawTimeAxis({ ctx, width, height, padding: PADDING, labels: timeLabels });
+              const timeLabels = relativeDayAxisLabels(maxLen, labelStep).map((l) => ({
+                x: PADDING.left + (l.x / (maxLen - 1 || 1)) * plotW,
+                text: l.text,
+              }));
+              if (timeLabels.length > 0) drawTimeAxis({ ctx, width, height, padding: PADDING, labels: timeLabels });
+
+              if (hoverX !== null && maxLen > 0) {
+                const idx = nearestIndexForX(hoverX - PADDING.left, plotW, maxLen);
+                const hoverPxX = PADDING.left + (idx / (maxLen - 1 || 1)) * plotW;
+
+                ctx.save();
+                ctx.strokeStyle = "rgba(255,255,255,0.3)";
+                ctx.lineWidth = 1;
+                ctx.setLineDash([2, 2]);
+                ctx.beginPath();
+                ctx.moveTo(hoverPxX, PADDING.top);
+                ctx.lineTo(hoverPxX, height - PADDING.bottom);
+                ctx.stroke();
+                ctx.setLineDash([]);
+
+                const rows = series
+                  .filter((s) => idx < s.points.length)
+                  .map((s) => ({ label: s.timeline.name, color: s.color, date: s.dates[idx], value: s.points[idx].value }));
+
+                if (rows.length > 0) {
+                  const boxWidth = 150;
+                  const boxHeight = rows.length * 16 + 22;
+                  const boxX = Math.min(hoverPxX + 8, width - boxWidth - 4);
+                  const boxY = PADDING.top + 4;
+
+                  ctx.fillStyle = "rgba(15,17,23,0.92)";
+                  ctx.beginPath();
+                  ctx.roundRect(boxX, boxY, boxWidth, boxHeight, 4);
+                  ctx.fill();
+
+                  ctx.fillStyle = "rgba(255,255,255,0.6)";
+                  ctx.font = "9px 'JetBrains Mono', monospace";
+                  ctx.textAlign = "left";
+                  ctx.fillText(`Day ${idx}${rows[0]?.date ? ` · ${rows[0].date}` : ""}`, boxX + 8, boxY + 12);
+
+                  rows.forEach((row, i) => {
+                    const y = boxY + 26 + i * 16;
+                    ctx.fillStyle = row.color;
+                    ctx.beginPath();
+                    ctx.arc(boxX + 11, y - 3, 3, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.fillStyle = "rgba(255,255,255,0.9)";
+                    ctx.font = "9px 'JetBrains Mono', monospace";
+                    ctx.textAlign = "left";
+                    ctx.fillText(row.label, boxX + 20, boxY + 26 + i * 16);
+                    ctx.textAlign = "right";
+                    ctx.fillText(formatPriceAxis(row.value), boxX + boxWidth - 8, boxY + 26 + i * 16);
+                  });
+                }
+                ctx.restore();
+              }
             }}
           </ChartSurface>
         </div>

@@ -12,6 +12,7 @@ import {
   useTimelineStatus,
   useTimelines,
 } from "@/lib/api/hooks/useSimulation";
+import { useMarketGrid } from "@/lib/api/hooks/useMarket";
 import { ApiError } from "@/lib/api/client";
 import type { TimelineOverrideSpec, TimelinePrimitive } from "@/lib/api/types";
 import { BranchPointStep } from "./BranchPointStep";
@@ -19,6 +20,8 @@ import { PrimitiveStep } from "./PrimitiveStep";
 import { ConfigureStep } from "./ConfigureStep";
 import { FastForwardStep } from "./FastForwardStep";
 import { ConfirmStep } from "./ConfirmStep";
+import { compareMarketGrids } from "./marketComparison";
+import { buildBranchOutcomeSummary } from "./outcomeSummary";
 
 const STEPS = ["Branch point", "Primitive", "Configure", "Fast-forward", "Confirm"] as const;
 
@@ -54,6 +57,13 @@ export function BranchWizard() {
 
   const liveTimeline = timelines?.find((t) => t.is_live);
   const status = useTimelineStatus(createdTimelineId, { pollWhilePending: true });
+  // Once the branch is ready, compare its resulting company prices against
+  // the same parent it forked from -- this is what lets the outcome message
+  // tell the user "N of M companies ended up priced lower/higher" instead of
+  // just reporting tick count, which says nothing about what the scenario
+  // actually did to the market.
+  const branchMarketGrid = useMarketGrid(status.data?.status === "ready" ? createdTimelineId : undefined);
+  const parentMarketGrid = useMarketGrid(status.data?.status === "ready" ? (state.parentTimelineId ?? undefined) : undefined);
   // The simulation runs on its own calendar (seeded at 2026-01-02, advancing
   // one day per tick) that has no relationship to the real wall-clock date --
   // defaulting to `new Date()` (today's REAL date) produced a branch_point_sim_date
@@ -142,6 +152,21 @@ export function BranchWizard() {
   const isLastStep = stepIndex === STEPS.length - 1;
   const isSubmitting = createTimeline.isPending;
   const hasCreated = createdTimelineId !== undefined;
+
+  const outcomeSummary =
+    status.data?.status === "ready"
+      ? buildBranchOutcomeSummary({
+          primitive: state.primitive,
+          overrideCount: state.overrides.length,
+          branchPointSimDate: state.branchPointSimDate,
+          fastForwardDays: state.fastForwardDays,
+          tickCount: status.data.tick_count ?? 0,
+          marketComparison:
+            branchMarketGrid.data && parentMarketGrid.data
+              ? compareMarketGrids(parentMarketGrid.data.companies, branchMarketGrid.data.companies)
+              : null,
+        })
+      : null;
 
   return (
     <Dialog
@@ -239,6 +264,11 @@ export function BranchWizard() {
                 </p>
               )}
             </div>
+            {outcomeSummary && (
+              <div className="card-flat p-4">
+                <p className="text-small text-text-secondary">{outcomeSummary}</p>
+              </div>
+            )}
             <Button size="sm" onClick={resetAndClose}>
               Done
             </Button>

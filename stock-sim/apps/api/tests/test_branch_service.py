@@ -7,7 +7,14 @@ import pytest
 
 from apps.api.exceptions import ConflictError, NotFoundError
 from apps.api.services import branch_service
-from db.models import PriceHistory, SimulationState, Timeline, TimelineOverride
+from db.models import (
+    FinancialQualitySubscore,
+    MoatSubscore,
+    PriceHistory,
+    SimulationState,
+    Timeline,
+    TimelineOverride,
+)
 
 
 def test_create_branch_basic(test_db, test_timeline, test_user):
@@ -114,6 +121,51 @@ def test_create_branch_invalid_override_target_type_raises(test_db, test_timelin
             test_db, user_id=test_user.id, name="Bad Override", parent_id=test_timeline.id,
             branch_date=date(2026, 1, 2), rng_seed=None, primitive="manual", overrides=overrides,
         )
+
+
+def test_create_branch_copies_parent_moat_subscores(test_db, test_timeline, test_user, test_company):
+    """Regression test: a branch's fast-forward crashes on its first
+    fundamentals refresh with ZeroDivisionError in moat_composite because
+    the new timeline_id has no MoatSubscore rows of its own -- create_branch
+    must seed the child with the parent's latest subscore rows."""
+    test_db.add(MoatSubscore(
+        company_id=test_company.id, timeline_id=test_timeline.id,
+        subfactor_key="brand_strength", score=70.0,
+    ))
+    test_db.commit()
+
+    timeline = branch_service.create_branch(
+        test_db, user_id=test_user.id, name="Moat Branch", parent_id=test_timeline.id,
+        branch_date=date(2026, 1, 2), rng_seed=None, primitive="manual",
+    )
+    test_db.commit()
+
+    child_rows = test_db.query(MoatSubscore).filter_by(timeline_id=timeline.id).all()
+    assert len(child_rows) == 1
+    assert child_rows[0].company_id == test_company.id
+    assert child_rows[0].subfactor_key == "brand_strength"
+    assert child_rows[0].score == 70.0
+
+
+def test_create_branch_copies_parent_fq_subscores(test_db, test_timeline, test_user, test_company):
+    test_db.add(FinancialQualitySubscore(
+        company_id=test_company.id, timeline_id=test_timeline.id, fiscal_period="2026Q1",
+        subfactor_key="roic", raw_metric_value=0.15, peer_percentile=80.0, subscore=80.0, applied_weight=1.0,
+    ))
+    test_db.commit()
+
+    timeline = branch_service.create_branch(
+        test_db, user_id=test_user.id, name="FQ Branch", parent_id=test_timeline.id,
+        branch_date=date(2026, 1, 2), rng_seed=None, primitive="manual",
+    )
+    test_db.commit()
+
+    child_rows = test_db.query(FinancialQualitySubscore).filter_by(timeline_id=timeline.id).all()
+    assert len(child_rows) == 1
+    assert child_rows[0].company_id == test_company.id
+    assert child_rows[0].fiscal_period == "2026Q1"
+    assert child_rows[0].subfactor_key == "roic"
+    assert child_rows[0].subscore == 80.0
 
 
 def test_estimate_branch_cost(test_db, test_timeline, test_company):

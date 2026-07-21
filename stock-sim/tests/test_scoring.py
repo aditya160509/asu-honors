@@ -74,3 +74,8 @@ def test_financial_quality_composite_missing_pillar_skips():
     subfactor_pillar_map = {"roic": "profitability"}
     result = scoring.financial_quality_composite(subscores, pillar_weights, subfactor_pillar_map)
     assert math.isclose(result, 0.7 * 80.0)
+
+
+def test_moat_composite_empty_subscores_returns_zero():
+    weights = {"brand": 0.5, "network_effect": 0.5}
+    assert scoring.moat_composite({}, weights) == 0.0
