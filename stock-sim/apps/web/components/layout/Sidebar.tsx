@@ -17,6 +17,7 @@ import {
   PanelLeftOpen,
   Search,
   ShieldCheck,
+  Sparkles,
   Star,
   Trophy,
   Wallet,
@@ -74,7 +75,13 @@ const NAV_GROUPS: NavGroup[] = [
       { href: "/leaderboard", label: "Leaderboard", icon: Trophy },
     ],
   },
-  { eyebrow: "Intelligence", items: [{ href: "/news", label: "News", icon: Newspaper }] },
+  {
+    eyebrow: "Intelligence",
+    items: [
+      { href: "/news", label: "News", icon: Newspaper },
+      { href: "/ai", label: "AI Workspace", icon: Sparkles },
+    ],
+  },
   {
     eyebrow: "Simulation",
     items: [

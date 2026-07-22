@@ -753,3 +753,104 @@ class PriceAlertResponse(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+# --------------------------------------------------------------------------
+# AI Financial Advisor
+# --------------------------------------------------------------------------
+
+
+class ExplainMetricRequest(BaseModel):
+    metric_name: str
+    value: Optional[float] = None
+    context: Optional[str] = None
+
+
+class ExplainMetricResponse(BaseModel):
+    explanation: str
+
+
+class AiEvidenceItem(BaseModel):
+    """Traces one specific claim in an AiGroundedResponse back to the field
+    it came from -- what the frontend's evidence chips render/link to.
+
+    Field descriptions here aren't just documentation -- they're included in
+    the JSON schema handed to the model as response_schema, so they're the
+    only guidance the model gets on what "label" is actually supposed to
+    contain (without them, Gemini filled it with the raw cited number
+    instead of a human-readable name -- see stock-sim-major-feature-backlog
+    memory / conversation history for the debugging trail)."""
+
+    type: str = Field(description="Category of the cited field, e.g. 'holding', 'metric', 'financial'.")
+    ref_id: str = Field(description="The machine key or ticker the figure came from, e.g. 'total_return_pct' or 'AAPL'.")
+    label: str = Field(
+        description=(
+            "A short, human-readable name for what this figure represents, e.g. "
+            "'Total Return' or 'AAPL Position' -- NOT the number itself and NOT ref_id repeated."
+        )
+    )
+
+
+class AiGroundedResponse(BaseModel):
+    """Shared response contract for every AI capability that narrates over a
+    structured data payload (Portfolio Review, Company Review, Explain
+    News): a narrative plus the evidence citing exactly which real fields
+    back it, per the prompt instruction that every cited figure must be
+    traceable to a field actually present in the context payload."""
+
+    text: str
+    evidence: list[AiEvidenceItem] = Field(
+        default=[], description="One entry per specific figure cited in `text`, tracing it back to a real field."
+    )
+
+
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+
+class ChatRequest(BaseModel):
+    messages: list[ChatMessage]
+    scope: str = "portfolio"
+    use_context: bool = False
+
+    @field_validator("scope")
+    @classmethod
+    def _validate_scope(cls, v: str) -> str:
+        if v not in ("portfolio", "market"):
+            raise ValueError("scope must be 'portfolio' or 'market'")
+        return v
+
+
+class CompanyReviewRequest(BaseModel):
+    ticker: str
+
+
+class ExplainNewsRequest(BaseModel):
+    news_id: int
+
+
+class StrategyBuilderRequest(BaseModel):
+    risk_tolerance: str
+    goal: str
+    time_horizon: str
+    use_context: bool = False
+
+    @field_validator("risk_tolerance")
+    @classmethod
+    def _validate_risk_tolerance(cls, v: str) -> str:
+        if v not in ("conservative", "moderate", "aggressive"):
+            raise ValueError("risk_tolerance must be 'conservative', 'moderate', or 'aggressive'")
+        return v
+
+    @field_validator("time_horizon")
+    @classmethod
+    def _validate_time_horizon(cls, v: str) -> str:
+        if v not in ("<1yr", "1-5yr", "5yr+"):
+            raise ValueError("time_horizon must be '<1yr', '1-5yr', or '5yr+'")
+        return v
+
+
+class StrategyBuilderResponse(BaseModel):
+    narrative: str
+    disclaimer: str

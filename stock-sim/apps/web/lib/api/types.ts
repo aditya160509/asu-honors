@@ -626,3 +626,47 @@ export interface PriceAlertResponse {
   triggered_at: string | null;
   created_at: string;
 }
+
+export interface ExplainMetricRequest {
+  metric_name: string;
+  value?: number | null;
+  context?: string | null;
+}
+
+export interface ExplainMetricResponse {
+  explanation: string;
+}
+
+export interface AiEvidenceItem {
+  type: string;
+  ref_id: string;
+  label: string;
+}
+
+export interface AiGroundedResponse {
+  text: string;
+  evidence: AiEvidenceItem[];
+}
+
+export interface CompanyReviewRequest {
+  ticker: string;
+}
+
+export interface ExplainNewsRequest {
+  news_id: number;
+}
+
+export type StrategyRiskTolerance = "conservative" | "moderate" | "aggressive";
+export type StrategyTimeHorizon = "<1yr" | "1-5yr" | "5yr+";
+
+export interface StrategyBuilderRequest {
+  risk_tolerance: StrategyRiskTolerance;
+  goal: string;
+  time_horizon: StrategyTimeHorizon;
+  use_context?: boolean;
+}
+
+export interface StrategyBuilderResponse {
+  narrative: string;
+  disclaimer: string;
+}

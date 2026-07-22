@@ -28,6 +28,14 @@ class Settings(BaseSettings):
     api_host: str = "0.0.0.0"
     api_port: int = 8000
     default_timeline_id: int = 1
+    # AI Financial Advisor (Section "AI Workspace") -- empty by default, same
+    # pattern as resend_api_key. Unlike email (which degrades to console-log
+    # when unset), ai_service must fail loudly with a clear error when this
+    # is empty rather than fabricate a response -- see ai_service.py.
+    # Gemini (Google AI Studio), not Anthropic -- has a genuinely free tier,
+    # picked over Claude specifically to avoid a billing-credit requirement.
+    gemini_api_key: str = ""
+    ai_model: str = "gemini-3.5-flash"
 
 
 settings = Settings()

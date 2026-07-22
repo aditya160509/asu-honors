@@ -8,6 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ui/error-state";
 import { usePortfolioAnalytics } from "@/lib/api/hooks/usePortfolio";
 import { formatPrice } from "@/lib/utils";
+import { AiMetricExplainer } from "@/components/ai/AiMetricExplainer";
 
 interface MetricDef {
   key: "beta" | "sharpe_ratio" | "volatility_pct" | "max_drawdown_pct" | "win_rate" | "value_at_risk_pct";
@@ -119,6 +120,7 @@ function MetricCard({ metric, value, loading }: { metric: MetricDef; value: numb
         <TooltipContent className="max-w-[260px]">
           <p className="text-small">{metric.definition}</p>
           <p className="num mt-1 text-micro text-mer-ink-tertiary" style={{ fontFamily: "var(--font-mono)" }}>{metric.formula}</p>
+          <AiMetricExplainer metricName={metric.label} value={value ?? undefined} />
         </TooltipContent>
       </Tooltip>
 

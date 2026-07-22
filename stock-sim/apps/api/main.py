@@ -12,6 +12,7 @@ from apps.api.database import engine as db_engine
 from apps.api.exceptions import add_exception_handlers
 
 from apps.api.routers import (
+    ai,
     audit_log,
     auth,
     concalls,
@@ -72,6 +73,7 @@ def create_app() -> FastAPI:
     application.include_router(leaderboard.router)
     application.include_router(notifications.router)
     application.include_router(ws.router)
+    application.include_router(ai.router)
 
     add_exception_handlers(application)
 

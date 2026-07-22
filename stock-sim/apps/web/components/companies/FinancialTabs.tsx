@@ -4,6 +4,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
+import { CompanyReviewCard } from "@/components/ai/CompanyReviewCard";
 import { DashboardPanel } from "@/components/dashboard/primitives/DashboardPanel";
 import { MER_HAIRLINE } from "@/components/dashboard/primitives/tokens";
 import { cn, formatMillions, formatPct, formatPrice } from "@/lib/utils";
@@ -325,6 +326,7 @@ export function FinancialTabs({ ticker, company, financials, loading }: Financia
           <TabsTrigger value="trend">Trend</TabsTrigger>
           <TabsTrigger value="dividends">Dividends</TabsTrigger>
           <TabsTrigger value="concalls">Con-Calls</TabsTrigger>
+          <TabsTrigger value="ai-analysis">AI Analysis</TabsTrigger>
         </TabsList>
         <TabsContent value="about">
           <AboutTab company={company} />
@@ -346,6 +348,9 @@ export function FinancialTabs({ ticker, company, financials, loading }: Financia
         </TabsContent>
         <TabsContent value="concalls">
           <ConCallsTab ticker={ticker} />
+        </TabsContent>
+        <TabsContent value="ai-analysis">
+          <CompanyReviewCard ticker={ticker} bare />
         </TabsContent>
       </Tabs>
       {financials && !financials.income_statement && !financials.balance_sheet && !financials.cash_flow_statement && (

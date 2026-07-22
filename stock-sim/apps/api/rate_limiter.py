@@ -89,3 +89,7 @@ class ScopedRateLimiter:
 
 
 auth_rate_limiter = ScopedRateLimiter()
+# LLM calls cost real money per request (unlike most other endpoints in this
+# app) -- a conservative, separately-tunable cap per Section "AI Workspace"
+# C0.3, distinct from auth_rate_limiter's login/OTP concerns.
+ai_rate_limiter = ScopedRateLimiter()

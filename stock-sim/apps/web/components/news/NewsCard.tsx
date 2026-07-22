@@ -1,4 +1,5 @@
 import { Badge } from "@/components/ui/badge";
+import { ExplainNewsButton } from "@/components/ai/ExplainNewsButton";
 import { formatDate } from "@/lib/utils";
 import type { NewsItem } from "@/lib/api/types";
 
@@ -39,6 +40,7 @@ export function NewsCard({ item }: NewsCardProps) {
       </div>
       <p className="text-body font-medium text-text-primary">{item.headline}</p>
       <p className="text-small text-text-secondary line-clamp-2">{item.body}</p>
+      <ExplainNewsButton newsId={item.id} />
     </div>
   );
 }
