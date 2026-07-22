@@ -48,6 +48,23 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
     )
 
 
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Catch-all for anything that isn't an HTTPException (DB errors, KeyError,
+    etc). Without this, FastAPI/Starlette's default handling returns a bare
+    500 response with no `detail` key, which the frontend then displays as
+    the unhelpful literal string "HTTP 500" -- exactly the symptom behind a
+    prior incident (Timeline.rng_seed integer overflow crashing branch
+    creation with a raw psycopg error). Logs the full traceback server-side
+    but never leaks the raw exception message to the client.
+    """
+    logger.exception("Unhandled exception on %s", request.url.path)
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={"detail": "Internal server error", "error_code": "INTERNAL_ERROR"},
+    )
+
+
 def add_exception_handlers(app: FastAPI) -> None:
     """Register exception handlers on the given FastAPI app."""
     app.add_exception_handler(HTTPException, http_exception_handler)
+    app.add_exception_handler(Exception, unhandled_exception_handler)

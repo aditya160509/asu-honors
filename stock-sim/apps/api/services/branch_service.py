@@ -28,12 +28,40 @@ from db.models import (
     Timeline,
     TimelineOverride,
 )
+from engine.cycle import CYCLE_PHASES
 from engine.orchestrator import run_ticks
+from engine.overrides import DRIVER_KEYS, FACTOR_SCORE_KEYS
 
 VALID_TARGET_TYPES = frozenset({"factor_score", "config", "event", "cycle_transition", "driver_bias"})
 VALID_PRIMITIVES = frozenset({
     "manual", "structural_override", "macro_shock", "sensitivity_sweep", "monte_carlo", "liquidity_scenario",
 })
+# Maximum sim-days a single fast-forward can request. With no ceiling, a
+# large fast_forward_days both dispatches an effectively unbounded synchronous
+# per-tick Celery job (cost/DoS risk) and produces a compute estimate with no
+# practical meaning. 730 (~2 years) comfortably covers any real Future Lab
+# use case while keeping worst-case job size bounded.
+MAX_FAST_FORWARD_DAYS = 730
+# target_key vocabularies for target_types whose keys are a closed enum
+# (mirrors apps/web/lib/scenario/overrideVocabulary.ts so the wizard's UI
+# constraint is also enforced server-side for non-wizard callers, e.g. the
+# scenario-template admin form or direct API use -- see engine/overrides.py's
+# DRIVER_KEYS/FACTOR_SCORE_KEYS and engine/cycle.py's CYCLE_PHASES, the same
+# sets the tick loop itself validates target_key against before applying).
+# "config" and "event" are intentionally excluded: config keys are open-ended
+# ConfigParameter names, and "event" isn't wired into the tick loop yet.
+TARGET_KEY_VOCABULARIES: dict[str, frozenset] = {
+    "cycle_transition": frozenset(CYCLE_PHASES),
+    "driver_bias": frozenset(DRIVER_KEYS),
+    "factor_score": frozenset(FACTOR_SCORE_KEYS),
+}
+# Timeline.rng_seed is a Postgres INTEGER column -- signed 32-bit, so its
+# max value is 2**31 - 1, not 2**32 - 1. int(sha256_digest[:8], 16) draws
+# uniformly from [0, 2**32 - 1], so about half of all auto-generated seeds
+# silently overflowed this column and crashed branch creation with a bare
+# psycopg NumericValueOutOfRange 500 (no validation message), reproducing
+# on roughly a coin flip per branch created.
+RNG_SEED_MAX = 2**31 - 1
 # Rough per-company, per-tick cost floor used for the pre-flight compute
 # estimate shown in the branch wizard (Section 11.3 step 5) -- calibrated
 # loosely against observed tick latency, not a hard SLA.
@@ -48,6 +76,57 @@ class OverrideSpec:
     effective_from_sim_date: date
     target_scope_id: Optional[int] = None
     effective_to_sim_date: Optional[date] = None
+
+
+def _validate_overrides(db: Session, overrides: list["OverrideSpec"]) -> None:
+    """Validate every override spec before any row is written.
+
+    Rejects bad data up front (clear 409) instead of letting it reach
+    engine/overrides.py, where an unrecognized target_key or unparseable
+    override_value is silently swallowed (`except (TypeError, ValueError):
+    continue`) and the override just never applies -- with no error
+    surfaced anywhere to the user who created it.
+    """
+    for spec in overrides:
+        if spec.target_type not in VALID_TARGET_TYPES:
+            raise ConflictError(f"Unknown override target_type '{spec.target_type}'")
+
+        vocab = TARGET_KEY_VOCABULARIES.get(spec.target_type)
+        if vocab is not None and spec.target_key not in vocab:
+            raise ConflictError(
+                f"target_key '{spec.target_key}' is not valid for target_type "
+                f"'{spec.target_type}' (expected one of {sorted(vocab)})"
+            )
+
+        if spec.target_type in ("driver_bias", "config", "factor_score", "cycle_transition"):
+            try:
+                value = float(spec.override_value)
+            except (TypeError, ValueError) as exc:
+                raise ConflictError(
+                    f"override_value '{spec.override_value}' must be numeric for "
+                    f"target_type '{spec.target_type}'"
+                ) from exc
+            if spec.target_type == "cycle_transition" and not (0.0 <= value <= 1.0):
+                raise ConflictError(
+                    f"cycle_transition override_value must be between 0.0 and 1.0, got {value}"
+                )
+            if spec.target_type == "driver_bias" and not (-1.0 <= value <= 1.0):
+                raise ConflictError(
+                    f"driver_bias override_value must be between -1.0 and 1.0, got {value}"
+                )
+            if spec.target_type == "factor_score" and not (-100.0 <= value <= 100.0):
+                raise ConflictError(
+                    f"factor_score override_value must be between -100 and 100, got {value}"
+                )
+
+        if spec.target_scope_id is not None:
+            if spec.target_type not in ("driver_bias", "factor_score"):
+                raise ConflictError(
+                    f"target_scope_id is not applicable to target_type '{spec.target_type}'"
+                )
+            company_exists = db.query(Company.id).filter_by(id=spec.target_scope_id).first()
+            if company_exists is None:
+                raise ConflictError(f"target_scope_id {spec.target_scope_id} does not match any company")
 
 
 def create_branch(
@@ -85,10 +164,15 @@ def create_branch(
     if primitive not in VALID_PRIMITIVES:
         raise ConflictError(f"Unknown primitive '{primitive}'")
 
+    if rng_seed is not None and not (0 <= rng_seed <= RNG_SEED_MAX):
+        raise ConflictError(f"rng_seed must be between 0 and {RNG_SEED_MAX}, got {rng_seed}")
+
+    _validate_overrides(db, overrides or [])
+
     seed = rng_seed
     if seed is None:
         digest = hashlib.sha256(f"{name}-{time.time()}".encode("utf-8")).hexdigest()
-        seed = int(digest[:8], 16)
+        seed = int(digest[:8], 16) & RNG_SEED_MAX
 
     timeline = Timeline(
         name=name,
@@ -182,8 +266,6 @@ def create_branch(
         ))
 
     for spec in overrides or []:
-        if spec.target_type not in VALID_TARGET_TYPES:
-            raise ConflictError(f"Unknown override target_type '{spec.target_type}'")
         db.add(TimelineOverride(
             timeline_id=timeline.id,
             target_type=spec.target_type,
@@ -205,6 +287,8 @@ def estimate_branch_cost(db: Session, parent_id: int, fast_forward_days: int) ->
     """
     if fast_forward_days < 0:
         raise ConflictError("fast_forward_days must be >= 0")
+    if fast_forward_days > MAX_FAST_FORWARD_DAYS:
+        raise ConflictError(f"fast_forward_days must be <= {MAX_FAST_FORWARD_DAYS}, got {fast_forward_days}")
     company_count = db.query(Company).count()
     estimated_compute_ms = int(fast_forward_days * company_count * ESTIMATED_MS_PER_COMPANY_PER_TICK)
     return {

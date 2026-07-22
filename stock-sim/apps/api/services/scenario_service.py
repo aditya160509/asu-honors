@@ -15,9 +15,40 @@ from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
-from apps.api.exceptions import NotFoundError
-from apps.api.services.branch_service import OverrideSpec
+from apps.api.exceptions import ConflictError, NotFoundError
+from apps.api.services.branch_service import TARGET_KEY_VOCABULARIES, VALID_TARGET_TYPES, OverrideSpec
 from db.models import ScenarioTemplate, TimelineOverride
+
+REQUIRED_OVERRIDE_KEYS = frozenset({"target_type", "target_key", "override_value"})
+
+
+def _validate_effect_profile(effect_profile: dict[str, Any]) -> None:
+    """Validate effect_profile["overrides"] shape at authoring time.
+
+    effect_profile is a free-form JSON column with no DB-level schema
+    validation, so a malformed template previously passed create_template
+    unchecked and only surfaced a bare KeyError/500 much later, whenever
+    apply_scenario_template first tried to materialize it onto a real
+    timeline -- far from the authoring action that actually caused it.
+    """
+    raw_overrides = (effect_profile or {}).get("overrides", [])
+    if not isinstance(raw_overrides, list):
+        raise ConflictError("effect_profile['overrides'] must be a list")
+    for i, raw in enumerate(raw_overrides):
+        if not isinstance(raw, dict):
+            raise ConflictError(f"effect_profile['overrides'][{i}] must be an object")
+        missing = REQUIRED_OVERRIDE_KEYS - raw.keys()
+        if missing:
+            raise ConflictError(f"effect_profile['overrides'][{i}] is missing required keys: {sorted(missing)}")
+        target_type = raw["target_type"]
+        if target_type not in VALID_TARGET_TYPES:
+            raise ConflictError(f"effect_profile['overrides'][{i}] has unknown target_type '{target_type}'")
+        vocab = TARGET_KEY_VOCABULARIES.get(target_type)
+        if vocab is not None and raw["target_key"] not in vocab:
+            raise ConflictError(
+                f"effect_profile['overrides'][{i}] target_key '{raw['target_key']}' is not valid for "
+                f"target_type '{target_type}' (expected one of {sorted(vocab)})"
+            )
 
 
 def list_templates(db: Session) -> list[ScenarioTemplate]:
@@ -33,6 +64,7 @@ def create_template(
     default_duration_days: Optional[int] = None,
     editable_params: Optional[dict[str, Any]] = None,
 ) -> ScenarioTemplate:
+    _validate_effect_profile(effect_profile)
     template = ScenarioTemplate(
         name=name,
         description=description,
@@ -76,6 +108,13 @@ def apply_scenario_template(
         # + days, or it silently runs one day longer than requested (days + 1
         # active days instead of days).
         effective_to = effective_from_sim_date + timedelta(days=days - 1)
+
+    # Defense in depth: create_template validates this shape at authoring
+    # time, but templates written before that check existed (or via a
+    # direct DB write/migration) could still be malformed, so re-validate
+    # here rather than letting a bare KeyError surface as an unhandled 500
+    # far from the template that actually caused it.
+    _validate_effect_profile(template.effect_profile or {})
 
     raw_overrides = (template.effect_profile or {}).get("overrides", [])
     rows: list[TimelineOverride] = []

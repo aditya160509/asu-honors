@@ -113,6 +113,13 @@ export function ComparisonOverlay({
           yDomain,
           color,
           lineWidth: isActive ? 2.5 : 1.5,
+          // Every ticker shares one x-axis by array index (handlePointerMove
+          // below looks up timeIdx against maxPoints, the longest series) --
+          // without a shared timeDomain, a ticker with fewer price points
+          // stretches to fill the full width on its own terms, so the
+          // hover's nearest-line detection reads a pixel position that
+          // doesn't match what's actually drawn for that ticker.
+          timeDomain: [0, maxPoints - 1 || 1],
         });
       });
 
@@ -150,7 +157,7 @@ export function ComparisonOverlay({
         ctx.restore();
       }
     },
-    [lines, yDomain, hover, activeLine, PADDING]
+    [lines, yDomain, hover, activeLine, PADDING, maxPoints]
   );
 
   function handlePointerMove(x: number, y: number) {

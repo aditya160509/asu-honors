@@ -533,6 +533,11 @@ class TimelineCreateRequest(BaseModel):
     def _validate_fast_forward_days(cls, v: int) -> int:
         if v < 0:
             raise ValueError("fast_forward_days must be >= 0")
+        # Keep in sync with branch_service.MAX_FAST_FORWARD_DAYS -- this
+        # schema-level check just rejects egregious values fast (422) before
+        # a DB round-trip; branch_service enforces the authoritative bound.
+        if v > 730:
+            raise ValueError("fast_forward_days must be <= 730")
         return v
 
     @field_validator("primitive")

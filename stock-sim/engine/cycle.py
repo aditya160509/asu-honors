@@ -1,6 +1,9 @@
 """Section 6.I — Economic cycle state machine and sector factor generation."""
 
+import logging
 import random
+
+logger = logging.getLogger(__name__)
 
 CYCLE_PHASES = ("expansion", "peak", "contraction", "trough")
 
@@ -65,6 +68,17 @@ def advance_cycle_phase(
     table = transition_overrides if transition_overrides is not None else CYCLE_TRANSITIONS
     transitions = table.get(current_phase)
     if transitions is None:
+        # current_phase isn't a recognized phase -- this should be
+        # unreachable (cycle_phase is only ever written by this function or
+        # seeded as "expansion", and TARGET_KEY_VOCABULARIES in
+        # branch_service now rejects unrecognized cycle_transition target
+        # keys before they can reach here). Log loudly rather than silently
+        # resetting to "expansion", since a silent reset previously masked
+        # data corruption instead of surfacing it.
+        logger.error(
+            "advance_cycle_phase: unrecognized current_phase %r, falling back to 'expansion'",
+            current_phase,
+        )
         return "expansion"
     phases, weights = zip(*transitions)
     total = sum(weights)

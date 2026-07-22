@@ -1,6 +1,7 @@
 """Tests for apps/api/services/branch_service.py — fork creation, cost
 estimate, extend, archive."""
 
+import re
 from datetime import date, timedelta
 
 import pytest
@@ -16,6 +17,36 @@ from db.models import (
     Timeline,
     TimelineOverride,
 )
+
+
+def _check_constraint_set(table, constraint_name: str) -> set[str]:
+    """Extract the quoted string literals out of a CheckConstraint's SQL text,
+    e.g. "target_type in ('a', 'b')" -> {"a", "b"}."""
+    for constraint in table.constraints:
+        if getattr(constraint, "name", None) == constraint_name:
+            return set(re.findall(r"'([^']*)'", constraint.sqltext.text))
+    raise AssertionError(f"No constraint named {constraint_name!r} found on {table.name}")
+
+
+def test_valid_target_types_matches_db_check_constraint():
+    """branch_service.VALID_TARGET_TYPES is the API-layer allowlist for
+    TimelineOverride.target_type; ck_timeline_overrides_target_type is the
+    DB's last line of defense against bad data from any other write path.
+    Nothing keeps these two in sync if one changes without the other --
+    this test exists so that drift becomes a loud test failure instead of a
+    silent gap (see branch_service.py's TARGET_KEY_VOCABULARIES comment)."""
+    db_values = _check_constraint_set(TimelineOverride.__table__, "ck_timeline_overrides_target_type")
+    assert db_values == branch_service.VALID_TARGET_TYPES
+
+
+def test_valid_primitives_matches_db_check_constraint():
+    """Same drift guard as above, for branch_service.VALID_PRIMITIVES vs.
+    ck_timelines_primitive. The DB constraint also allows a null primitive
+    (pre-Future-Lab timelines have none), which VALID_PRIMITIVES doesn't
+    need to represent since branch_service.create_branch always receives a
+    concrete primitive string."""
+    db_values = _check_constraint_set(Timeline.__table__, "ck_timelines_primitive")
+    assert db_values == branch_service.VALID_PRIMITIVES
 
 
 def test_create_branch_basic(test_db, test_timeline, test_user):
@@ -46,6 +77,41 @@ def test_create_branch_deterministic_seed_when_given(test_db, test_timeline, tes
         branch_date=date(2026, 1, 2), rng_seed=12345, primitive="manual",
     )
     assert timeline.rng_seed == 12345
+
+
+# Postgres INTEGER (Timeline.rng_seed's column type) is a signed 32-bit int,
+# max 2**31 - 1 = 2147483647. int(sha256_digest[:8], 16) draws uniformly
+# from [0, 2**32 - 1] -- about half of all auto-generated seeds silently
+# overflowed that column and crashed branch creation with a bare
+# "psycopg.errors.NumericValueOutOfRange" 500, no validation message,
+# reproducing only on roughly a coin flip (confirmed empirically: ~50% of
+# hashes over many trials exceed the column's max).
+_PG_INTEGER_MAX = 2**31 - 1
+
+
+def test_create_branch_auto_seed_always_fits_postgres_integer_column(test_db, test_timeline, test_user):
+    for i in range(200):
+        timeline = branch_service.create_branch(
+            test_db, user_id=test_user.id, name=f"Auto Seed Branch {i}", parent_id=test_timeline.id,
+            branch_date=date(2026, 1, 2), rng_seed=None, primitive="manual",
+        )
+        assert 0 <= timeline.rng_seed <= _PG_INTEGER_MAX
+
+
+def test_create_branch_explicit_seed_over_postgres_integer_max_raises(test_db, test_timeline, test_user):
+    with pytest.raises(ConflictError):
+        branch_service.create_branch(
+            test_db, user_id=test_user.id, name="Overflowing Seed", parent_id=test_timeline.id,
+            branch_date=date(2026, 1, 2), rng_seed=_PG_INTEGER_MAX + 1, primitive="manual",
+        )
+
+
+def test_create_branch_explicit_seed_negative_raises(test_db, test_timeline, test_user):
+    with pytest.raises(ConflictError):
+        branch_service.create_branch(
+            test_db, user_id=test_user.id, name="Negative Seed", parent_id=test_timeline.id,
+            branch_date=date(2026, 1, 2), rng_seed=-1, primitive="manual",
+        )
 
 
 def test_create_branch_missing_parent_raises(test_db, test_user):
@@ -85,7 +151,7 @@ def test_create_branch_invalid_primitive_raises(test_db, test_timeline, test_use
         )
 
 
-def test_create_branch_with_overrides_persists_rows(test_db, test_timeline, test_user):
+def test_create_branch_with_overrides_persists_rows(test_db, test_timeline, test_user, test_company):
     overrides = [
         branch_service.OverrideSpec(
             target_type="config", target_key="theta_default", override_value="0.08",
@@ -93,7 +159,7 @@ def test_create_branch_with_overrides_persists_rows(test_db, test_timeline, test
         ),
         branch_service.OverrideSpec(
             target_type="driver_bias", target_key="guidance", override_value="0.2",
-            effective_from_sim_date=date(2026, 1, 2), target_scope_id=1,
+            effective_from_sim_date=date(2026, 1, 2), target_scope_id=test_company.id,
         ),
     ]
     timeline = branch_service.create_branch(
@@ -107,7 +173,7 @@ def test_create_branch_with_overrides_persists_rows(test_db, test_timeline, test
     assert rows[0].target_type == "config"
     assert rows[0].target_key == "theta_default"
     assert rows[1].target_type == "driver_bias"
-    assert rows[1].target_scope_id == 1
+    assert rows[1].target_scope_id == test_company.id
 
 
 def test_create_branch_invalid_override_target_type_raises(test_db, test_timeline, test_user):

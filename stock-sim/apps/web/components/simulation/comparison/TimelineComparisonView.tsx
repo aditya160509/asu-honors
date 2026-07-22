@@ -245,6 +245,15 @@ export function TimelineComparisonView() {
             {({ ctx, width, height, dpr }) => {
               drawGrid({ ctx, width, height, dpr, padding: PADDING });
 
+              // Every series shares one x-axis position per array index (see
+              // relativeDayAxisLabels/nearestIndexForX), so all of them must
+              // be scaled against the SAME [0, maxLen - 1] domain here, not
+              // each series' own [0, its own length - 1] -- otherwise a
+              // shorter branch stretches to fill the full plot width on its
+              // own terms, and the hover tooltip (which reads s.points[idx]
+              // for a shared idx) ends up reporting a value whose drawn
+              // pixel position doesn't match the cursor for any series
+              // shorter than the longest one.
               for (const s of series) {
                 drawLineSeries({
                   ctx,
@@ -255,6 +264,7 @@ export function TimelineComparisonView() {
                   yDomain,
                   color: s.color,
                   lineWidth: 1.5,
+                  timeDomain: [0, maxLen - 1 || 1],
                 });
               }
 

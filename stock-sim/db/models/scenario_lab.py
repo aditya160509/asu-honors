@@ -12,6 +12,7 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from db.models.base import Base, TimestampMixin, utcnow
@@ -24,9 +25,9 @@ class ScenarioTemplate(Base, TimestampMixin):
     name: Mapped[str] = mapped_column(String(200), nullable=False, unique=True)
     description: Mapped[Optional[str]] = mapped_column(String)
     category: Mapped[str] = mapped_column(String(20), nullable=False)
-    effect_profile: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    effect_profile: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     default_duration_days: Mapped[Optional[int]] = mapped_column(Integer)
-    editable_params: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON)
+    editable_params: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB)
 
     __table_args__ = (
         CheckConstraint(
@@ -52,6 +53,18 @@ class TimelineOverride(Base, TimestampMixin):
         CheckConstraint(
             "target_type in ('factor_score', 'config', 'event', 'cycle_transition', 'driver_bias')",
             name="ck_timeline_overrides_target_type",
+        ),
+        # Guards against a retried/double-submitted create_branch or
+        # apply_scenario_template call inserting the same override twice --
+        # engine/overrides.py treats override_value as an additive delta for
+        # driver_bias/factor_score, so duplicate rows would silently double
+        # the applied bias instead of erroring. Postgres treats NULL
+        # target_scope_id as distinct from itself, so this doesn't catch
+        # duplicate market-wide (target_scope_id IS NULL) overrides -- see
+        # migration 0021's docstring.
+        UniqueConstraint(
+            "timeline_id", "target_type", "target_key", "target_scope_id", "effective_from_sim_date",
+            name="uq_timeline_overrides_dedup",
         ),
     )
 

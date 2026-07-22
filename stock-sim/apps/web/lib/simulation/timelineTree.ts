@@ -34,12 +34,24 @@ export function buildTimelineTree(timelines: TimelineResponse[]): TimelineTreeNo
 
   const placed = new Set<number>();
 
-  function buildNode(timeline: TimelineResponse, depth: number): TimelineTreeNode {
-    placed.add(timeline.id);
-    const children = (byParent.get(timeline.id) ?? [])
-      .filter((child) => !placed.has(child.id))
-      .map((child) => buildNode(child, depth + 1));
-    return { timeline, children, depth };
+  // Iterative (not recursive) so an unusually deep branch-of-branch chain
+  // can't stack-overflow the JS engine -- each node's `children` array is
+  // built bottom-up via an explicit work stack instead of native recursion.
+  function buildNode(root: TimelineResponse, rootDepth: number): TimelineTreeNode {
+    const node: TimelineTreeNode = { timeline: root, children: [], depth: rootDepth };
+    placed.add(root.id);
+    const stack: TimelineTreeNode[] = [node];
+    while (stack.length > 0) {
+      const current = stack.pop()!;
+      const childTimelines = (byParent.get(current.timeline.id) ?? []).filter((child) => !placed.has(child.id));
+      for (const childTimeline of childTimelines) {
+        placed.add(childTimeline.id);
+        const childNode: TimelineTreeNode = { timeline: childTimeline, children: [], depth: current.depth + 1 };
+        current.children.push(childNode);
+        stack.push(childNode);
+      }
+    }
+    return node;
   }
 
   const result: TimelineTreeNode[] = [];
@@ -61,10 +73,13 @@ export function buildTimelineTree(timelines: TimelineResponse[]): TimelineTreeNo
  * CSS indentation needs a flat array with a depth per row, not nested JSX. */
 export function flattenTimelineTree(nodes: TimelineTreeNode[]): TimelineTreeNode[] {
   const out: TimelineTreeNode[] = [];
-  function visit(node: TimelineTreeNode) {
+  // Iterative depth-first walk (see buildTimelineTree's buildNode) so a very
+  // deep chain can't stack-overflow the JS engine.
+  const stack = [...nodes].reverse();
+  while (stack.length > 0) {
+    const node = stack.pop()!;
     out.push(node);
-    for (const child of node.children) visit(child);
+    for (let i = node.children.length - 1; i >= 0; i--) stack.push(node.children[i]);
   }
-  for (const node of nodes) visit(node);
   return out;
 }

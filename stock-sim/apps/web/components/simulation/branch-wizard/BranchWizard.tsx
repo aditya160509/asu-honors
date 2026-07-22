@@ -15,6 +15,7 @@ import {
 import { useMarketGrid } from "@/lib/api/hooks/useMarket";
 import { ApiError } from "@/lib/api/client";
 import type { TimelineOverrideSpec, TimelinePrimitive } from "@/lib/api/types";
+import { overrideValueError } from "@/lib/scenario/overrideVocabulary";
 import { BranchPointStep } from "./BranchPointStep";
 import { PrimitiveStep } from "./PrimitiveStep";
 import { ConfigureStep } from "./ConfigureStep";
@@ -106,12 +107,21 @@ export function BranchWizard() {
       }
       case 1:
         return Boolean(state.primitive);
-      case 2:
+      case 2: {
         // ConfigureStep blocks sensitivity_sweep/monte_carlo with a "not yet
         // available" message since the API only supports single-branch
         // creation today -- Next must not let the user click past that dead
         // end and submit a request the backend can't fulfill.
-        return state.primitive !== "sensitivity_sweep" && state.primitive !== "monte_carlo";
+        if (state.primitive === "sensitivity_sweep" || state.primitive === "monte_carlo") return false;
+        // Every override needs a non-empty key and value, and numeric
+        // target_types (driver_bias/config/factor_score/cycle_transition)
+        // need a value the engine can actually parse -- otherwise the
+        // branch gets created but the override silently never applies
+        // (engine/overrides.py swallows unparseable override_value).
+        return state.overrides.every(
+          (o) => o.target_key.trim() !== "" && o.override_value.trim() !== "" && overrideValueError(o) === null
+        );
+      }
       default:
         return true;
     }

@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, ForeignKey, Integer, String
+from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from db.models.base import Base, TimestampMixin, utcnow
@@ -65,6 +65,27 @@ class Timeline(Base, TimestampMixin):
             "status in ('pending', 'running', 'ready', 'failed', 'archived')",
             name="ck_timelines_status",
         ),
+        # timeline_groups.primitive only allows sweep/ensemble primitives
+        # ('sensitivity_sweep', 'monte_carlo') -- a Timeline that belongs to
+        # a group must itself carry one of those two, since nothing else
+        # ties the two tables' primitive columns together (no FK-level
+        # cross-table check is possible without a trigger). This narrows,
+        # rather than fully closes, the drift risk between the two CHECKs.
+        CheckConstraint(
+            "timeline_group_id is null or primitive in ('sensitivity_sweep', 'monte_carlo')",
+            name="ck_timelines_group_primitive_consistency",
+        ),
+        # Guards against a double-click/retry on the wizard's "Create branch"
+        # button producing two indistinguishable branches at the same fork
+        # point -- create_branch fully clones MoatSubscore/
+        # FinancialQualitySubscore/CompanyFactorScore for each one (real DB
+        # writes) and each gets separately fast-forwarded.
+        UniqueConstraint(
+            "parent_timeline_id", "branch_point_sim_date", "name",
+            name="uq_timelines_parent_branch_date_name",
+        ),
+        Index("ix_timelines_parent_timeline_id", "parent_timeline_id"),
+        Index("ix_timelines_timeline_group_id", "timeline_group_id"),
     )
 
 

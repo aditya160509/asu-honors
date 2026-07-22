@@ -10,6 +10,7 @@ import {
   CONFIG_KEY_SUGGESTIONS,
   OVERRIDE_TARGET_TYPES,
   keyOptionsFor,
+  overrideValueError,
   valueHelpFor,
 } from "@/lib/scenario/overrideVocabulary";
 import type { BranchWizardState } from "./BranchWizard";
@@ -159,6 +160,7 @@ export function ConfigureStep({ state, scenarioLibrary, onChange }: Props) {
           {state.overrides.map((override, index) => {
             const keyOptions = keyOptionsFor(override.target_type);
             const datalistId = `config-key-suggestions-${index}`;
+            const valueError = overrideValueError(override);
             return (
               <div key={index} className="flex flex-col gap-1">
                 <div className="grid grid-cols-[1fr_1fr_1fr_auto] gap-2 items-center">
@@ -223,6 +225,7 @@ export function ConfigureStep({ state, scenarioLibrary, onChange }: Props) {
                     placeholder="value"
                     value={override.override_value}
                     onChange={(e) => updateOverride(index, { override_value: e.target.value })}
+                    aria-invalid={valueError !== null}
                   />
                   <button
                     type="button"
@@ -232,7 +235,9 @@ export function ConfigureStep({ state, scenarioLibrary, onChange }: Props) {
                     Remove
                   </button>
                 </div>
-                <p className="text-micro text-text-tertiary">{valueHelpFor(override.target_type)}</p>
+                <p className={valueError ? "text-micro text-negative" : "text-micro text-text-tertiary"}>
+                  {valueError ?? valueHelpFor(override.target_type)}
+                </p>
               </div>
             );
           })}

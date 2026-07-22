@@ -84,7 +84,20 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # If any Future Lab branch has been created since this migration
+    # shipped, there can now legitimately be multiple rows sharing the same
+    # (company_id, fiscal_period[, subfactor_key]) across different
+    # timeline_ids -- downgrading drops timeline_id entirely, so those rows
+    # would collide on the narrower pre-0015 constraint. Delete every row
+    # that doesn't belong to the live timeline before recreating that
+    # constraint, since after this downgrade there is no column left to
+    # distinguish them by anyway (this mirrors what "downgrade" means here:
+    # branch-scoped data has no home in the pre-Future-Lab schema).
     for table_name, uq_name, cols in _ALL_TABLES:
+        op.execute(
+            f"DELETE FROM {table_name} WHERE timeline_id NOT IN "
+            "(SELECT id FROM timelines WHERE is_live = true)"
+        )
         op.drop_constraint(uq_name, table_name, type_="unique")
         op.create_unique_constraint(uq_name, table_name, cols)
         op.drop_constraint(f"fk_{table_name}_timeline_id", table_name, type_="foreignkey")

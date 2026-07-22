@@ -1,4 +1,4 @@
-import type { TimelineOverrideTargetType } from "@/lib/api/types";
+import type { TimelineOverrideSpec, TimelineOverrideTargetType } from "@/lib/api/types";
 
 /** Which target_types + engine keys a TimelineOverride actually supports
  * (engine/overrides.py). Shared by the branch wizard's Configure step
@@ -61,6 +61,31 @@ export function keyOptionsFor(targetType: TimelineOverrideTargetType): { value: 
   if (targetType === "driver_bias") return DRIVER_BIAS_OPTIONS;
   if (targetType === "factor_score") return FACTOR_SCORE_OPTIONS;
   return null; // config (datalist suggestions) / event (free text)
+}
+
+// Target types whose override_value the engine parses as a float
+// (engine/overrides.py: driver_bias/config/factor_score/cycle_transition all
+// do `float(row.override_value)` wrapped in a silent try/except that just
+// drops the override on failure -- a user who fat-fingers "0.4x" previously
+// got no error anywhere, just a scenario that silently did nothing). "event"
+// is free text since it isn't wired into the tick loop yet. Ranges mirror
+// apps/api/services/branch_service.py's _validate_overrides.
+const NUMERIC_TARGET_TYPES: TimelineOverrideTargetType[] = ["driver_bias", "config", "factor_score", "cycle_transition"];
+
+/** Client-side mirror of branch_service._validate_overrides's numeric checks,
+ * surfaced inline in the wizard so a bad value is caught before submission
+ * instead of being silently dropped by the engine or rejected by a 409 the
+ * user has to decode. Returns null when the value is valid (or not
+ * applicable / still empty). */
+export function overrideValueError(override: TimelineOverrideSpec): string | null {
+  if (!NUMERIC_TARGET_TYPES.includes(override.target_type)) return null;
+  if (override.override_value.trim() === "") return null;
+  const value = Number(override.override_value);
+  if (Number.isNaN(value)) return "Must be a number";
+  if (override.target_type === "cycle_transition" && (value < 0 || value > 1)) return "Must be between 0.0 and 1.0";
+  if (override.target_type === "driver_bias" && (value < -1 || value > 1)) return "Must be between -1.0 and 1.0";
+  if (override.target_type === "factor_score" && (value < -100 || value > 100)) return "Must be between -100 and 100";
+  return null;
 }
 
 export function valueHelpFor(targetType: TimelineOverrideTargetType): string {

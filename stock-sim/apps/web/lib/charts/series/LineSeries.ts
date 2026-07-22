@@ -12,6 +12,16 @@ export interface LineSeriesDrawArgs {
   lineWidth?: number;
   dashed?: [number, number];
   fill?: string; // area fill color (top), fades to transparent
+  // Overrides the auto-derived [tMin, tMax] (normally each series' own first/
+  // last point.time) with a shared domain. Required whenever multiple
+  // series of DIFFERENT LENGTHS are drawn on one shared x-axis (e.g. a
+  // Future Lab timeline comparison, where a branch may have far fewer
+  // points than the timeline it forked from) -- without this, each series
+  // independently stretches to fill the full plot width using only its own
+  // point count, so a hover lookup that indexes by shared array index (see
+  // hoverLookup.ts/nearestIndexForX) reads a value whose pixel position
+  // doesn't match the cursor for any series shorter than the longest one.
+  timeDomain?: [number, number];
 }
 
 /** Monotone-x-style smoothed line (Catmull-Rom-ish midpoint smoothing), with optional area fill. */
@@ -27,6 +37,7 @@ export function drawLineSeries({
   lineWidth = 1.5,
   dashed,
   fill,
+  timeDomain,
 }: LineSeriesDrawArgs): void {
   const visible = visibleRange ? data.slice(Math.max(0, visibleRange.from), Math.min(data.length, visibleRange.to)) : data;
   if (visible.length === 0) return;
@@ -35,8 +46,7 @@ export function drawLineSeries({
   const plotH = height - padding.top - padding.bottom;
   const [yMin, yMax] = yDomain;
   const ySpan = yMax - yMin || 1;
-  const tMin = visible[0].time;
-  const tMax = visible[visible.length - 1].time;
+  const [tMin, tMax] = timeDomain ?? [visible[0].time, visible[visible.length - 1].time];
   const tSpan = tMax - tMin || 1;
 
   const xScale = (t: number) => padding.left + ((t - tMin) / tSpan) * plotW;
