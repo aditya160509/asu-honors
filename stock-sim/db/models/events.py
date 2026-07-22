@@ -1,7 +1,7 @@
 from datetime import date
 from typing import Optional
 
-from sqlalchemy import CheckConstraint, Date, ForeignKey, Numeric, String
+from sqlalchemy import CheckConstraint, Date, ForeignKey, Index, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from db.models.base import Base, TimestampMixin
@@ -48,6 +48,7 @@ class EventInstance(Base, TimestampMixin):
 
     __table_args__ = (
         CheckConstraint("scope_type in ('company', 'industry', 'market')", name="ck_event_instances_scope_type"),
+        Index("ix_event_instances_timeline_expires", "timeline_id", "expires_on"),
     )
 
 

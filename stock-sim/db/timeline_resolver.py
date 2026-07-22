@@ -95,17 +95,28 @@ def get_latest_two_closes(
     return None, None
 
 
-def get_latest_prices(session: Session, company_ids: list[int], timeline_id: int) -> dict[int, Decimal]:
+def get_latest_prices(
+    session: Session, company_ids: list[int], timeline_id: int,
+    timeline_chain: Optional[list[int]] = None,
+) -> dict[int, Decimal]:
     """Batch form of get_latest_price for a set of companies on one timeline.
 
     Walks the parent chain once, filling in only the companies still missing
     a price after each level, so a mostly-populated child timeline doesn't
     re-query the whole company set against every ancestor.
+
+    `timeline_chain` lets a caller that already resolved the chain this tick
+    (e.g. _load_tick_state, which also needs it for
+    get_latest_intrinsic_values) pass it in instead of re-querying Timeline
+    rows a second time. Omit it to have this function resolve the chain itself.
     """
-    return _latest_column_batch(session, company_ids, timeline_id, PriceHistory.close)
+    return _latest_column_batch(session, company_ids, timeline_id, PriceHistory.close, timeline_chain)
 
 
-def get_latest_intrinsic_values(session: Session, company_ids: list[int], timeline_id: int) -> dict[int, Decimal]:
+def get_latest_intrinsic_values(
+    session: Session, company_ids: list[int], timeline_id: int,
+    timeline_chain: Optional[list[int]] = None,
+) -> dict[int, Decimal]:
     """Batch, timeline-scoped intrinsic_value lookup, same fallback semantics
     as get_latest_prices.
 
@@ -117,18 +128,21 @@ def get_latest_intrinsic_values(session: Session, company_ids: list[int], timeli
     company.intrinsic_value is required for any non-live timeline's tick to
     compute its own correct IV drift rather than drifting off whatever IV
     the live (or another branch's) timeline last left in the shared row.
+
+    See get_latest_prices's docstring for `timeline_chain`.
     """
-    return _latest_column_batch(session, company_ids, timeline_id, PriceHistory.intrinsic_value)
+    return _latest_column_batch(session, company_ids, timeline_id, PriceHistory.intrinsic_value, timeline_chain)
 
 
 def _latest_column_batch(
     session: Session, company_ids: list[int], timeline_id: int, column,
+    timeline_chain: Optional[list[int]] = None,
 ) -> dict[int, Decimal]:
     if not company_ids:
         return {}
     remaining = set(company_ids)
     result: dict[int, Decimal] = {}
-    for tid in get_timeline_chain(session, timeline_id):
+    for tid in (timeline_chain if timeline_chain is not None else get_timeline_chain(session, timeline_id)):
         if not remaining:
             break
         rows = (

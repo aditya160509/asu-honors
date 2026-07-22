@@ -1930,3 +1930,126 @@ def test_factor_score_override_market_wide_applies_to_every_company(session):
             company_id=cid, timeline_id=timeline_id,
         ).order_by(CompanyFactorScore.id.desc()).first()
         assert float(cfs.moat_score) == pytest.approx(60.0)
+
+
+# ── Pinned-Seed Regression Snapshot (SPEED.md optimization guard) ─────────
+#
+# Every "output safe" optimization in stock-sim/SPEED.md must leave this
+# snapshot unchanged. Runs past QUARTER_LENGTH (63) so quarter-boundary
+# code paths (_refresh_fundamentals, _generate_fake_quarterly_financials)
+# are exercised too. If this test fails after an optimization, the change
+# is not output-safe -- revert it or fix it before merging.
+
+_PINNED_SEED_NUM_TICKS = 70
+
+
+def _run_pinned_seed_snapshot(session):
+    timeline_id = _seed_minimal(session)
+    _setup_fq_factor_defs(session)
+    session.commit()
+    results = run_ticks(session, timeline_id, num_ticks=_PINNED_SEED_NUM_TICKS)
+    session.commit()
+
+    assert len(results) == _PINNED_SEED_NUM_TICKS
+    assert all(r["status"] == "completed" for r in results)
+
+    prices = session.query(PriceHistory).filter_by(
+        timeline_id=timeline_id
+    ).order_by(PriceHistory.sim_date).all()
+    price_snapshot = [
+        (
+            p.sim_date.isoformat(), round(float(p.open), 6), round(float(p.high), 6),
+            round(float(p.low), 6), round(float(p.close), 6), p.volume,
+            round(float(p.intrinsic_value), 6),
+        )
+        for p in prices
+    ]
+
+    driver_scores = session.query(PriceDriverScore).order_by(
+        PriceDriverScore.sim_date, PriceDriverScore.company_id, PriceDriverScore.driver_key,
+    ).all()
+    driver_snapshot = [
+        (
+            d.sim_date.isoformat(), d.company_id, d.driver_key,
+            round(float(d.value), 6), round(float(d.weight), 6), round(float(d.contribution), 6),
+        )
+        for d in driver_scores
+    ]
+
+    company = session.query(Company).filter_by(id=1).first()
+    company_snapshot = (
+        round(float(company.current_price), 6), round(float(company.intrinsic_value), 6),
+        round(float(company.intrinsic_score), 6),
+    )
+
+    cfs_rows = session.query(CompanyFactorScore).filter_by(
+        company_id=1, timeline_id=timeline_id,
+    ).order_by(CompanyFactorScore.id).all()
+    cfs_snapshot = [
+        (
+            c.fiscal_period, round(float(c.management_quality), 6), round(float(c.moat_score), 6),
+            round(float(c.financial_quality), 6), round(float(c.fcf_quality), 6),
+            round(float(c.growth_potential), 6), round(float(c.intrinsic_score), 6),
+        )
+        for c in cfs_rows
+    ]
+
+    income_rows = session.query(IncomeStatement).filter_by(company_id=1, timeline_id=timeline_id).order_by(IncomeStatement.id).all()
+    income_snapshot = [
+        (i.fiscal_period, round(float(i.revenue), 6), round(float(i.net_profit), 6), round(float(i.eps), 6))
+        for i in income_rows
+    ]
+
+    sim_state = session.query(SimulationState).filter_by(timeline_id=timeline_id).first()
+
+    return {
+        "prices": price_snapshot,
+        "drivers": driver_snapshot,
+        "company": company_snapshot,
+        "cfs": cfs_snapshot,
+        "income": income_snapshot,
+        "tick_count": sim_state.tick_count,
+        "sim_date": sim_state.current_sim_date.isoformat(),
+    }
+
+
+def test_pinned_seed_snapshot_stable_across_optimizations(session):
+    """Golden-master test: with rng_seed=42 (seeded by _seed_minimal), 70 ticks
+    of run_ticks must always produce this exact sequence of prices, driver
+    scores, and quarterly financials. Any SPEED.md optimization that changes
+    these values is not output-safe.
+
+    Values below were captured from the pre-optimization baseline (commit
+    63bb08f, before any SPEED.md change was applied) and must not drift."""
+    snapshot = _run_pinned_seed_snapshot(session)
+
+    assert snapshot["tick_count"] == _PINNED_SEED_NUM_TICKS
+    assert snapshot["sim_date"] == "2026-03-13"
+    # +1 for the day-0 baseline row seeded by _seed_minimal.
+    assert len(snapshot["prices"]) == _PINNED_SEED_NUM_TICKS + 1
+    # 7 drivers x 70 ticks.
+    assert len(snapshot["drivers"]) == 7 * _PINNED_SEED_NUM_TICKS
+    # SEED row + 1 quarter-boundary refresh (tick 63 crosses QUARTER_LENGTH).
+    assert len(snapshot["cfs"]) == 2
+    assert len(snapshot["income"]) == 2
+
+    assert snapshot["prices"][0] == ("2026-01-01", 100.0, 101.0, 99.0, 100.0, 500000, 100.0)
+    assert snapshot["prices"][1] == ("2026-01-02", 100.0981, 121.1819, 99.1121, 120.0, 8897785, 100.060622)
+    assert snapshot["prices"][2] == ("2026-01-03", 120.358, 123.2563, 116.0885, 118.953, 9182481, 100.121281)
+    assert snapshot["prices"][-2] == ("2026-03-11", 80.6675, 97.3167, 80.0786, 96.6114, 6876368, 104.270311)
+    assert snapshot["prices"][-1] == ("2026-03-12", 97.6822, 116.9774, 96.8028, 115.9337, 8972647, 104.333522)
+
+    assert snapshot["drivers"][0] == ("2026-01-02", 1, "earnings_surprise", 0.026316, 0.15, 0.056564)
+    assert snapshot["drivers"][1] == ("2026-01-02", 1, "economic_outlook", 0.587552, 0.1, 0.841939)
+    assert snapshot["drivers"][2] == ("2026-01-02", 1, "guidance", 0.026316, 0.15, 0.056564)
+
+    assert snapshot["company"] == (115.9337, 104.3335, 55.0)
+
+    assert snapshot["cfs"] == [
+        ("SEED", 50.0, 50.0, 50.0, 50.0, 50.0, 50.0),
+        ("2026Q2", 50.0, 70.0, 50.0, 50.0, 50.0, 55.0),
+    ]
+    assert snapshot["income"] == [
+        ("2026Q1", 1000000.0, 97500.0, 0.975),
+        ("2026Q2", 975517.22, 93803.95, 938.9826),
+    ]

@@ -41,7 +41,9 @@ from db.models import (
     Timeline,
     TimelineOverride,
 )
-from db.timeline_resolver import get_latest_intrinsic_values, get_latest_prices, resolve_latest_cycle_state
+from db.timeline_resolver import (
+    get_latest_intrinsic_values, get_latest_prices, get_timeline_chain, resolve_latest_cycle_state,
+)
 from engine.concalls import generate_concall
 from engine.cycle import advance_cycle_phase, compute_cycle_state, generate_sector_shocks
 from engine.drivers import (
@@ -158,7 +160,10 @@ def run_ticks(
         # Same existence-check order as _load_tick_state (Timeline before
         # SimulationState) so error messages/precedence are unchanged now that
         # this validation runs here first, before the side-effecting state load.
-        if session.query(Timeline).filter_by(id=timeline_id).first() is None:
+        # timeline/sim_state are fetched once here and threaded through to
+        # _load_tick_state below so it doesn't re-query them (SPEED.md #2).
+        timeline = session.query(Timeline).filter_by(id=timeline_id).first()
+        if timeline is None:
             raise ValueError(f"Timeline {timeline_id} not found")
         sim_state = session.query(SimulationState).filter_by(timeline_id=timeline_id).first()
         if sim_state is None:
@@ -192,7 +197,7 @@ def run_ticks(
             })
             continue
 
-        state = _load_tick_state(session, timeline_id, sim_date)
+        state = _load_tick_state(session, timeline_id, sim_date, timeline=timeline, sim_state=sim_state)
         tick_count = state.tick_count
         companies = state.companies
         company_by_id = {c.id: c for c in companies}
@@ -383,7 +388,13 @@ def _resolve_tick_target_date(session: Session, timeline_id: int, sim_state: Sim
     return sim_date
 
 
-def _load_tick_state(session: Session, timeline_id: int, sim_date: date) -> SimpleNamespace:
+def _load_tick_state(
+    session: Session,
+    timeline_id: int,
+    sim_date: date,
+    timeline: Optional[Timeline] = None,
+    sim_state: Optional[SimulationState] = None,
+) -> SimpleNamespace:
     """Load and return all simulation state for one tick.
 
     Loads timeline, sim_state, economic cycle, companies, industries, balance
@@ -393,12 +404,19 @@ def _load_tick_state(session: Session, timeline_id: int, sim_date: date) -> Simp
     be called first to compute sim_date so idempotency can be checked before
     this function's side effects, e.g. the EconomicCycleState insert below,
     run).
+
+    `timeline`/`sim_state` are optional pre-fetched rows so callers that
+    already queried them (run_ticks's existence/idempotency check) don't pay
+    for a second round-trip. When omitted (e.g. direct test calls), this
+    function queries them itself exactly as before.
     """
-    timeline = session.query(Timeline).filter_by(id=timeline_id).first()
+    if timeline is None:
+        timeline = session.query(Timeline).filter_by(id=timeline_id).first()
     if timeline is None:
         raise ValueError(f"Timeline {timeline_id} not found")
 
-    sim_state = session.query(SimulationState).filter_by(timeline_id=timeline_id).first()
+    if sim_state is None:
+        sim_state = session.query(SimulationState).filter_by(timeline_id=timeline_id).first()
     if sim_state is None:
         raise ValueError(f"No SimulationState for timeline {timeline_id} -- run seed_initial_prices first")
 
@@ -490,14 +508,21 @@ def _load_tick_state(session: Session, timeline_id: int, sim_date: date) -> Simp
     # _update_denormalized_fields (only the live timeline persists its result
     # back to the shared Company row; non-live timelines' per-tick price
     # already lives durably in PriceHistory).
+    # Resolved once and reused for both overlays below -- the parent chain
+    # never changes mid-tick (SPEED.md #4), so a second get_timeline_chain
+    # round-trip inside get_latest_intrinsic_values would be redundant.
+    timeline_chain = get_timeline_chain(session, timeline_id)
     price_overlay: dict[int, float] = {
-        cid: float(price) for cid, price in get_latest_prices(session, [c.id for c in companies], timeline_id).items()
+        cid: float(price)
+        for cid, price in get_latest_prices(session, [c.id for c in companies], timeline_id, timeline_chain).items()
     }
     # Same shared-cache problem as price_overlay, for intrinsic_value -- see
     # get_latest_intrinsic_values's docstring.
     iv_overlay: dict[int, float] = {
         cid: float(iv)
-        for cid, iv in get_latest_intrinsic_values(session, [c.id for c in companies], timeline_id).items()
+        for cid, iv in get_latest_intrinsic_values(
+            session, [c.id for c in companies], timeline_id, timeline_chain
+        ).items()
     }
 
     sector_shocks = generate_sector_shocks(
@@ -552,7 +577,12 @@ def _load_tick_state(session: Session, timeline_id: int, sim_date: date) -> Simp
     ma_window = int(params.get("ma_window", 20))
     recent_closes: dict[int, list[float]] = {}
     if ma_window > 0:
-        window_start = sim_date - timedelta(days=ma_window * 3)  # calendar-day buffer for weekends/gaps
+        # Ticks advance exactly 1 calendar day each (no weekend/holiday
+        # skipping in this engine -- see run_ticks/_resolve_tick_target_date),
+        # so `ma_window` calendar days back covers exactly `ma_window` prior
+        # trading days with no gap risk. SPEED.md #5: was `* 3`, fetching 3x
+        # the rows this loop needed across all companies every tick.
+        window_start = sim_date - timedelta(days=ma_window)
         price_rows = (
             session.query(PriceHistory.company_id, PriceHistory.close)
             .filter(
@@ -1082,6 +1112,16 @@ def _execute_events(
     # generated, no event effects ever applied to factor scores/IV, despite
     # events firing correctly.
     session.flush()
+    # Batch company/industry lookups instead of one query per EventInstance
+    # (SPEED.md #3) -- `companies`/`state.industries` already hold every
+    # company/industry for this tick, so scope_ref resolution is a dict
+    # lookup. A representative company per industry (the "industry-scope
+    # template refers to {company}" fallback) is also precomputed once.
+    company_by_id = {c.id: c for c in companies}
+    representative_company_by_industry: dict[int, Company] = {}
+    for c in companies:
+        representative_company_by_industry.setdefault(c.industry_id, c)
+
     for ev in fired_events:
         event_instances = session.query(EventInstance).filter_by(
             event_id=ev.id, timeline_id=timeline_id, sim_date=sim_date,
@@ -1091,7 +1131,7 @@ def _execute_events(
             industry_name = None
             extra_replacements: dict[str, str] = {}
             if ei.scope_type == "company":
-                comp = session.query(Company).filter_by(id=ei.scope_ref).first()
+                comp = company_by_id.get(ei.scope_ref)
                 if comp:
                     company_name = comp.name
                 # "{eps}"/"{consensus}" in the earnings templates need real
@@ -1105,13 +1145,13 @@ def _execute_events(
                     if latest_ce is not None:
                         extra_replacements["{consensus}"] = f"${float(latest_ce.consensus_eps):.2f}"
             elif ei.scope_type == "industry":
-                ind = session.query(Industry).filter_by(id=ei.scope_ref).first()
+                ind = state.industries.get(ei.scope_ref)
                 if ind:
                     industry_name = ind.name
                 # Industry-scope templates sometimes reference {company}. Use
                 # a representative company from that industry as the fallback.
                 if company_name is None:
-                    rep_co = session.query(Company).filter_by(industry_id=ei.scope_ref).first()
+                    rep_co = representative_company_by_industry.get(ei.scope_ref)
                     if rep_co:
                         company_name = rep_co.name
             generate_news(session, timeline_id, sim_date, ei, state.rng,
@@ -1451,6 +1491,36 @@ def _refresh_fundamentals(
         session, [c.id for c in companies], latest_period,
     )
 
+    # Batch the "does this company's quarter already exist" idempotency
+    # check (SPEED.md #7/1.4) into 3 IN (...) queries covering every company
+    # at once, instead of _generate_fake_quarterly_financials issuing 3
+    # queries per company (~450 queries at 150 companies). Same three-table
+    # check as before -- see that function's docstring for why all three
+    # must agree before a company's quarter is treated as already-refreshed.
+    company_ids_for_refresh = [c.id for c in companies]
+    inc_exists_ids = {
+        row[0] for row in session.query(IncomeStatement.company_id).filter(
+            IncomeStatement.timeline_id == timeline_id,
+            IncomeStatement.fiscal_period == latest_period,
+            IncomeStatement.company_id.in_(company_ids_for_refresh),
+        ).all()
+    }
+    bal_exists_ids = {
+        row[0] for row in session.query(BalanceSheet.company_id).filter(
+            BalanceSheet.timeline_id == timeline_id,
+            BalanceSheet.fiscal_period == latest_period,
+            BalanceSheet.company_id.in_(company_ids_for_refresh),
+        ).all()
+    }
+    cf_exists_ids = {
+        row[0] for row in session.query(CashFlowStatement.company_id).filter(
+            CashFlowStatement.timeline_id == timeline_id,
+            CashFlowStatement.fiscal_period == latest_period,
+            CashFlowStatement.company_id.in_(company_ids_for_refresh),
+        ).all()
+    }
+    already_refreshed_ids = inc_exists_ids & bal_exists_ids & cf_exists_ids
+
     company_rows = []
     for company in companies:
         prior_cfs_for_mgmt = latest_cfs_by_company.get(company.id)
@@ -1465,6 +1535,7 @@ def _refresh_fundamentals(
             management_quality=mgmt_quality_signal,
             fq_history=fq_history_by_company.get(company.id, []),
             price_return_qtr=price_return_by_company.get(company.id, 0.0),
+            already_refreshed=company.id in already_refreshed_ids,
             event_sentiment=event_sentiment_by_company.get(company.id, 0.0)
                 + event_sentiment_by_industry.get(company.industry_id, 0.0),
             guidance_signal=guidance_signal_by_company.get(company.id, 0.0),
@@ -1751,6 +1822,7 @@ def _generate_fake_quarterly_financials(
     price_return_qtr: float = 0.0,
     event_sentiment: float = 0.0,
     guidance_signal: float = 0.0,
+    already_refreshed: Optional[bool] = None,
 ) -> dict[str, float]:
     """Generate plausible next-quarter financials from the company's trailing
     history and quality/context signals.
@@ -1791,20 +1863,42 @@ def _generate_fake_quarterly_financials(
     # a genuine transaction rollback removes all of them together, so a
     # same-fiscal-period retry is either "none of these rows exist yet" or
     # "all of them already do".
-    existing_inc = session.query(IncomeStatement).filter_by(
-        company_id=company.id, fiscal_period=fiscal_period, timeline_id=timeline_id,
-    ).first()
-    existing_bal = session.query(BalanceSheet).filter_by(
-        company_id=company.id, fiscal_period=fiscal_period, timeline_id=timeline_id,
-    ).first()
-    existing_cf = session.query(CashFlowStatement).filter_by(
-        company_id=company.id, fiscal_period=fiscal_period, timeline_id=timeline_id,
-    ).first()
-    if existing_inc is not None and existing_bal is not None and existing_cf is not None:
+    # `already_refreshed` lets a caller that already batch-checked every
+    # company's existence for this fiscal_period (SPEED.md #7/1.4 --
+    # _refresh_fundamentals's 3 IN (...) pre-check) skip these 3 queries
+    # here. Left as None (the default), this function checks for itself --
+    # e.g. direct test calls that don't do the batch pre-check.
+    if already_refreshed is None:
+        existing_inc = session.query(IncomeStatement).filter_by(
+            company_id=company.id, fiscal_period=fiscal_period, timeline_id=timeline_id,
+        ).first()
+        existing_bal = session.query(BalanceSheet).filter_by(
+            company_id=company.id, fiscal_period=fiscal_period, timeline_id=timeline_id,
+        ).first()
+        existing_cf = session.query(CashFlowStatement).filter_by(
+            company_id=company.id, fiscal_period=fiscal_period, timeline_id=timeline_id,
+        ).first()
+        already_refreshed = existing_inc is not None and existing_bal is not None and existing_cf is not None
+    else:
+        existing_inc = existing_bal = existing_cf = None
+
+    if already_refreshed:
         # This company's quarter was already refreshed (e.g. a retried advance
         # call re-crossing the same boundary) -- reuse the existing rows
         # instead of inserting a second row for the same (company_id,
         # fiscal_period) and hitting the unique constraint.
+        if existing_inc is None:
+            existing_inc = session.query(IncomeStatement).filter_by(
+                company_id=company.id, fiscal_period=fiscal_period, timeline_id=timeline_id,
+            ).first()
+        if existing_bal is None:
+            existing_bal = session.query(BalanceSheet).filter_by(
+                company_id=company.id, fiscal_period=fiscal_period, timeline_id=timeline_id,
+            ).first()
+        if existing_cf is None:
+            existing_cf = session.query(CashFlowStatement).filter_by(
+                company_id=company.id, fiscal_period=fiscal_period, timeline_id=timeline_id,
+            ).first()
         prior_incs = session.query(IncomeStatement).filter_by(
             company_id=company.id, timeline_id=timeline_id,
         ).order_by(IncomeStatement.fiscal_period.asc()).all()
