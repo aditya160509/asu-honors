@@ -64,11 +64,20 @@ def financial_quality_composite(
 
 
 def moat_composite(subscores: dict[str, float], weights: dict[str, float]) -> float:
-    """Section 6.C precursor — Moat Score = weighted average of moat subfactors."""
-    weighted_sum = sum(weights[key] * score for key, score in subscores.items())
-    weight_total = sum(weights[key] for key in subscores)
+    """Section 6.C precursor — Moat Score = weighted average of moat subfactors.
+
+    Returns 50.0 (neutral midpoint) when subscores is empty or no matching
+    weights are found, preventing ZeroDivisionError in _refresh_fundamentals
+    for companies that haven't had their moat sub-scores seeded yet.
+    Uses weights.get(key, 0) so that any subfactor key without a matching
+    weight entry is silently skipped rather than raising KeyError.
+    """
+    if not subscores:
+        return 50.0
+    weighted_sum = sum(weights.get(key, 0) * score for key, score in subscores.items())
+    weight_total = sum(weights.get(key, 0) for key in subscores)
     if weight_total == 0:
-        return 0.0
+        return 50.0
     return weighted_sum / weight_total
 
 

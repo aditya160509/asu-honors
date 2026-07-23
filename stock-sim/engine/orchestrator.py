@@ -1948,8 +1948,8 @@ def _generate_fake_quarterly_financials(
         rev = float(latest_inc.revenue) * (1 + growth_rate)
         rev = max(rev, 1e3)
     else:
-        rev = rng.uniform(1e8, 1e10)
-        rev = max(rev, 1e6)
+        rev = rng.uniform(100, 10000)
+        rev = max(rev, 100)
         margin_bias = 0.0
 
     # Cost ratios are carried forward from the latest quarter (not re-rolled

@@ -1,5 +1,6 @@
 "use client";
 
+import { Download, FileText } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -13,6 +14,29 @@ import { useFinancialsHistory, useCompanyDividends } from "@/lib/api/hooks/useCo
 import { useSimState } from "@/lib/api/hooks/useSimulation";
 import { nextEarningsDate } from "@/lib/companies/earningsCalendar";
 import type { CompanyDetail, ConCallItem, FinancialStatementResponse } from "@/lib/api/types";
+
+async function downloadPdf(url: string, filename: string) {
+  try {
+    const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
+    const res = await fetch(url, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) {
+      const detail = (await res.json().catch(() => ({}))).detail ?? `HTTP ${res.status}`;
+      console.error("PDF download failed:", detail);
+      return;
+    }
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = blobUrl;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(blobUrl);
+  } catch (err) {
+    console.error("PDF download error:", err);
+  }
+}
 
 export interface FinancialTabsProps {
   ticker: string;
@@ -103,7 +127,7 @@ const BUCKET_VARIANT: Record<ConCallItem["performance_bucket"], "positive" | "ne
 
 const STATEMENT_ORDER = ["opening", "revenue", "margins", "guidance", "closing"];
 
-function ConCallTranscript({ call }: { call: ConCallItem }) {
+function ConCallTranscript({ call, ticker }: { call: ConCallItem; ticker: string }) {
   const sections = Object.entries(call.statements).sort(
     ([a], [b]) => STATEMENT_ORDER.indexOf(a) - STATEMENT_ORDER.indexOf(b),
   );
@@ -119,6 +143,14 @@ function ConCallTranscript({ call }: { call: ConCallItem }) {
             Actual EPS {formatPrice(call.actual_eps)} vs. Consensus {formatPrice(call.consensus_eps)}
           </span>
         )}
+        <button
+          type="button"
+          onClick={() => downloadPdf(`/api/v1/companies/${ticker}/concalls/${call.id}/pdf`, `${ticker}_${call.fiscal_period}_concall.pdf`)}
+          className="ml-auto flex items-center gap-1 rounded-mer-sm px-2 py-1 text-micro text-mer-ink-tertiary transition-colors hover:bg-mer-surface-2 hover:text-mer-ink-primary"
+          title="Download PDF transcript"
+        >
+          <Download size={12} /> PDF
+        </button>
       </div>
       <div className="flex flex-col gap-1">
         {sections.map(([section, text]) => (
@@ -294,7 +326,7 @@ function ConCallsTab({ ticker }: { ticker: string }) {
       {!data || data.length === 0 ? (
         <EmptyState title={`No con-calls for ${ticker} yet.`} />
       ) : (
-        data.map((call) => <ConCallTranscript key={call.id} call={call} />)
+        data.map((call) => <ConCallTranscript key={call.id} call={call} ticker={ticker} />)
       )}
     </div>
   );
@@ -316,7 +348,27 @@ export function FinancialTabs({ ticker, company, financials, loading }: Financia
   const title = financials ? `Financials — ${financials.fiscal_period}` : "Financials";
 
   return (
-    <DashboardPanel eyebrow="Statements" title={title}>
+    <DashboardPanel
+      eyebrow="Statements"
+      title={title}
+      actions={
+        financials ? (
+          <button
+            type="button"
+            onClick={() =>
+              downloadPdf(
+                `/api/v1/companies/${ticker}/report/${financials.fiscal_period}/pdf`,
+                `${ticker}_${financials.fiscal_period}_report.pdf`,
+              )
+            }
+            className="flex items-center gap-1 rounded-mer-sm px-2 py-1 text-micro text-mer-ink-tertiary transition-colors hover:bg-mer-surface-2 hover:text-mer-ink-primary"
+            title="Download PDF report"
+          >
+            <FileText size={12} /> PDF
+          </button>
+        ) : undefined
+      }
+    >
       <Tabs defaultValue="about">
         <TabsList>
           <TabsTrigger value="about">About</TabsTrigger>
