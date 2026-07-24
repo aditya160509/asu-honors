@@ -91,8 +91,8 @@ export function Toolbar({
           aria-checked={viewMode === "table"}
           onClick={() => onViewModeChange("table")}
           className={cn(
-            "h-6 rounded-sm px-2.5 text-micro font-medium transition-colors",
-            viewMode === "table" ? "bg-bg-hover text-text-primary" : "text-text-tertiary hover:text-text-secondary"
+            "h-6 rounded-sm px-2.5 text-micro font-medium transition-all duration-fast ease-out-expo active:scale-[0.96]",
+           viewMode === "table" ? "bg-bg-hover text-text-primary" : "text-text-tertiary hover:text-text-secondary"
           )}
         >
           Table
@@ -103,8 +103,8 @@ export function Toolbar({
           aria-checked={viewMode === "heatmap"}
           onClick={() => onViewModeChange("heatmap")}
           className={cn(
-            "h-6 rounded-sm px-2.5 text-micro font-medium transition-colors",
-            viewMode === "heatmap" ? "bg-bg-hover text-text-primary" : "text-text-tertiary hover:text-text-secondary"
+            "h-6 rounded-sm px-2.5 text-micro font-medium transition-all duration-fast ease-out-expo active:scale-[0.96]",
+           viewMode === "heatmap" ? "bg-bg-hover text-text-primary" : "text-text-tertiary hover:text-text-secondary"
           )}
         >
           Heatmap
@@ -150,8 +150,8 @@ export function Toolbar({
                   setSortOpen(false);
                 }}
                 className={cn(
-                  "flex w-full items-center gap-2 px-3 py-1.5 text-micro transition-colors",
-                  sort.key === col.key ? "text-accent bg-accent/5" : "text-text-secondary hover:bg-bg-hover hover:text-text-primary"
+                  "flex w-full items-center gap-2 px-3 py-1.5 text-micro transition-all duration-fast ease-out-expo",
+                 sort.key === col.key ? "text-accent bg-accent/5" : "text-text-secondary hover:bg-bg-hover hover:text-text-primary"
                 )}
               >
                 {sort.key === col.key ? (
@@ -181,8 +181,8 @@ export function Toolbar({
           aria-pressed={density === "compact"}
           onClick={() => onDensityChange("compact")}
           className={cn(
-            "flex h-6 w-6 items-center justify-center rounded-sm transition-colors",
-            density === "compact" ? "bg-bg-hover text-text-primary" : "text-text-tertiary hover:text-text-primary"
+            "flex h-6 w-6 items-center justify-center rounded-sm transition-all duration-fast ease-out-expo active:scale-[0.96]",
+           density === "compact" ? "bg-bg-hover text-text-primary" : "text-text-tertiary hover:text-text-primary"
           )}
         >
           <LayoutList size={12} />
@@ -193,8 +193,8 @@ export function Toolbar({
           aria-pressed={density === "comfortable"}
           onClick={() => onDensityChange("comfortable")}
           className={cn(
-            "flex h-6 w-6 items-center justify-center rounded-sm transition-colors",
-            density === "comfortable" ? "bg-bg-hover text-text-primary" : "text-text-tertiary hover:text-text-primary"
+            "flex h-6 w-6 items-center justify-center rounded-sm transition-all duration-fast ease-out-expo active:scale-[0.96]",
+           density === "comfortable" ? "bg-bg-hover text-text-primary" : "text-text-tertiary hover:text-text-primary"
           )}
         >
           <Rows3 size={12} />

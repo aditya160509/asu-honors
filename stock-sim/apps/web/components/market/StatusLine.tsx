@@ -69,7 +69,7 @@ export function StatusLine({
               onClick={() => onRemoveToken(t.raw)}
               title={`Remove ${t.raw}`}
               className={cn(
-                "normal-case lowercase hover:line-through",
+                "normal-case lowercase transition-all duration-fast ease-out-expo hover:bg-white/[0.05] hover:-translate-y-[0.5px]",
                 t.valid ? "text-[var(--term-ink)]" : "text-[var(--term-down)]"
               )}
             >
@@ -102,7 +102,7 @@ export function StatusLine({
       </span>
 
       {compareCount > 0 && (
-        <button type="button" onClick={onOpenCompare} className="shrink-0 text-[var(--term-accent)] hover:underline">
+        <button type="button" onClick={onOpenCompare} className="shrink-0 text-[var(--term-accent)] transition-all duration-fast ease-out-expo hover:underline active:scale-[0.96]">
           Compare ({compareCount})
         </button>
       )}
@@ -113,7 +113,7 @@ export function StatusLine({
         <span className="shrink-0 text-[var(--term-amber)]">{staleLabel} {staleSince ?? "—"}</span>
       ) : (
         <span className="flex shrink-0 items-center gap-1.5">
-          <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-[var(--term-up)] motion-safe:animate-pulse" />
+          <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-[var(--term-up)] shadow-[0_0_0_2px_rgba(63,191,133,0.3)] motion-safe:animate-pulse" />
           <span className="text-[var(--term-up)]">LIVE</span>
           <span className="text-[var(--term-ink-tertiary)]">·SIM</span>
           <span className="tabular-nums text-[var(--term-ink-secondary)]">{clock}</span>

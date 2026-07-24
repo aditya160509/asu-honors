@@ -78,8 +78,8 @@ function ToolbarButton({
       onClick={onClick}
       title={title}
       aria-pressed={active}
-      className={cn(
-        "flex h-6 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-sm border px-2 font-mono text-[11px] uppercase tracking-[0.04em] transition-colors",
+     className={cn(
+        "flex h-6 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-sm border px-2 font-mono text-[11px] uppercase tracking-[0.04em] transition-all duration-fast ease-out-expo active:scale-[0.96]",
         active
           ? "border-[var(--term-amber)] text-[var(--term-amber)]"
           : "border-transparent text-[var(--term-ink-secondary)] hover:border-[var(--term-divider)] hover:text-[var(--term-ink)]"
@@ -150,7 +150,7 @@ export function ScreenerToolbar({
         spellCheck={false}
         autoComplete="off"
         aria-label="Quick search (ticker or name)"
-        className="h-6 w-44 shrink-0 border border-[var(--term-divider)] bg-transparent px-2 font-mono text-[11px] text-[var(--term-ink)] outline-none placeholder:text-[var(--term-ink-tertiary)] focus:border-[var(--term-amber)]"
+        className="h-6 w-44 shrink-0 border border-[var(--term-divider)] bg-transparent px-2 font-mono text-[11px] text-[var(--term-ink)] outline-none placeholder:text-[var(--term-ink-tertiary)] transition-shadow duration-fast focus:border-[var(--term-amber)] focus:shadow-[inset_0_0_0_1px_var(--term-amber)]"
       />
 
       <div className="relative shrink-0" ref={sortRef}>
@@ -179,10 +179,10 @@ export function ScreenerToolbar({
                   setSortOpen(false);
                 }}
                 className={cn(
-                  "flex w-full items-center gap-2 px-3 py-1.5 text-left font-mono text-[11px] uppercase tracking-[0.04em] transition-colors",
+                  "flex w-full items-center gap-2 px-3 py-1.5 text-left font-mono text-[11px] uppercase tracking-[0.04em] transition-all duration-fast ease-out-expo",
                   sort.key === col.key
                     ? "text-[var(--term-amber)]"
-                    : "text-[var(--term-ink-secondary)] hover:bg-white/5 hover:text-[var(--term-ink)]"
+                    : "text-[var(--term-ink-secondary)] hover:bg-white/[0.07] hover:text-[var(--term-ink)]"
                 )}
               >
                 {sort.key === col.key ? (
@@ -216,7 +216,7 @@ export function ScreenerToolbar({
                     type="button"
                     onClick={() => onToggleColumn(col.key)}
                     className={cn(
-                      "flex items-center gap-2",
+                      "flex items-center gap-2 transition-all duration-fast ease-out-expo hover:text-[var(--term-amber)]",
                       isHidden ? "text-[var(--term-ink-tertiary)]" : "text-[var(--term-ink)]"
                     )}
                   >
@@ -229,7 +229,7 @@ export function ScreenerToolbar({
                       aria-label={`Move ${col.header} left`}
                       disabled={i === 0}
                       onClick={() => onMoveColumn(col.key, -1)}
-                      className="p-0.5 hover:text-[var(--term-ink)] disabled:opacity-30"
+                      className="p-0.5 transition-all duration-fast ease-out-expo hover:text-[var(--term-ink)] active:scale-[0.9] disabled:opacity-30"
                     >
                       <ArrowUp size={11} />
                     </button>
@@ -238,7 +238,7 @@ export function ScreenerToolbar({
                       aria-label={`Move ${col.header} right`}
                       disabled={i === orderedColumns.length - 1}
                       onClick={() => onMoveColumn(col.key, 1)}
-                      className="p-0.5 hover:text-[var(--term-ink)] disabled:opacity-30"
+                      className="p-0.5 transition-all duration-fast ease-out-expo hover:text-[var(--term-ink)] active:scale-[0.9] disabled:opacity-30"
                     >
                       <ArrowDown size={11} />
                     </button>
@@ -250,7 +250,7 @@ export function ScreenerToolbar({
               <button
                 type="button"
                 onClick={onResetColumns}
-                className="py-1.5 font-mono text-[11px] text-[var(--term-ink-secondary)] hover:text-[var(--term-ink)]"
+                className="py-1.5 font-mono text-[11px] text-[var(--term-ink-secondary)] transition-all duration-fast ease-out-expo hover:text-[var(--term-amber)]"
               >
                 Reset to default
               </button>

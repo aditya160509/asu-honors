@@ -232,10 +232,10 @@ const ExplorerRow = React.memo(function ExplorerRow({
       aria-selected={selected}
       data-row-ticker={row.ticker}
       className={cn(
-        "group absolute left-0 right-0 flex items-stretch cursor-pointer",
+        "group absolute left-0 right-0 flex items-stretch cursor-pointer transition-colors duration-150 active:bg-white/[0.06]",
         isLedgerLine ? "border-b border-[var(--term-divider)]" : "border-b border-[var(--term-hairline)]",
-        !isTerminalDensity && "hover:bg-white/[0.03]",
-        focused && "bg-white/[0.04]",
+        !isTerminalDensity && "hover:bg-white/[0.04]",
+        focused && "bg-white/[0.05]",
         selected && "bg-[color:var(--term-accent)]/10"
       )}
       style={{ height: rowHeight, top }}
@@ -243,16 +243,17 @@ const ExplorerRow = React.memo(function ExplorerRow({
     >
       <span
         className={cn(
-          "absolute inset-y-0 left-0 w-[2px]",
+          "absolute inset-y-0 left-0 w-[2px] transition-colors duration-150",
           focused || selected ? "bg-[color:var(--term-accent)]" : "bg-transparent"
         )}
       />
       <div
-        className="sticky left-0 z-10 flex items-center gap-1 bg-[var(--term-bg)] pl-2 pr-1.5"
+        className={cn("sticky left-0 z-10 flex items-center gap-1 bg-[var(--term-bg)] pl-2 pr-1.5", scrolledX && "shadow-[inset_-12px_0_12px_-12px_rgba(0,0,0,0.5)]")}
         style={{ width: PINNED_COLUMN_WIDTH, minWidth: PINNED_COLUMN_WIDTH }}
       >
         <button
           type="button"
+          tabIndex={-1}
           aria-label={isExpanded ? `Collapse ${row.ticker} details` : `Expand ${row.ticker} details`}
           onClick={(e) => {
             e.stopPropagation();
@@ -269,6 +270,7 @@ const ExplorerRow = React.memo(function ExplorerRow({
         </button>
         <button
           type="button"
+          tabIndex={-1}
           role="checkbox"
           aria-checked={selected}
           aria-label={selected ? `Remove ${row.ticker} from compare` : `Add ${row.ticker} to compare`}
@@ -287,7 +289,7 @@ const ExplorerRow = React.memo(function ExplorerRow({
           {row.ticker}
           {watched && <span className="text-[color:var(--term-amber)]"> ✓</span>}
         </span>
-        <span className="truncate text-small text-[color:var(--term-ink-secondary)]" style={{ fontFamily: "var(--font-sans)" }}>
+        <span className="truncate text-small text-[color:var(--term-ink-secondary)] select-none" style={{ fontFamily: "var(--font-sans)" }}>
           {row.name}
         </span>
         {scrolledX && (
@@ -530,12 +532,12 @@ export function ExplorerTable({
           <button
             type="button"
             onClick={() => onSort("ticker")}
-            className="sticky left-0 z-30 flex items-center gap-1 bg-[var(--term-bg)] pl-2 pr-2 font-mono text-[11px] font-semibold uppercase tracking-[0.04em] text-[color:var(--term-amber)]/90 transition-colors"
+            className="sticky left-0 z-30 flex items-center gap-1 bg-[var(--term-bg)] pl-2 pr-2 font-mono text-[11px] font-semibold uppercase tracking-[0.04em] text-[color:var(--term-amber)]/90 transition-colors select-none"
             style={{ width: PINNED_COLUMN_WIDTH, minWidth: PINNED_COLUMN_WIDTH, height: 28 }}
           >
             Tkr / Company
             {sort.key === "ticker" && (
-              <span className="text-[color:var(--term-ink)]">{sort.direction === "asc" ? <ArrowUp size={10} /> : <ArrowDown size={10} />}</span>
+              <span className="text-[color:var(--term-amber)]">{sort.direction === "asc" ? <ArrowUp size={10} /> : <ArrowDown size={10} />}</span>
             )}
           </button>
           {resolvedColumns.map((col, colIdx) => {
@@ -546,9 +548,11 @@ export function ExplorerTable({
                 <button
                   type="button"
                   onClick={(e) => onSort(col.key, e.shiftKey)}
+                  aria-sort={priority === 1 ? (sort.direction === "asc" ? "ascending" : "descending") : undefined}
                   className={cn(
-                    "flex flex-1 items-center gap-1 px-2.5 font-mono text-[11px] font-semibold uppercase tracking-[0.04em] text-[color:var(--term-amber)]/90 transition-colors hover:text-[color:var(--term-amber)]",
-                    col.align === "right" && "justify-end text-right"
+                    "flex flex-1 items-center gap-1 px-2.5 font-mono text-[11px] font-semibold uppercase tracking-[0.04em] transition-colors hover:text-[color:var(--term-amber)] select-none",
+                    col.align === "right" && "justify-end text-right",
+                    isSorted ? "text-[color:var(--term-amber)]" : "text-[color:var(--term-amber)]/80"
                   )}
                   style={{ height: 28 }}
                 >
@@ -556,7 +560,7 @@ export function ExplorerTable({
                   {isSorted && (
                     <>
                       <span className="text-[9px] text-[color:var(--term-ink-tertiary)]">{priority > 1 ? priority : ""}</span>
-                      <span className="text-[color:var(--term-ink)]">
+                      <span className="text-[color:var(--term-amber)]">
                         {priority === 1
                           ? (sort.direction === "asc" ? <ArrowUp size={10} /> : <ArrowDown size={10} />)
                           : (sort.secondary?.direction === "asc" ? <ArrowUp size={10} /> : <ArrowDown size={10} />)}
@@ -568,10 +572,10 @@ export function ExplorerTable({
                   <div
                     role="separator"
                     aria-label={`Resize ${col.header} column`}
-                    className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize group/resize hover:bg-[color:var(--term-accent)]/30 transition-colors z-10"
+                    className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize group/resize transition-colors z-10 hover:bg-[color:var(--term-accent)]/20"
                     onMouseDown={(e) => handleColumnResizeStart(col.key, e)}
                   >
-                    <div className="absolute right-0 top-1 bottom-1 w-px bg-[var(--term-hairline)]/0 group-hover/resize:bg-[color:var(--term-accent)]/50 transition-colors" />
+                    <div className="absolute right-0 top-1 bottom-1 w-px bg-[var(--term-hairline)] transition-colors group-hover/resize:bg-[color:var(--term-accent)]/60 group-hover/resize:w-[2px]" />
                   </div>
                 )}
               </div>
@@ -630,10 +634,10 @@ export function ExplorerTable({
                 disabled={currentPage === 1}
                 onClick={() => handlePageChange(currentPage - 1)}
                 className={cn(
-                  "px-2 py-0.5 border text-[10px] font-semibold transition-colors uppercase tracking-wider",
+                  "px-2 py-0.5 border text-[10px] font-semibold transition-all duration-100 uppercase tracking-wider",
                   currentPage === 1
                     ? "border-[color:var(--term-divider)] text-[color:var(--term-ink-tertiary)] cursor-not-allowed"
-                    : "border-[color:var(--term-amber)]/60 text-[color:var(--term-amber)] hover:bg-[color:var(--term-amber)]/10"
+                    : "border-[color:var(--term-amber)]/60 text-[color:var(--term-amber)] hover:bg-[color:var(--term-amber)]/10 active:scale-[0.97]"
                 )}
               >
                 &lt; PREV
@@ -646,10 +650,10 @@ export function ExplorerTable({
                 disabled={currentPage === totalPages}
                 onClick={() => handlePageChange(currentPage + 1)}
                 className={cn(
-                  "px-2 py-0.5 border text-[10px] font-semibold transition-colors uppercase tracking-wider",
+                  "px-2 py-0.5 border text-[10px] font-semibold transition-all duration-100 uppercase tracking-wider",
                   currentPage === totalPages
                     ? "border-[color:var(--term-divider)] text-[color:var(--term-ink-tertiary)] cursor-not-allowed"
-                    : "border-[color:var(--term-amber)]/60 text-[color:var(--term-amber)] hover:bg-[color:var(--term-amber)]/10"
+                    : "border-[color:var(--term-amber)]/60 text-[color:var(--term-amber)] hover:bg-[color:var(--term-amber)]/10 active:scale-[0.97]"
                 )}
               >
                 NEXT &gt;
