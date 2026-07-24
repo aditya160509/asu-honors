@@ -14,31 +14,42 @@ export function PortfolioQuickStatsPanel({ className }: { className?: string }) 
   const analytics = usePortfolioAnalytics();
   const loading = portfolio.isLoading || analytics.isLoading;
 
+  const statCardClass =
+    "rounded-mer-sm border border-transparent bg-mer-surface-1 p-3 transition-all duration-fast ease-out-expo hover:border-[color:var(--mer-stroke-hairline)] hover:bg-mer-surface-2 active:scale-[0.98]";
+
   return (
-    <DashboardPanel eyebrow="Live Snapshot" title="Your Portfolio" icon={Wallet} className={className} bodyClassName="grid grid-cols-2 gap-4">
-      <KpiCounter
-        label="Total Value"
-        value={analytics.data ? Number(analytics.data.total_value) : 0}
-        format="price"
-        size="lg"
-        loading={loading}
-      />
-      <KpiCounter
-        label="Total Return"
-        value={analytics.data?.total_return_pct ?? 0}
-        format="pct"
-        tone="auto"
-        icon={Target}
-        loading={loading}
-      />
-      <KpiCounter label="Positions" value={portfolio.data?.holdings.length ?? 0} format="number" loading={loading} />
-      <KpiCounter
-        label="Cash Allocation"
-        value={analytics.data?.cash_allocation_pct ?? 0}
-        format="pct"
-        icon={PieChart}
-        loading={loading}
-      />
+    <DashboardPanel eyebrow="Live Snapshot" title="Your Portfolio" icon={Wallet} className={className} bodyClassName="grid grid-cols-2 gap-3">
+      <div className={statCardClass}>
+        <KpiCounter
+          label="Total Value"
+          value={analytics.data ? Number(analytics.data.total_value) : 0}
+          format="price"
+          size="lg"
+          loading={loading}
+        />
+      </div>
+      <div className={statCardClass}>
+        <KpiCounter
+          label="Total Return"
+          value={analytics.data?.total_return_pct ?? 0}
+          format="pct"
+          tone="auto"
+          icon={Target}
+          loading={loading}
+        />
+      </div>
+      <div className={statCardClass}>
+        <KpiCounter label="Positions" value={portfolio.data?.holdings.length ?? 0} format="number" loading={loading} />
+      </div>
+      <div className={statCardClass}>
+        <KpiCounter
+          label="Cash Allocation"
+          value={analytics.data?.cash_allocation_pct ?? 0}
+          format="pct"
+          icon={PieChart}
+          loading={loading}
+        />
+      </div>
     </DashboardPanel>
   );
 }

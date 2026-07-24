@@ -49,8 +49,8 @@ function SegmentedControl<T extends string>({
             type="button"
             onClick={() => onChange(opt.value)}
             className={cn(
-              "flex items-center gap-1.5 rounded-mer-sm px-2.5 py-1 text-micro font-medium uppercase tracking-wide transition-colors",
-              value === opt.value ? "bg-mer-surface-3 text-mer-ink-primary" : "text-mer-ink-tertiary hover:text-mer-ink-secondary"
+              "flex items-center gap-1.5 rounded-mer-sm px-3 py-1 text-micro font-medium uppercase tracking-wide transition-all duration-150",
+              value === opt.value ? "bg-mer-surface-3 text-mer-ink-primary shadow-mer-raised" : "text-mer-ink-tertiary hover:bg-mer-surface-2 hover:text-mer-ink-secondary"
             )}
           >
             {Icon && <Icon size={12} />}
@@ -68,7 +68,7 @@ function CopyButton({ text }: { text: string }) {
     <Button
       variant="ghost"
       size="sm"
-      className="gap-1 text-mer-ink-tertiary"
+      className="gap-1 text-mer-ink-tertiary transition-all duration-150 active:scale-90"
       onClick={() => {
         navigator.clipboard.writeText(text).then(() => {
           setCopied(true);
@@ -123,7 +123,7 @@ export function StrategyBuilderForm({ onGenerated }: { onGenerated?: () => void 
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:items-start">
       <DashboardPanel eyebrow="Strategy Inputs" title="Build a Strategy" icon={ShieldAlert}>
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+        <form onSubmit={handleSubmit} className="flex flex-col gap-5">
           <div className="flex flex-col gap-1.5">
             <span className="text-micro font-medium uppercase tracking-wide text-mer-ink-tertiary">Risk tolerance</span>
             <SegmentedControl value={riskTolerance} options={RISK_OPTIONS} onChange={setRiskTolerance} />
@@ -149,7 +149,7 @@ export function StrategyBuilderForm({ onGenerated }: { onGenerated?: () => void 
                   key={preset}
                   type="button"
                   onClick={() => setGoal(preset)}
-                  className="rounded-full border border-[color:var(--mer-stroke-hairline)] px-2.5 py-1 text-micro text-mer-ink-secondary hover:border-[#8b7cf6] hover:text-[#8b7cf6]"
+                  className="rounded-full border border-[color:var(--mer-stroke-hairline)] px-2.5 py-1 text-micro text-mer-ink-secondary transition-all duration-150 ease-[var(--ease-out-expo)] hover:-translate-y-0.5 hover:border-[#8b7cf6] hover:text-[#8b7cf6] hover:shadow-mer-raised active:scale-95"
                 >
                   {preset}
                 </button>
@@ -181,7 +181,7 @@ export function StrategyBuilderForm({ onGenerated }: { onGenerated?: () => void 
             <div className="flex items-center gap-1">
               {relativeTime && <span className="num mr-1 text-micro text-mer-ink-tertiary">{relativeTime}</span>}
               <CopyButton text={strategy.data.narrative} />
-              <Button variant="ghost" size="sm" onClick={generate} className="gap-1 text-mer-ink-tertiary">
+              <Button variant="ghost" size="sm" onClick={generate} className="gap-1 text-mer-ink-tertiary transition-all duration-150 active:scale-90">
                 <RotateCw size={12} />
                 Regenerate
               </Button>
@@ -196,7 +196,7 @@ export function StrategyBuilderForm({ onGenerated }: { onGenerated?: () => void 
         {strategy.isPending ? (
           <div className="flex flex-col gap-2">
             <span className="flex items-center gap-1.5 text-micro text-[#8b7cf6]">
-              <Sparkles size={11} className="animate-pulse" />
+              <Sparkles size={11} className="animate-pulse motion-reduce:animate-none" />
               Thinking...
             </span>
             <Skeleton width="100%" height={14} />
@@ -223,7 +223,7 @@ export function StrategyBuilderForm({ onGenerated }: { onGenerated?: () => void 
         ) : strategy.data ? (
           <div className="flex flex-col gap-3">
             <AiMarkdown text={strategy.data.narrative} />
-            <div className={cn("flex items-start gap-2 border-t pt-3", MER_HAIRLINE)}>
+            <div className={cn("flex items-start gap-2.5 border-t pt-4", MER_HAIRLINE)}>
               <ShieldAlert size={14} className="mt-0.5 shrink-0 text-warning" />
               <p className="text-micro leading-relaxed text-mer-ink-tertiary">{strategy.data.disclaimer}</p>
             </div>

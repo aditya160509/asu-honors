@@ -4,18 +4,29 @@ import { cn } from "@/lib/utils";
 /** Deliberately not a full markdown library -- AI narratives here are short
  * (a few sentences, maybe a bullet list) and always rendered inside the
  * dark, tightly-typed AI card grammar, so a tiny hand-rolled parser
- * supporting just **bold** and "- " bullet/"1. " numbered lists gives full
+ * supporting **bold**, `inline code`, and "- " bullet / "1. " numbered
+ * lists gives full
  * control over styling without a new dependency or an unstyled markdown
  * library fighting the design system. */
 
 function renderInline(line: string, keyPrefix: string): React.ReactNode[] {
-  const parts = line.split(/(\*\*.+?\*\*)/g).filter((p) => p !== "");
+  const parts = line.split(/(\*\*.+?\*\*|`[^`]+`)/g).filter((p) => p !== "");
   return parts.map((part, i) => {
     if (part.startsWith("**") && part.endsWith("**") && part.length > 4) {
       return (
-        <strong key={`${keyPrefix}-${i}`} className="font-semibold text-mer-ink-primary">
+        <strong key={`${keyPrefix}-${i}`} className="font-semibold tracking-[0.01em] text-mer-ink-primary">
           {part.slice(2, -2)}
         </strong>
+      );
+    }
+    if (part.startsWith("`") && part.endsWith("`") && part.length > 2) {
+      return (
+        <code
+          key={`${keyPrefix}-${i}`}
+          className="rounded bg-mer-surface-2 px-1 py-0.5 font-mono text-[0.75em] text-[#8b7cf6]"
+        >
+          {part.slice(1, -1)}
+        </code>
       );
     }
     return <React.Fragment key={`${keyPrefix}-${i}`}>{part}</React.Fragment>;
@@ -37,7 +48,7 @@ export function AiMarkdown({ text, className }: { text: string; className?: stri
   const blocks = text.trim().split(/\n\s*\n/);
 
   return (
-    <div className={cn("flex flex-col gap-2", className)}>
+    <div className={cn("flex flex-col gap-3", className)}>
       {blocks.map((block, blockIdx) => {
         const lines = block.split("\n").filter((l) => l.trim() !== "");
         if (lines.length === 0) return null;
@@ -49,7 +60,7 @@ export function AiMarkdown({ text, className }: { text: string; className?: stri
             <ListTag
               key={blockIdx}
               className={cn(
-                "flex flex-col gap-1 pl-4 text-small leading-relaxed text-mer-ink-primary",
+                "flex flex-col gap-0.5 pl-4 text-small leading-relaxed text-mer-ink-primary",
                 ordered ? "list-decimal" : "list-disc"
               )}
             >
