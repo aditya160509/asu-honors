@@ -34,10 +34,11 @@ import type { VisibleRange } from "@/lib/charts/types";
 const TIME_RANGES = [
   { label: "1D", days: 1 },
   { label: "5D", days: 5 },
+  { label: "10D", days: 10 },
   { label: "1M", days: 30 },
   { label: "3M", days: 90 },
   { label: "6M", days: 180 },
-  { label: "YTD", days: null },
+  { label: "YTD", days: -1 },
   { label: "1Y", days: 365 },
   { label: "ALL", days: null },
 ] as const;
@@ -66,7 +67,7 @@ function toNumber(value: number | string | null | undefined, fallback = 0): numb
   return Number.isFinite(numeric) ? numeric : fallback;
 }
 
-function TerminalButton({
+function TerminalBtn({
   active,
   children,
   onClick,
@@ -82,73 +83,30 @@ function TerminalButton({
       type="button"
       title={title}
       onClick={onClick}
+      onMouseDown={(e) => {
+        const el = e.currentTarget;
+        el.style.transform = "scale(0.95)";
+        setTimeout(() => { el.style.transform = ""; }, 100);
+      }}
       style={{
-        height: 28,
-        padding: "0 10px",
+        height: 24,
+        padding: "0 8px",
         border: "1px solid",
         borderColor: active ? "var(--mer-stroke-accent)" : "var(--mer-stroke-hairline)",
-        borderRadius: "var(--mer-radius-sm)",
-        background: active ? "rgba(62, 111, 224, 0.16)" : "var(--mer-surface-2)",
+        borderRadius: "var(--mer-radius-xs)",
+        background: active ? "rgba(62, 111, 224, 0.14)" : "transparent",
         color: active ? "var(--mer-accent-300)" : "var(--mer-ink-secondary)",
         fontSize: "var(--fs-micro)",
-        fontWeight: 700,
-        letterSpacing: "0.04em",
+        fontWeight: 500,
+        letterSpacing: "0.06em",
         textTransform: "uppercase",
         cursor: "pointer",
+        lineHeight: 1,
+        transition: "background 180ms cubic-bezier(0.16, 1, 0.3, 1), color 180ms cubic-bezier(0.16, 1, 0.3, 1), border-color 180ms cubic-bezier(0.16, 1, 0.3, 1), transform 80ms cubic-bezier(0.16, 1, 0.3, 1)",
       }}
     >
       {children}
     </button>
-  );
-}
-
-interface MiniSparklineProps {
-  data: PriceHistoryItem[];
-  width?: number;
-  height?: number;
-  positive?: boolean;
-}
-
-function MiniSparkline({ data, width = 60, height = 20, positive }: MiniSparklineProps) {
-  const canvasRef = React.useRef<HTMLCanvasElement>(null);
-
-  React.useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || data.length < 2) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = width * dpr;
-    canvas.height = height * dpr;
-    ctx.scale(dpr, dpr);
-    ctx.clearRect(0, 0, width, height);
-
-    const closes = data.map((d) => Number(d.close));
-    const min = Math.min(...closes);
-    const max = Math.max(...closes);
-    const range = max - min || 1;
-
-    const color = positive ? "var(--positive)" : "var(--negative)";
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 1.2;
-    ctx.lineJoin = "round";
-    ctx.beginPath();
-
-    closes.forEach((v, i) => {
-      const x = (i / (closes.length - 1)) * width;
-      const y = height - ((v - min) / range) * (height - 4) - 2;
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    });
-    ctx.stroke();
-  }, [data, width, height, positive]);
-
-  return (
-    <canvas
-      ref={canvasRef}
-      style={{ width, height, display: "block" }}
-    />
   );
 }
 
@@ -255,15 +213,23 @@ export function SimulationTradingView() {
       });
     } else if (timeRange !== "ALL") {
       const range = TIME_RANGES.find((r) => r.label === timeRange);
-      if (range && range.days !== null) {
-        const lastDate = new Date(data[data.length - 1].sim_date);
-        const cutoff = new Date(lastDate);
-        cutoff.setDate(cutoff.getDate() - range.days);
-        data = data.filter((p) => new Date(p.sim_date) >= cutoff);
+      if (range) {
+        if (range.days === -1) {
+          // YTD — filter to current calendar year
+          const lastDate = new Date(data[data.length - 1].sim_date);
+          const yearStart = new Date(lastDate.getFullYear(), 0, 1);
+          data = data.filter((p) => new Date(p.sim_date) >= yearStart);
+        } else if (range.days !== null) {
+          const lastDate = new Date(data[data.length - 1].sim_date);
+          const cutoff = new Date(lastDate);
+          cutoff.setDate(cutoff.getDate() - range.days);
+          data = data.filter((p) => new Date(p.sim_date) >= cutoff);
+        }
+        // days === null → ALL, no filtering
       }
     }
 
-    if (replayMode) {
+    if (replayMode && currentTick < priceHistory.length) {
       data = data.slice(0, currentTick + 1);
     }
 
@@ -284,7 +250,7 @@ export function SimulationTradingView() {
   const lastVolume = latestPrice ? toNumber(latestPrice.volume) : null;
   const isPositive = dayChange >= 0;
 
-  const currentRange = TIME_RANGES.find((r) => r.label === timeRange) ?? TIME_RANGES[7];
+  const currentRange = TIME_RANGES.find((r) => r.label === timeRange) ?? null;
 
   const eventMarkers = React.useMemo<EventMarker[]>(() => {
     if (!newsData || !priceHistory || priceHistory.length === 0) return [];
@@ -391,10 +357,15 @@ export function SimulationTradingView() {
         display: "flex",
         flexDirection: "column",
         height: "calc(100vh - 96px)",
-        background: "linear-gradient(180deg, #080b10 0%, #06080c 100%)",
+        background: cycleData?.market_sentiment != null && cycleData.market_sentiment < 40
+          ? "linear-gradient(180deg, #0b0808 0%, #06080c 100%)"
+          : cycleData?.market_sentiment != null && cycleData.market_sentiment > 60
+            ? "linear-gradient(180deg, #080b0e 0%, #06080c 100%)"
+            : "linear-gradient(180deg, #080b10 0%, #06080c 100%)",
         borderRadius: "var(--mer-radius-sm)",
         border: "1px solid var(--mer-stroke-hairline)",
         overflow: "hidden",
+        transition: "background 800ms cubic-bezier(0.16, 1, 0.3, 1)",
       }}
     >
       {/* Ticker Tape */}
@@ -408,8 +379,8 @@ export function SimulationTradingView() {
         style={{
           display: "flex",
           alignItems: "center",
-          gap: 10,
-          padding: "6px 12px",
+          gap: 6,
+          padding: "4px 10px",
           borderBottom: "1px solid var(--mer-stroke-hairline)",
           background: "linear-gradient(180deg, rgba(22,26,34,0.92) 0%, var(--mer-surface-1) 100%)",
         }}
@@ -422,11 +393,11 @@ export function SimulationTradingView() {
         <div style={{ display: "flex", minWidth: 0, flexDirection: "column", gap: 2 }}>
           <span
             style={{
-                fontSize: "var(--fs-body)",
+              fontSize: "var(--fs-header)",
               fontWeight: 700,
               color: "var(--mer-ink-primary)",
               fontFamily: "var(--font-mono)",
-              letterSpacing: "0.02em",
+              letterSpacing: "0em",
             }}
           >
             {selectedTicker ?? "SELECT"}
@@ -447,13 +418,22 @@ export function SimulationTradingView() {
           )}
         </div>
 
-        <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginLeft: "auto" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: "auto" }}>
+          {latestPrice && (
+            <div style={{ display: "flex", gap: 6, alignItems: "baseline", marginRight: 6, paddingRight: 6, borderRight: "1px solid var(--mer-stroke-hairline)" }}>
+              <OhlcBadge label="O" value={latestPrice.open} />
+              <OhlcBadge label="H" value={latestPrice.high} />
+              <OhlcBadge label="L" value={latestPrice.low} />
+              <OhlcBadge label="C" value={latestPrice.close} />
+            </div>
+          )}
           <span
             className="num"
             style={{
-              fontSize: "var(--fs-body)",
+              fontSize: "var(--fs-header)",
               fontWeight: 700,
               color: "var(--mer-ink-primary)",
+              transition: "color 300ms cubic-bezier(0.16, 1, 0.3, 1)",
             }}
           >
             {formatPrice(currentCompany?.current_price ?? latestClose ?? null)}
@@ -461,9 +441,10 @@ export function SimulationTradingView() {
           <span
             className="num"
             style={{
-              fontSize: "var(--fs-small)",
-              fontWeight: 500,
+              fontSize: "var(--fs-body)",
+              fontWeight: 600,
               color: isPositive ? "var(--positive)" : "var(--negative)",
+              transition: "color 300ms cubic-bezier(0.16, 1, 0.3, 1)",
             }}
           >
             {isPositive ? "+" : ""}
@@ -471,17 +452,8 @@ export function SimulationTradingView() {
           </span>
         </div>
 
-        {latestPrice && (
-          <MiniSparkline
-            data={priceHistory ?? []}
-            positive={isPositive}
-            width={60}
-            height={20}
-          />
-        )}
-
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(58px, auto))", gap: 5 }}>
-          <QuoteStat label="Range" value={currentRange.label} />
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(54px, auto))", gap: 4 }}>
+          <QuoteStat label="Range" value={customRange ? `${customRange.start.slice(5)}–${customRange.end.slice(5)}` : currentRange?.label ?? "--"} />
           <QuoteStat label="Volume" value={lastVolume == null ? "--" : formatLarge(lastVolume)} />
           <QuoteStat label="Mkt Cap" value={currentCompany?.market_cap == null ? "--" : formatLarge(currentCompany.market_cap)} />
         </div>
@@ -518,7 +490,7 @@ export function SimulationTradingView() {
             display: "flex",
             flexDirection: "column",
             minWidth: 0,
-            padding: "6px 8px",
+            padding: "4px 6px",
             overflow: "hidden",
           }}
         >
@@ -529,7 +501,7 @@ export function SimulationTradingView() {
               display: "flex",
               alignItems: "center",
               gap: 6,
-              marginBottom: 5,
+              marginBottom: 3,
               flexWrap: "wrap",
             }}
           >
@@ -540,48 +512,27 @@ export function SimulationTradingView() {
             <ChartTypePicker value={chartType} onChange={setChartType} />
             <div style={{ width: 1, height: 20, background: "var(--mer-stroke-hairline)", flexShrink: 0 }} />
             <IndicatorPicker activeIndicators={activeOverlays} onToggle={toggleOverlay} />
-            <TerminalButton active={showVolumeProfile} onClick={() => setShowVolumeProfile((v) => !v)}>VPVR</TerminalButton>
+            <TerminalBtn active={showVolumeProfile} onClick={() => setShowVolumeProfile((v) => !v)}>VPVR</TerminalBtn>
             <div style={{ flex: 1 }} />
-            <TerminalButton active={showSentiment} onClick={() => setShowSentiment((v) => !v)}>Sentiment</TerminalButton>
-            <TerminalButton active={showFundamentals} onClick={() => setShowFundamentals((v) => !v)}>Fundamentals</TerminalButton>
+            <TerminalBtn active={showSentiment} onClick={() => setShowSentiment((v) => !v)}>Sentiment</TerminalBtn>
+            <TerminalBtn active={showFundamentals} onClick={() => setShowFundamentals((v) => !v)}>Fundamentals</TerminalBtn>
           </div>
 
-          {latestPrice && (
-            <div
-              style={{
-                position: "relative",
-                zIndex: 10,
-                marginBottom: -30,
-                marginLeft: 10,
-                display: "flex",
-                gap: 12,
-                pointerEvents: "none",
-                width: "fit-content",
-                padding: "4px 7px",
-                border: "1px solid var(--mer-stroke-hairline)",
-                borderRadius: "var(--mer-radius-sm)",
-                background: "rgba(10, 12, 16, 0.78)",
-                backdropFilter: "blur(10px)",
-              }}
-            >
-              <OhlcBadge label="O" value={latestPrice.open} />
-              <OhlcBadge label="H" value={latestPrice.high} />
-              <OhlcBadge label="L" value={latestPrice.low} />
-              <OhlcBadge label="C" value={latestPrice.close} />
-            </div>
-          )}
+
 
           {/* Chart */}
           <div
             ref={chartContainerRef}
+            className="chart-surface"
             style={{
               flex: 1,
               background: "radial-gradient(circle at 50% 0%, rgba(51, 102, 204, 0.08), transparent 36%), #0b0f14",
               border: "1px solid var(--mer-stroke-hairline)",
-              borderRadius: "var(--mer-radius-md)",
+              borderRadius: "var(--mer-radius-xs)",
               overflow: "hidden",
               minHeight: 0,
-              boxShadow: "var(--mer-shadow-rest)",
+              boxShadow: "0 0 0 1px rgba(62, 111, 224, 0.06), var(--mer-shadow-rest)",
+              transition: "box-shadow 600ms cubic-bezier(0.16, 1, 0.3, 1)",
             }}
           >
             <PriceChart
@@ -611,8 +562,8 @@ export function SimulationTradingView() {
               style={{
                 display: "grid",
                 gridTemplateColumns: `repeat(${paneIndicators.length}, minmax(0, 1fr))`,
-                gap: 6,
-                marginTop: 6,
+                gap: 4,
+                marginTop: 4,
                 flexShrink: 0,
               }}
             >
@@ -649,6 +600,7 @@ export function SimulationTradingView() {
               overflow: "auto",
               display: "flex",
               flexDirection: "column",
+              animation: "fade-slide-down 220ms cubic-bezier(0.16, 1, 0.3, 1)",
             }}
           >
             <div
@@ -656,7 +608,7 @@ export function SimulationTradingView() {
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "space-between",
-                padding: "8px 12px",
+                padding: "6px 10px",
                 borderBottom: "1px solid var(--mer-stroke-hairline)",
               }}
             >
@@ -686,7 +638,7 @@ export function SimulationTradingView() {
                 Close
               </button>
             </div>
-            <div style={{ padding: "8px 12px", flex: 1 }}>
+            <div style={{ padding: "6px 10px", flex: 1 }}>
               <FundamentalsPanel
                 financials={financials ?? null}
                 company={companyDetail ?? null}
@@ -700,42 +652,44 @@ export function SimulationTradingView() {
           {/* Right Sidebar */}
           <aside
             style={{
-              width: 246,
+              width: 220,
               flexShrink: 0,
               display: "flex",
               flexDirection: "column",
               borderLeft: "1px solid var(--mer-stroke-hairline)",
               overflow: "auto",
+              animation: "fade-slide-down 250ms cubic-bezier(0.16, 1, 0.3, 1)",
             }}
           >
             {showSentiment && (
               <div
                 style={{
-                  padding: "8px 10px",
+                  padding: "6px 8px",
                   borderBottom: "1px solid var(--mer-stroke-hairline)",
                 }}
               >
-                <span
-                  style={{
-                    fontSize: "var(--fs-micro)",
-                    fontWeight: 600,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.08em",
-                    color: "var(--mer-ink-tertiary)",
-                    display: "block",
-                    marginBottom: 4,
-                  }}
-                >
-                  Market Sentiment
-                </span>
-                <SentimentGauge value={sentimentValue} previousValue={prevSentiment} width={218} height={108} />
-                <SentimentHistory history={sentimentHistoryRef.current} width={218} height={32} />
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
+                  <span style={{ width: 3, height: 12, borderRadius: 2, background: "var(--mer-accent-500)", flexShrink: 0 }} />
+                  <span
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 700,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.08em",
+                      color: "var(--mer-ink-tertiary)",
+                    }}
+                  >
+                    Market Sentiment
+                  </span>
+                </div>
+                <SentimentGauge value={sentimentValue} previousValue={prevSentiment} width={200} height={96} />
+                <SentimentHistory history={sentimentHistoryRef.current} width={200} height={32} />
                 <div
                   style={{
                     display: "grid",
                     gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-                    gap: 5,
-                    marginTop: 8,
+                    gap: 4,
+                    marginTop: 6,
                   }}
                 >
                   <SentimentDriver label="Cycle" value={sentimentDrivers.cycle} warmingUp={sentimentDrivers.warmingUp.cycle} />
@@ -769,10 +723,10 @@ function OhlcBadge({ label, value }: { label: string; value: number | string | n
   const numericValue = Number(value);
 
   return (
-    <div style={{ display: "flex", alignItems: "baseline", gap: 3 }}>
+    <div style={{ display: "flex", alignItems: "baseline", gap: 2 }}>
       <span
         style={{
-          fontSize: "var(--fs-micro)",
+          fontSize: 10,
           color: "var(--mer-ink-tertiary)",
           fontWeight: 500,
         }}
@@ -783,8 +737,8 @@ function OhlcBadge({ label, value }: { label: string; value: number | string | n
         className="num"
         style={{
           fontSize: "var(--fs-small)",
-          color: "var(--mer-ink-secondary)",
-          fontWeight: 500,
+          color: "var(--mer-ink-primary)",
+          fontWeight: 600,
         }}
       >
         {Number.isFinite(numericValue) ? numericValue.toFixed(2) : "--"}
@@ -805,9 +759,10 @@ function ReplayPickPrompt({ onCancel }: { onCancel: () => void }) {
         display: "flex",
         alignItems: "center",
         gap: 10,
-        padding: "8px 10px",
+        padding: "6px 8px",
         border: "1px solid var(--mer-stroke-accent)",
-        borderRadius: 8,
+        borderRadius: "var(--mer-radius-sm)",
+        boxShadow: "0 4px 24px rgba(4, 6, 10, 0.5), 0 0 0 1px var(--mer-stroke-emphasis)",
         background: "rgba(10, 14, 22, 0.94)",
         boxShadow: "var(--mer-shadow-overlay)",
         color: "var(--mer-ink-primary)",
@@ -863,15 +818,19 @@ function NewsCompactPanel({ news, companyName }: { news: NewsItem[]; companyName
     >
       <div
         style={{
-          padding: "8px 10px",
+          padding: "6px 8px",
           borderBottom: "1px solid var(--mer-stroke-hairline)",
-          fontSize: "var(--fs-micro)",
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          fontSize: 10,
           fontWeight: 700,
           letterSpacing: "0.08em",
           textTransform: "uppercase",
           color: "var(--mer-ink-tertiary)",
         }}
       >
+        <span style={{ width: 3, height: 12, borderRadius: 2, background: "var(--mer-accent-500)", flexShrink: 0 }} />
         News
       </div>
       <div style={{ overflow: "auto", minHeight: 0 }}>
@@ -886,12 +845,16 @@ function NewsCompactPanel({ news, companyName }: { news: NewsItem[]; companyName
               <div
                 key={item.id}
                 style={{
-                  padding: "9px 10px",
+                  padding: "7px 8px",
                   borderBottom: "1px solid var(--mer-stroke-hairline)",
                   display: "grid",
                   gridTemplateColumns: "6px minmax(0, 1fr)",
                   gap: 8,
+                  cursor: "default",
+                  transition: "background 200ms cubic-bezier(0.16, 1, 0.3, 1)",
                 }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.025)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = ""; }}
               >
                 <span
                   style={{
@@ -908,7 +871,7 @@ function NewsCompactPanel({ news, companyName }: { news: NewsItem[]; companyName
                       color: "var(--mer-ink-primary)",
                       fontSize: "var(--fs-small)",
                       lineHeight: 1.3,
-                      fontWeight: 600,
+                      fontWeight: 500,
                     }}
                   >
                     {item.headline}
@@ -946,20 +909,25 @@ function SentimentDriver({ label, value, warmingUp }: { label: string; value: nu
 
   return (
     <div
-      title={warmingUp ? "Warming up — not enough trailing history for a reliable reading yet" : undefined}
+      title={warmingUp ? "Warming up \u2014 not enough trailing history for a reliable reading yet" : undefined}
       style={{
-        padding: "5px 6px",
+        padding: "4px 6px",
         border: "1px solid var(--mer-stroke-hairline)",
-        borderRadius: "var(--mer-radius-sm)",
+        borderRadius: "var(--mer-radius-xs)",
         background: "rgba(255,255,255,0.025)",
+        cursor: "default",
+        transition: "background 200ms cubic-bezier(0.16, 1, 0.3, 1), border-color 200ms cubic-bezier(0.16, 1, 0.3, 1)",
       }}
+      onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.045)"; e.currentTarget.style.borderColor = "var(--mer-stroke-emphasis)"; }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.025)"; e.currentTarget.style.borderColor = "var(--mer-stroke-hairline)"; }}
     >
       <div
         style={{
-          fontSize: "var(--fs-micro)",
+          fontSize: 10,
           color: "var(--mer-ink-tertiary)",
           textTransform: "uppercase",
-          letterSpacing: "0.06em",
+          letterSpacing: "0.05em",
+          lineHeight: 1.3,
         }}
       >
         {label}
@@ -967,36 +935,44 @@ function SentimentDriver({ label, value, warmingUp }: { label: string; value: nu
       <div
         className="num"
         style={{
-          marginTop: 2,
+          marginTop: 1,
           fontSize: "var(--fs-small)",
           fontWeight: 700,
           color,
           fontStyle: warmingUp ? "italic" : "normal",
         }}
       >
-        {warmingUp ? "…" : rounded}
+        {warmingUp ? "\u2026" : rounded}
       </div>
     </div>
   );
 }
 
+
 function QuoteStat({ label, value }: { label: string; value: React.ReactNode }) {
+  const [hovered, setHovered] = React.useState(false);
   return (
     <div
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
       style={{
-        minWidth: 58,
-        padding: "3px 6px",
-        border: "1px solid var(--mer-stroke-hairline)",
-        borderRadius: "var(--mer-radius-sm)",
-        background: "rgba(255,255,255,0.025)",
+        minWidth: 52,
+        padding: "2px 5px",
+        border: "1px solid",
+        borderColor: hovered ? "var(--mer-stroke-emphasis)" : "var(--mer-stroke-hairline)",
+        borderRadius: "var(--mer-radius-xs)",
+        background: hovered ? "rgba(255,255,255,0.045)" : "rgba(255,255,255,0.025)",
+        cursor: "default",
+        transition: "background 180ms cubic-bezier(0.16, 1, 0.3, 1), border-color 180ms cubic-bezier(0.16, 1, 0.3, 1)",
       }}
     >
       <div
         style={{
-          fontSize: "var(--fs-micro)",
+          fontSize: 10,
           color: "var(--mer-ink-tertiary)",
           textTransform: "uppercase",
-          letterSpacing: "0.08em",
+          letterSpacing: "0.06em",
+          lineHeight: 1.3,
         }}
       >
         {label}
@@ -1004,7 +980,7 @@ function QuoteStat({ label, value }: { label: string; value: React.ReactNode }) 
       <div
         className="num"
         style={{
-          marginTop: 2,
+          marginTop: 1,
           fontSize: "var(--fs-micro)",
           fontWeight: 700,
           color: "var(--mer-ink-primary)",
