@@ -102,6 +102,7 @@ function TickerItem({
           fontFamily: "var(--font-mono)",
           fontSize: "var(--fs-small)",
           fontWeight: 600,
+          letterSpacing: "0.02em",
           color: "var(--mer-ink-primary)",
         }}
       >
@@ -112,6 +113,8 @@ function TickerItem({
         style={{
           fontSize: "var(--fs-small)",
           color: "var(--mer-ink-primary)",
+          fontWeight: 500,
+          letterSpacing: "0.01em",
         }}
       >
         {formatPrice(company.current_price)}
@@ -122,6 +125,7 @@ function TickerItem({
           fontSize: "var(--fs-micro)",
           color: isPositive ? "var(--positive)" : "var(--negative)",
           fontWeight: 500,
+          letterSpacing: "0.02em",
         }}
       >
         {isPositive ? "+" : ""}

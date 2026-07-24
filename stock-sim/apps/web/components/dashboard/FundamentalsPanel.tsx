@@ -76,6 +76,7 @@ function DataRow({
 }) {
   return (
     <div
+      className="fundamentals-row"
       style={{
         display: "flex",
         alignItems: "center",
@@ -151,6 +152,7 @@ function RatioCard({
 
   return (
     <div
+      className="fundamentals-ratio-card"
       style={{
         padding: "10px 12px",
         background: "var(--mer-surface-2)",
@@ -347,6 +349,14 @@ export function FundamentalsPanel({ financials, company, dividendYieldPct, loadi
   const [activeTab, setActiveTab] = React.useState<TabKey>("income");
 
   return (
+    <>
+      <style>{`
+  .fundamentals-tab { transition: background 120ms ease, color 120ms ease, border-color 120ms ease; }
+  .fundamentals-tab:hover:not(.fundamentals-tab--active) { background: rgba(255,255,255,0.035); }
+  .fundamentals-row:hover { background: rgba(255,255,255,0.015); }
+  .fundamentals-ratio-card { transition: border-color 120ms ease; }
+  .fundamentals-ratio-card:hover { border-color: var(--mer-stroke-emphasis); }
+`}</style>
     <div
       style={{
         background: "var(--mer-surface-1)",
@@ -361,20 +371,24 @@ export function FundamentalsPanel({ financials, company, dividendYieldPct, loadi
           borderBottom: "1px solid var(--mer-stroke-hairline)",
         }}
       >
-        {TABS.map((tab) => (
+        {TABS.map((tab, i) => {
+          const isActive = activeTab === tab.key;
+          const isLast = i === TABS.length - 1;
+          return (
           <button
             key={tab.key}
             type="button"
             onClick={() => setActiveTab(tab.key)}
+            className={isActive ? "fundamentals-tab fundamentals-tab--active" : "fundamentals-tab"}
             style={{
               flex: 1,
               padding: "10px 12px",
               fontSize: "var(--fs-small)",
-              fontWeight: 600,
-              color: activeTab === tab.key ? "var(--mer-ink-primary)" : "var(--mer-ink-tertiary)",
-              background: activeTab === tab.key ? "var(--mer-surface-2)" : "transparent",
-              borderBottom: activeTab === tab.key ? "2px solid var(--mer-accent-500)" : "2px solid transparent",
-              borderRight: "1px solid var(--mer-stroke-hairline)",
+              fontWeight: isActive ? 600 : 500,
+              color: isActive ? "var(--mer-ink-primary)" : "var(--mer-ink-tertiary)",
+              background: isActive ? "var(--mer-surface-2)" : "transparent",
+              borderBottom: isActive ? "2px solid var(--mer-accent-500)" : "2px solid transparent",
+              borderRight: isLast ? "none" : "1px solid var(--mer-stroke-hairline)",
               cursor: "pointer",
               transition: "all 120ms",
               textAlign: "center",
@@ -382,7 +396,8 @@ export function FundamentalsPanel({ financials, company, dividendYieldPct, loadi
           >
             {tab.label}
           </button>
-        ))}
+        );
+        })}
       </div>
       <div style={{ padding: "12px 14px", minHeight: 160 }}>
         {activeTab === "income" && <IncomeStatement data={financials} loading={loading} />}
@@ -392,5 +407,6 @@ export function FundamentalsPanel({ financials, company, dividendYieldPct, loadi
         )}
       </div>
     </div>
+    </>
   );
 }

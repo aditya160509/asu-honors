@@ -17,7 +17,7 @@ export interface ChartSurfaceProps {
 
 const DEFAULT_PADDING = { top: 8, right: 8, bottom: 24, left: 64 };
 
-/** DPI-aware Canvas wrapper. Owns the rAF render loop; children draw imperatively via the callback. */
+/** DPI-aware Canvas wrapper. Owns a continuous rAF render loop; children draw imperatively every frame. */
 export function ChartSurface({
   height,
   padding = DEFAULT_PADDING,
@@ -59,15 +59,18 @@ export function ChartSurface({
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    rafRef.current = requestAnimationFrame(() => {
+    let running = true;
+    const frame = () => {
+      if (!running) return;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, width, height);
       children({ ctx, width, height, dpr });
-    });
+      rafRef.current = requestAnimationFrame(frame);
+    };
+    rafRef.current = requestAnimationFrame(frame);
 
     return () => {
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      running = false;
     };
   }, [width, height, children]);
 

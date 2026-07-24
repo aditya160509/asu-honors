@@ -36,7 +36,6 @@ export function TimeRangeSelector({ compact = false }: { compact?: boolean }) {
   }
 
   function handleClearCustom() {
-    setCustomRange(null);
     setTimeRange("ALL");
     setStart("");
     setEnd("");
@@ -64,7 +63,6 @@ export function TimeRangeSelector({ compact = false }: { compact?: boolean }) {
               type="button"
               onClick={() => {
                 setTimeRange(range.label);
-                setCustomRange(null);
                 setReplayMode(false);
               }}
               style={{
@@ -141,6 +139,8 @@ export function TimeRangeSelector({ compact = false }: { compact?: boolean }) {
               background: "var(--mer-surface-2)",
               color: "var(--mer-ink-secondary)",
               fontSize: "var(--fs-micro)",
+              fontWeight: 500,
+              letterSpacing: "0.02em",
               cursor: "pointer",
             }}
           >
@@ -172,6 +172,7 @@ export function TimeRangeSelector({ compact = false }: { compact?: boolean }) {
               gap: 4,
               fontSize: "var(--fs-micro)",
               color: "var(--mer-ink-tertiary)",
+              letterSpacing: "0.05em",
             }}
           >
             Start
@@ -198,6 +199,7 @@ export function TimeRangeSelector({ compact = false }: { compact?: boolean }) {
               gap: 4,
               fontSize: "var(--fs-micro)",
               color: "var(--mer-ink-tertiary)",
+              letterSpacing: "0.05em",
             }}
           >
             End
@@ -230,6 +232,7 @@ export function TimeRangeSelector({ compact = false }: { compact?: boolean }) {
               color: "var(--mer-accent-300)",
               fontSize: "var(--fs-micro)",
               fontWeight: 700,
+              letterSpacing: "0.04em",
               cursor: "pointer",
             }}
           >
@@ -247,6 +250,7 @@ export function TimeRangeSelector({ compact = false }: { compact?: boolean }) {
               color: "var(--mer-ink-secondary)",
               fontSize: "var(--fs-micro)",
               fontWeight: 700,
+              letterSpacing: "0.04em",
               cursor: "pointer",
             }}
           >
