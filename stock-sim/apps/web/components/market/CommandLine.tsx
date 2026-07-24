@@ -127,7 +127,7 @@ export function CommandLine({
   }
 
   return (
-    <div className="relative flex h-10 items-center gap-3 border-b border-[var(--term-divider)] bg-[var(--term-bg)] px-4">
+    <div className="relative flex h-9 items-center gap-3 border-b border-[var(--term-divider)] bg-[var(--term-bg)] px-4">
       <span className="shrink-0 font-mono text-[13px] font-semibold text-[var(--term-amber)]">SCRN&gt;</span>
 
       <div className="relative min-w-0 flex-1">
@@ -155,7 +155,7 @@ export function CommandLine({
         />
 
         {focused && suggestions.length > 0 && (
-          <div className="absolute left-0 top-full z-30 mt-1 w-64 border-t border-[var(--term-divider)] bg-[var(--term-bg)] shadow-[0_8px_24px_rgba(4,6,10,0.5)]">
+          <div className="absolute left-0 top-full z-30 mt-1 w-64 border-t border-[var(--term-divider)] bg-[var(--term-bg)] shadow-[0_8px_24px_rgba(4,6,10,0.5)] shadow-[0_0_0_1px_var(--mer-stroke-emphasis)]">
             {suggestions.map((s) => (
               <button
                 key={s}

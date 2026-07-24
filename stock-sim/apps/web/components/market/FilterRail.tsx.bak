@@ -54,7 +54,7 @@ function FilterSection({
           className={cn("text-text-tertiary transition-transform", open && "rotate-180")}
         />
       </button>
-      {open && <div className="mt-1.5">{children}</div>}
+      {open {open && <div className="mt-2">{open && <div className="mt-2"> <div className="mt-1.5">{children}</div>}
     </div>
   );
 }
@@ -72,7 +72,7 @@ export function FilterRail({
 
   if (collapsed) {
     return (
-      <div className="flex w-10 shrink-0 flex-col items-center gap-2 border-r border-border py-3">
+      <div className="flex w-10 shrink-0 flex-col items-center gap-2 border-r border-border pt-1">
         <Button variant="ghost" size="icon" onClick={onToggleCollapsed} aria-label="Expand filters" className="h-7 w-7">
           <ChevronsRight size={14} />
         </Button>

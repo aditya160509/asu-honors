@@ -45,7 +45,7 @@ export function StatsBar({ companies }: StatsBarProps) {
   }, [companies]);
 
   return (
-    <div className="flex items-center gap-3 border-b border-border/60 bg-bg-secondary px-3 py-1.5">
+    <div className="flex items-center gap-2 border-b border-border/60 bg-bg-secondary px-3 py-1.5">
       <Stat label="Companies">{count.toLocaleString()}</Stat>
       <Divider />
       <Stat label="Avg Price">{avgPrice != null ? formatPrice(avgPrice) : "—"}</Stat>

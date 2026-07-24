@@ -69,7 +69,7 @@ export function TimeMachineControl({ asOfDate, maxDate, onDateChange }: TimeMach
           "flex h-6 items-center gap-1.5 rounded-sm border px-2 uppercase tracking-[0.04em] transition-colors",
           isLive
             ? "border-[var(--term-up)] text-[var(--term-up)]"
-            : "border-transparent text-[var(--term-ink-secondary)] hover:border-[var(--term-divider)] hover:text-[var(--term-ink)]"
+            : "border-[var(--term-divider)] text-[var(--term-ink-secondary)] hover:border-[var(--term-hairline)] hover:text-[var(--term-ink)]"
         )}
       >
         <Radio size={12} />
@@ -108,7 +108,7 @@ export function TimeMachineControl({ asOfDate, maxDate, onDateChange }: TimeMach
                   "flex h-6 items-center rounded-sm border px-1.5 uppercase tracking-[0.04em] transition-colors",
                   stepDays === d
                     ? "border-[var(--term-amber)] text-[var(--term-amber)]"
-                    : "border-transparent text-[var(--term-ink-tertiary)] hover:text-[var(--term-ink-secondary)]"
+                    : "border-[var(--term-divider)] text-[var(--term-ink-tertiary)] hover:border-[var(--term-hairline)] hover:text-[var(--term-ink-secondary)]"
                 )}
               >
                 {d}d

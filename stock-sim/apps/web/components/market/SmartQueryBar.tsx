@@ -66,7 +66,7 @@ export function SmartQueryBar({ value, onChange, resultCount }: SmartQueryBarPro
       </button>
 
       {open && (
-        <div className="absolute left-0 top-full z-40 mt-1 w-[420px] border border-[var(--term-divider)] bg-[var(--term-bg)] p-3 shadow-[0_8px_24px_rgba(4,6,10,0.5)]">
+        <div className="absolute left-0 top-full z-40 mt-1 w-[420px] border border-[var(--term-divider)] bg-[var(--term-bg)] p-3 shadow-[0_8px_24px_rgba(4,6,10,0.5)] shadow-[0_0_0_1px_var(--mer-stroke-emphasis)]">
           <div className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.04em] text-[var(--term-ink-tertiary)]">
             Describe criteria — combine any metrics with &quot;and&quot;
           </div>

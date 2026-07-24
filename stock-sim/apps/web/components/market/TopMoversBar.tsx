@@ -117,9 +117,9 @@ export function TopMoversBar({ companies, onActivateRow }: TopMoversBarProps) {
   return (
     <div className="flex items-center gap-3 overflow-x-auto rounded-md border border-border bg-bg-secondary px-3 py-2 scrollbar-none">
       <Section label="Most Volatile" chips={volatile} onActivateRow={onActivateRow} />
-      <div className="mx-0.5 h-4 w-px shrink-0 bg-border/40" />
+      <div className="mx-1 h-5 w-px shrink-0 bg-border/40" />
       <Section label="Biggest IV Gap" chips={ivGap} onActivateRow={onActivateRow} />
-      <div className="mx-0.5 h-4 w-px shrink-0 bg-border/40" />
+      <div className="mx-1 h-5 w-px shrink-0 bg-border/40" />
       <Section label="Largest Cap" chips={largeCap} onActivateRow={onActivateRow} />
     </div>
   );

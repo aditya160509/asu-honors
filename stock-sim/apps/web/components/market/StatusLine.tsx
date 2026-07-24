@@ -56,7 +56,7 @@ export function StatusLine({
   );
 
   return (
-    <div className="flex h-[26px] items-center gap-4 border-b border-[var(--term-hairline)] bg-[var(--term-bg)] px-4 font-mono text-[11px] uppercase tracking-[0.04em]">
+    <div className="flex h-[26px] items-center gap-3 border-b border-[var(--term-hairline)] bg-[var(--term-bg)] px-4 font-mono text-[11px] uppercase tracking-[0.04em]">
       <span className="flex items-center gap-1.5 truncate">
         <span className="text-[var(--term-amber)]">Filters</span>
         {tokens.length === 0 ? (

@@ -21,7 +21,7 @@ export interface PreviewDrawerProps {
 
 function StatRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="flex items-center justify-between py-1.5">
+    <div className="flex items-center justify-between py-1">
       <span className="text-small text-text-secondary">{label}</span>
       <span className="num text-body text-text-primary">{value}</span>
     </div>

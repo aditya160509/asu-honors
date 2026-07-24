@@ -74,7 +74,7 @@ export function CompareDrawer({ open, onClose, tickers, companies, onRemove }: C
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-[900px] w-[92vw] p-0 gap-0">
         <div ref={contentRef}>
-          <div className="flex items-center justify-between border-b border-border px-5 py-3.5">
+          <div className="flex items-center justify-between border-b border-border px-5 py-3">
             <DialogTitle className="mb-0 text-h3 font-semibold">Compare companies</DialogTitle>
           </div>
 
@@ -87,11 +87,11 @@ export function CompareDrawer({ open, onClose, tickers, companies, onRemove }: C
               <table className="w-full border-collapse">
                 <thead>
                   <tr className="border-b border-border bg-bg-secondary">
-                    <th className="w-32 px-5 py-2.5 text-left text-micro font-medium uppercase text-text-secondary">
+                    <th className="w-32 px-5 py-2 text-left text-micro font-medium uppercase text-text-secondary">
                       Metric
                     </th>
                     {selected.map((c) => (
-                      <th key={c.ticker} className="min-w-[160px] px-4 py-2.5 text-right align-top">
+                      <th key={c.ticker} className="min-w-[160px] px-4 py-2 text-right align-top">
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0 text-left">
                             <Link href={`/companies/${c.ticker}`} className="num block truncate font-bold uppercase text-text-primary hover:text-accent">

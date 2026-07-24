@@ -42,7 +42,7 @@ export function SavedScreensBar({ screens, activeId, onSelect, onRemove }: Saved
                   e.stopPropagation();
                   onRemove(screen.id);
                 }}
-                className="text-text-tertiary opacity-0 hover:text-negative group-hover:opacity-100 ml-0.5"
+                className="text-text-tertiary opacity-0 hover:text-negative group-hover:opacity-100 ml-1 transition-opacity"
               >
                 <X size={10} />
               </button>

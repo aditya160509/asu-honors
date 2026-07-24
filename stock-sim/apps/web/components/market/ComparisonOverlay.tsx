@@ -204,7 +204,7 @@ export function ComparisonOverlay({
           {selected.map((c, i) => (
             <div
               key={c.ticker}
-              className="flex items-center gap-1 rounded-sm border border-border/50 px-1.5 py-0.5"
+              className="flex items-center gap-1 rounded-sm border border-border/50 px-2 py-0.5"
               onMouseEnter={() => setActiveLine(i)}
               onMouseLeave={() => setActiveLine(null)}
             >

@@ -169,7 +169,7 @@ export function ScreenerToolbar({
           label="Sort"
         />
         {sortOpen && (
-          <div className="absolute left-0 top-full z-40 mt-1 w-52 border border-[var(--term-divider)] bg-[var(--term-bg)] py-1 shadow-[0_8px_24px_rgba(4,6,10,0.5)]">
+          <div className="absolute left-0 top-full z-40 mt-1 w-52 border border-[var(--term-divider)] bg-[var(--term-bg)] py-1 shadow-[0_8px_24px_rgba(4,6,10,0.5)] shadow-[0_0_0_1px_var(--mer-stroke-emphasis)]">
             {orderedColumns.map((col) => (
               <button
                 key={col.key}
@@ -204,14 +204,14 @@ export function ScreenerToolbar({
       <div className="relative shrink-0" ref={colsRef}>
         <ToolbarButton active={colsOpen} onClick={() => setColsOpen((v) => !v)} icon={<Columns3 size={12} />} label="Columns" />
         {colsOpen && (
-          <div className="absolute left-0 top-full z-40 mt-1 w-64 border border-[var(--term-divider)] bg-[var(--term-bg)] py-1 shadow-[0_8px_24px_rgba(4,6,10,0.5)]">
-            <div className="px-3 py-1 font-mono text-[10px] uppercase tracking-[0.04em] text-[var(--term-ink-tertiary)]">
+          <div className="absolute left-0 top-full z-40 mt-1 w-64 border border-[var(--term-divider)] bg-[var(--term-bg)] py-1 shadow-[0_8px_24px_rgba(4,6,10,0.5)] shadow-[0_0_0_1px_var(--mer-stroke-emphasis)]">
+            <div className="mb-1 px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.04em] text-[var(--term-ink-tertiary)]">
               Visible columns
             </div>
             {orderedColumns.map((col, i) => {
               const isHidden = hiddenColumns.includes(col.key);
               return (
-                <div key={col.key} className="flex items-center justify-between px-3 py-1 font-mono text-[11px]">
+                <div key={col.key} className="flex items-center justify-between px-3 py-1.5 font-mono text-[11px]">
                   <button
                     type="button"
                     onClick={() => onToggleColumn(col.key)}
@@ -246,11 +246,11 @@ export function ScreenerToolbar({
                 </div>
               );
             })}
-            <div className="mt-1 border-t border-[var(--term-hairline)] px-3 pt-1">
+            <div className="mt-1.5 border-t border-[var(--term-hairline)] px-3 pt-1.5">
               <button
                 type="button"
                 onClick={onResetColumns}
-                className="py-1 font-mono text-[11px] text-[var(--term-ink-secondary)] hover:text-[var(--term-ink)]"
+                className="py-1.5 font-mono text-[11px] text-[var(--term-ink-secondary)] hover:text-[var(--term-ink)]"
               >
                 Reset to default
               </button>

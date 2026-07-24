@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { ArrowDown, ArrowUp, ChevronRight, TriangleAlert } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronRight } from "lucide-react";
 import { cn, formatLarge, formatPct, formatPrice } from "@/lib/utils";
 import { DEFAULT_ROW_HEIGHT, PINNED_COLUMN_WIDTH } from "@/lib/market/columns";
 import { sectorCode } from "@/lib/market/sectorAbbrev";
@@ -522,7 +522,7 @@ export function ExplorerTable({
       tabIndex={0}
       role="grid"
       aria-label="Market screener results"
-      className="relative min-h-0 flex-1 overflow-auto outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent/30"
+      className="relative min-h-0 flex-1 overflow-auto outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[color:var(--term-accent)]/30"
     >
       <div style={{ minWidth: totalWidth }}>
         {/* Header */}
@@ -568,10 +568,10 @@ export function ExplorerTable({
                   <div
                     role="separator"
                     aria-label={`Resize ${col.header} column`}
-                    className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize group/resize hover:bg-accent/30 transition-colors z-10"
+                    className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize group/resize hover:bg-[color:var(--term-accent)]/30 transition-colors z-10"
                     onMouseDown={(e) => handleColumnResizeStart(col.key, e)}
                   >
-                    <div className="absolute right-0 top-1 bottom-1 w-px bg-border/0 group-hover/resize:bg-accent/50 transition-colors" />
+                    <div className="absolute right-0 top-1 bottom-1 w-px bg-[var(--term-hairline)]/0 group-hover/resize:bg-[color:var(--term-accent)]/50 transition-colors" />
                   </div>
                 )}
               </div>

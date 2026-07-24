@@ -181,7 +181,7 @@ export function Toolbar({
           aria-pressed={density === "compact"}
           onClick={() => onDensityChange("compact")}
           className={cn(
-            "flex h-5 w-5 items-center justify-center rounded-sm transition-colors",
+            "flex h-6 w-6 items-center justify-center rounded-sm transition-colors",
             density === "compact" ? "bg-bg-hover text-text-primary" : "text-text-tertiary hover:text-text-primary"
           )}
         >
@@ -193,7 +193,7 @@ export function Toolbar({
           aria-pressed={density === "comfortable"}
           onClick={() => onDensityChange("comfortable")}
           className={cn(
-            "flex h-5 w-5 items-center justify-center rounded-sm transition-colors",
+            "flex h-6 w-6 items-center justify-center rounded-sm transition-colors",
             density === "comfortable" ? "bg-bg-hover text-text-primary" : "text-text-tertiary hover:text-text-primary"
           )}
         >

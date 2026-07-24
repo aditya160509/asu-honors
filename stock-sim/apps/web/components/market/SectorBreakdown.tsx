@@ -165,7 +165,7 @@ export function SectorBreakdown({ companies, height = 280 }: SectorBreakdownProp
 
   return (
     <div className="relative rounded-md border border-border bg-bg-secondary p-3">
-      <div className="mb-2 flex items-center justify-between">
+      <div className="mb-1.5 flex items-center justify-between">
         <h3 className="text-small font-semibold text-text-primary">Sector Breakdown</h3>
         <span className="text-micro text-text-tertiary">{sectors.length} sectors</span>
       </div>
