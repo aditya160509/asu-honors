@@ -176,24 +176,26 @@ export function PriceChart({
     prevLenRef.current = ohlc.length;
 
     if (tickerChanged || prevLen === 0) {
-      // New instrument (or first load) — nothing to preserve, show the default window.
+      // New instrument (or first load) — reset to default range.
       updateRange(defaultRange(ohlc.length));
       return;
     }
     if (ohlc.length === prevLen) return;
 
-    // Same ticker, new candles arrived (e.g. live auto-advance). If the user
-    // was already looking at the latest bar, keep following it — same zoom
-    // width, window slides right — instead of yanking their pan/zoom back to
-    // the default every time a new tick lands. If they'd panned into history
-    // to look at older data, leave their view alone.
-    const wasAtLiveEdge = rangeRef.current.to >= prevLen;
-    if (wasAtLiveEdge) {
-      const span = rangeRef.current.to - rangeRef.current.from;
-      const to = ohlc.length;
-      const from = Math.max(0, to - span);
-      updateRange({ from, to });
+    // Data grew — live auto-advance
+    if (ohlc.length > prevLen) {
+      const wasAtLiveEdge = rangeRef.current.to >= prevLen;
+      if (wasAtLiveEdge) {
+        const span = rangeRef.current.to - rangeRef.current.from;
+        const to = ohlc.length;
+        const from = Math.max(0, to - span);
+        updateRange({ from, to });
+      }
+      return;
     }
+
+    // Data shrunk — time range changed (e.g. ALL → 1D): reset to default.
+    updateRange(defaultRange(ohlc.length));
   }, [ohlc.length, ticker, updateRange]);
 
   // Computed once per data/indicator-selection change, not per render frame —
