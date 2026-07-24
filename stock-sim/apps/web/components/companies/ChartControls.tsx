@@ -35,17 +35,17 @@ export function ChartControls({
 }: ChartControlsProps) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-2 pb-3">
-      <div className="flex items-center gap-1">
+      <div className="flex items-center rounded-mer-xs bg-mer-surface-1 p-0.5">
         {TIMEFRAMES.map((tf) => (
           <button
             key={tf}
             type="button"
             onClick={() => onTimeframeChange(tf)}
             className={cn(
-              "h-7 rounded-sm px-2.5 text-micro font-medium transition-colors",
+              "h-7 rounded-[3px] px-2.5 text-micro font-medium tracking-wide transition-all duration-fast ease-out-expo focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-mer-accent-500",
               timeframe === tf
-                ? "bg-accent-dim text-accent"
-                : "text-text-tertiary hover:bg-bg-hover hover:text-text-secondary"
+                ? "bg-mer-surface-3 text-mer-ink-primary shadow-mer-rest"
+                : "text-mer-ink-tertiary hover:bg-mer-surface-2 hover:text-mer-ink-secondary"
             )}
           >
             {tf}

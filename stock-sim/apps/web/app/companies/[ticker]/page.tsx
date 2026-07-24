@@ -131,8 +131,8 @@ export default function CompanyDetailPage() {
       )}
 
       {company.data && (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_360px]">
-          <div className="flex flex-col gap-4">
+        <div className="grid grid-cols-1 gap-4 lg:gap-6 lg:grid-cols-[1fr_360px]">
+          <div className="flex flex-col gap-4 lg:gap-5">
             <ExecutiveTearSheet
               company={company.data}
               latestBar={latestBar}
@@ -214,7 +214,7 @@ export default function CompanyDetailPage() {
             <CompanyNewsSection companyId={company.data.id} ticker={ticker} />
           </div>
 
-          <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-4 lg:gap-5">
             <ValuationCard
               valuation={valuation.data}
               eps={financials.data?.income_statement?.eps as number | undefined}

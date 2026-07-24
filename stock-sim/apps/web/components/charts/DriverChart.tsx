@@ -34,7 +34,7 @@ export function DriverChart({ drivers }: DriverChartProps) {
   if (drivers.length === 0) return <EmptyState title="No driver data available." />;
 
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className="flex flex-col gap-2">
       {drivers.map((d) => {
         const scorePct = ((d.value + 1) / 2) * 100;
         const label = DRIVER_LABELS[d.driver_key] ?? d.driver_key.toUpperCase();
@@ -42,11 +42,11 @@ export function DriverChart({ drivers }: DriverChartProps) {
         return (
           <Tooltip key={d.driver_key}>
             <TooltipTrigger asChild>
-              <div className="flex items-center gap-3">
-                <span className="text-small text-text-secondary w-40 shrink-0">{label}</span>
-                <div className="flex-1 h-4 bg-bg-tertiary rounded-sm overflow-hidden relative">
+              <div className="group flex items-center gap-3 cursor-help">
+                <span className="text-small text-mer-ink-secondary w-40 shrink-0 tracking-wide">{label}</span>
+                <div className="flex-1 h-4 rounded-[3px] bg-mer-surface-3 overflow-hidden relative ring-1 ring-inset ring-white/[0.04] transition-all duration-fast group-hover:ring-mer-accent-500/20">
                   <div
-                    className="h-full origin-left transition-transform duration-[400ms] ease-out"
+                    className="h-full origin-left transition-transform duration-[400ms] ease-out group-hover:brightness-110"
                     style={{
                       width: "100%",
                       backgroundColor: scoreToColor(scorePct),
@@ -54,10 +54,10 @@ export function DriverChart({ drivers }: DriverChartProps) {
                     }}
                   />
                 </div>
-                <span className="num text-small text-text-primary w-14 text-right">{d.value.toFixed(2)}</span>
+                <span className="num text-small text-mer-ink-primary w-14 text-right font-medium tabular-nums tracking-tight">{d.value.toFixed(2)}</span>
               </div>
             </TooltipTrigger>
-            <TooltipContent>
+            <TooltipContent className="shadow-mer-raised">
               {label} · weight {(d.weight * 100).toFixed(0)}% · contribution {d.contribution.toFixed(3)}
               {description && <div className="mt-1 text-text-secondary">{description}</div>}
             </TooltipContent>

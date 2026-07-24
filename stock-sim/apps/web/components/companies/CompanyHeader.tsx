@@ -48,7 +48,7 @@ export function CompanyHeader({ company, dayChangePct, history }: CompanyHeaderP
   const sparkPositive = sparkData.length >= 2 ? sparkData[sparkData.length - 1].value >= sparkData[0].value : true;
 
   return (
-    <div className="mb-5 flex flex-col gap-3">
+    <div className="mb-6 flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-4">
         <button
           type="button"
@@ -57,46 +57,46 @@ export function CompanyHeader({ company, dayChangePct, history }: CompanyHeaderP
           aria-pressed={isWatched}
           aria-label={isWatched ? `Remove ${company.ticker} from watchlist` : `Add ${company.ticker} to watchlist`}
           className={cn(
-            "flex h-9 w-9 shrink-0 items-center justify-center rounded-mer-sm border transition-colors",
-            "border-[color:var(--mer-stroke-hairline)] bg-mer-surface-2 hover:border-[color:var(--mer-stroke-emphasis)]",
+            "flex h-9 w-9 shrink-0 items-center justify-center rounded-mer-sm border transition-all duration-fast ease-out-expo",
+            "border-[color:var(--mer-stroke-hairline)] bg-mer-surface-2 hover:border-[color:var(--mer-stroke-emphasis)] hover:shadow-mer-glow-accent",
             "focus-visible:outline focus-visible:outline-2 focus-visible:outline-[color:var(--mer-accent-500)] focus-visible:outline-offset-2",
-            "disabled:opacity-50"
+            "disabled:opacity-50 active:scale-90"
           )}
         >
           <Star
             size={16}
-            className={isWatched ? "fill-mer-accent-500 text-mer-accent-500" : "text-mer-ink-tertiary"}
+            className={cn(isWatched ? "fill-mer-accent-500 text-mer-accent-500" : "text-mer-ink-tertiary", "transition-colors duration-fast")}
           />
         </button>
 
         <Avatar displayName={company.name} colorSeed={company.ticker} className="h-9 w-9 text-base" />
-        <span className="num text-h2 font-bold text-mer-ink-primary">{company.ticker}</span>
+        <span className="num text-h2 font-bold tracking-tight text-mer-ink-primary">{company.ticker}</span>
         <span className="max-w-[280px] truncate text-base text-mer-ink-secondary">{company.name}</span>
         <Badge>{company.industry_name}</Badge>
 
         <div className="flex-1" />
 
         {sparkData.length >= 2 && (
-          <div className="hidden w-28 sm:block">
+          <div className="hidden w-28 transition-opacity duration-base hover:opacity-80 sm:block">
             <MiniAreaSpark data={sparkData} height={36} color={sparkPositive ? cssVar('--positive') : cssVar('--negative')} />
           </div>
         )}
 
         <div className="flex flex-col items-end gap-0.5">
-          <span className="num text-h2 font-bold text-mer-ink-primary">
+          <span className="num text-h1 font-bold text-mer-ink-primary">
             {formatPrice(company.latest_price ? Number(company.latest_price) : null)}
           </span>
           <div className="flex items-center gap-2">
             <DeltaBadge value={dayChangePct} />
             {ivGap != null && (
-              <span className="num text-micro text-mer-ink-tertiary">IV gap {formatPct(ivGap)}</span>
+              <span className="num text-micro tracking-tight text-mer-ink-tertiary">IV gap {formatPct(ivGap)}</span>
             )}
           </div>
         </div>
       </div>
 
       {company.description && (
-        <p className="max-w-3xl text-sm text-mer-ink-secondary">{company.description}</p>
+        <p className="max-w-3xl text-sm leading-relaxed text-mer-ink-secondary">{company.description}</p>
       )}
 
       <div className="h-px w-full bg-gradient-to-r from-transparent via-mer-accent-500 to-transparent opacity-70" />
@@ -106,7 +106,7 @@ export function CompanyHeader({ company, dayChangePct, history }: CompanyHeaderP
 
 export function CompanyHeaderSkeleton() {
   return (
-    <div className="mb-5 flex flex-col gap-3">
+    <div className="mb-6 flex flex-col gap-3">
       <div className="flex items-center gap-4">
         <Skeleton width={36} height={36} className="rounded-mer-sm" />
         <Skeleton width={80} height={28} />

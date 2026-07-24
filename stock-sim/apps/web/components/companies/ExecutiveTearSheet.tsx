@@ -17,7 +17,7 @@ export interface ExecutiveTearSheetProps {
  * to animate, it's a Low/Medium/High label derived from the live volatility distribution. */
 function RiskTierTile({ tier, loading }: { tier: RiskTier | null | undefined; loading?: boolean }) {
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className="flex flex-col gap-1.5 rounded-mer-xs p-2 -m-2 transition-colors duration-base hover:bg-mer-surface-3">
       <span className="text-micro font-medium uppercase text-mer-ink-tertiary">Risk Tier</span>
       {loading || tier == null ? (
         <span className="num text-h3 font-semibold text-mer-ink-tertiary">{loading ? "—" : "N/A"}</span>
@@ -58,7 +58,7 @@ export function ExecutiveTearSheet({ company, latestBar, dayChangePct, riskTier,
 
   return (
     <DashboardPanel eyebrow="Snapshot" title="Executive Tear Sheet" edge="accent">
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-x-3 gap-y-5 sm:grid-cols-3 lg:grid-cols-4">
         <NullableKpi label="Market Cap" value={company.market_cap} format="large" loading={loading} />
         <NullableKpi label="P/E Ratio" value={company.pe_ratio} format="number" loading={loading} />
         <NullableKpi label="Intrinsic Value" value={company.latest_iv} format="price" loading={loading} />
