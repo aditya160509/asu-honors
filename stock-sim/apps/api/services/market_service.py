@@ -286,7 +286,7 @@ def get_company_detail(db: Session, ticker: str, timeline_id: int) -> CompanyDet
     if latest_price and company.fair_pe:
         latest_inc = (
             db.query(IncomeStatement)
-            .filter_by(company_id=company.id)
+            .filter_by(company_id=company.id, timeline_id=timeline_id)
             .order_by(IncomeStatement.fiscal_period.desc())
             .first()
         )
@@ -295,7 +295,7 @@ def get_company_detail(db: Session, ticker: str, timeline_id: int) -> CompanyDet
 
     latest_cfs = (
         db.query(CompanyFactorScore)
-        .filter_by(company_id=company.id)
+        .filter_by(company_id=company.id, timeline_id=timeline_id)
         .order_by(CompanyFactorScore.fiscal_period.desc())
         .first()
     )
@@ -407,13 +407,23 @@ def _statement_row_to_dict(row) -> Optional[dict]:
     }
 
 
-def get_financials(db: Session, ticker: str, period: Optional[str] = None) -> FinancialStatementResponse:
-    """Get income/balance/cashflow statements for the latest (or specified) fiscal period."""
+def get_financials(
+    db: Session, ticker: str, period: Optional[str] = None, timeline_id: int = 1,
+) -> FinancialStatementResponse:
+    """Get income/balance/cashflow statements for the latest (or specified) fiscal period.
+
+    Scoped to `timeline_id` (default = live). Without it, `.order_by(fiscal_period
+    .desc())` picks the newest period across ALL timelines, so a branch whose
+    fast-forward generated later-dated quarters (e.g. a 2028 branch off a live
+    market only simulated to 2027) leaks its financials -- including its EPS --
+    onto the live company page, which is how EPS could read $0.00 while the
+    live-scoped valuation showed a healthy intrinsic value.
+    """
     company = db.query(Company).filter_by(ticker=ticker.upper()).first()
     if company is None:
         raise NotFoundError(f"Company '{ticker}' not found")
 
-    inc_query = db.query(IncomeStatement).filter_by(company_id=company.id)
+    inc_query = db.query(IncomeStatement).filter_by(company_id=company.id, timeline_id=timeline_id)
     if period:
         inc_query = inc_query.filter_by(fiscal_period=period)
     else:
@@ -423,8 +433,12 @@ def get_financials(db: Session, ticker: str, period: Optional[str] = None) -> Fi
         raise NotFoundError(f"No financial statements found for '{ticker}'")
 
     fiscal_period = inc.fiscal_period
-    bal = db.query(BalanceSheet).filter_by(company_id=company.id, fiscal_period=fiscal_period).first()
-    cf = db.query(CashFlowStatement).filter_by(company_id=company.id, fiscal_period=fiscal_period).first()
+    bal = db.query(BalanceSheet).filter_by(
+        company_id=company.id, timeline_id=timeline_id, fiscal_period=fiscal_period,
+    ).first()
+    cf = db.query(CashFlowStatement).filter_by(
+        company_id=company.id, timeline_id=timeline_id, fiscal_period=fiscal_period,
+    ).first()
 
     return FinancialStatementResponse(
         fiscal_period=fiscal_period,
@@ -434,15 +448,21 @@ def get_financials(db: Session, ticker: str, period: Optional[str] = None) -> Fi
     )
 
 
-def get_financials_history(db: Session, ticker: str, limit: int = 8) -> list[FinancialStatementResponse]:
-    """Get income/balance/cashflow statements for the last `limit` fiscal periods, most recent first."""
+def get_financials_history(
+    db: Session, ticker: str, limit: int = 8, timeline_id: int = 1,
+) -> list[FinancialStatementResponse]:
+    """Get income/balance/cashflow statements for the last `limit` fiscal periods, most recent first.
+
+    Scoped to `timeline_id` (default = live) for the same reason as get_financials:
+    an unscoped query mixes in branch timelines' later-dated quarters.
+    """
     company = db.query(Company).filter_by(ticker=ticker.upper()).first()
     if company is None:
         raise NotFoundError(f"Company '{ticker}' not found")
 
     incs = (
         db.query(IncomeStatement)
-        .filter_by(company_id=company.id)
+        .filter_by(company_id=company.id, timeline_id=timeline_id)
         .order_by(IncomeStatement.fiscal_period.desc())
         .limit(limit)
         .all()
@@ -454,13 +474,17 @@ def get_financials_history(db: Session, ticker: str, limit: int = 8) -> list[Fin
     bal_by_period = {
         b.fiscal_period: b
         for b in db.query(BalanceSheet).filter(
-            BalanceSheet.company_id == company.id, BalanceSheet.fiscal_period.in_(periods)
+            BalanceSheet.company_id == company.id,
+            BalanceSheet.timeline_id == timeline_id,
+            BalanceSheet.fiscal_period.in_(periods),
         )
     }
     cf_by_period = {
         c.fiscal_period: c
         for c in db.query(CashFlowStatement).filter(
-            CashFlowStatement.company_id == company.id, CashFlowStatement.fiscal_period.in_(periods)
+            CashFlowStatement.company_id == company.id,
+            CashFlowStatement.timeline_id == timeline_id,
+            CashFlowStatement.fiscal_period.in_(periods),
         )
     }
 

@@ -114,6 +114,41 @@ def test_get_financials(client, test_db, test_company, test_timeline):
     assert float(body["income_statement"]["revenue"]) == 1000000.0
 
 
+def test_get_financials_ignores_later_dated_branch_quarter(client, test_db, test_company, test_timeline):
+    """Regression: the live financials endpoint must not pick up a branch
+    timeline's later-dated quarter.
+
+    A branch fast-forwarded past the live sim date generates income statements
+    with fiscal periods newer than any on the live timeline. `order_by(
+    fiscal_period.desc())` without a timeline filter would return that branch
+    row -- leaking its EPS (which can be 0 for a collapsed-revenue branch) onto
+    the live company page while the live-scoped valuation still read healthy.
+    """
+    from db.models import IncomeStatement, Timeline
+
+    # Live quarter: real EPS.
+    test_db.add(IncomeStatement(
+        company_id=1, timeline_id=test_timeline.id, fiscal_period="2027Q3",
+        revenue=280_000_000, cogs=150_000_000, gross_profit=130_000_000,
+        operating_expenses=40_000_000, ebitda=90_000_000, depreciation_amortization=10_000_000,
+        ebit=80_000_000, interest_expense=5_000_000, pretax_income=75_000_000, tax=18_750_000,
+        net_profit=56_250_000, eps=0.5625, shares_diluted=100_000_000,
+    ))
+    # Branch quarter: LATER period, EPS 0 (collapsed-revenue branch).
+    test_db.add(Timeline(id=2, name="Branch", rng_seed=7, is_live=False, parent_timeline_id=1))
+    test_db.add(IncomeStatement(
+        company_id=1, timeline_id=2, fiscal_period="2028Q2",
+        revenue=8800, cogs=5000, gross_profit=3800, operating_expenses=2000, ebitda=1800,
+        depreciation_amortization=300, ebit=1500, interest_expense=200, pretax_income=1300,
+        tax=0, net_profit=1300, eps=0.0, shares_diluted=90_000_000,
+    ))
+    test_db.commit()
+
+    body = client.get("/api/v1/companies/TST/financials").json()
+    assert body["fiscal_period"] == "2027Q3"  # live, not the branch's 2028Q2
+    assert float(body["income_statement"]["eps"]) == 0.5625
+
+
 def test_get_valuation(client, test_db, test_company, test_timeline):
     test_db.add(
         CompanyFactorScore(

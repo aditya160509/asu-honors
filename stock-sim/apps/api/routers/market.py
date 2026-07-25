@@ -73,18 +73,20 @@ def get_company_drivers(
 def get_company_financials(
     ticker: str,
     period: Optional[str] = Query(default=None),
+    timeline_id: int = Query(default=settings.default_timeline_id),
     db: Session = Depends(get_db),
 ) -> FinancialStatementResponse:
-    return market_service.get_financials(db, ticker, period)
+    return market_service.get_financials(db, ticker, period, timeline_id)
 
 
 @router.get("/companies/{ticker}/financials/history", response_model=list[FinancialStatementResponse])
 def get_company_financials_history(
     ticker: str,
     limit: int = Query(default=8, ge=1, le=40),
+    timeline_id: int = Query(default=settings.default_timeline_id),
     db: Session = Depends(get_db),
 ) -> list[FinancialStatementResponse]:
-    return market_service.get_financials_history(db, ticker, limit)
+    return market_service.get_financials_history(db, ticker, limit, timeline_id)
 
 
 @router.get("/companies/{ticker}/valuation", response_model=ValuationResponse)

@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from db.models import Company, CompanyFactorScore, ConfigParameter, IncomeStatement
+from db.models import Company, CompanyFactorScore, ConfigParameter, IncomeStatement, Timeline
 from engine.valuation import (
     fair_peg, growth_score_to_rate, fair_pe_from_peg,
     DEFAULT_GROWTH_RATE_MIN, DEFAULT_GROWTH_RATE_MAX,
@@ -31,12 +31,20 @@ def _load_neutral_pegs(session: Session) -> dict[int, float]:
 
 
 def _load_latest_eps(session: Session) -> dict[int, float]:
-    """Latest EPS per company."""
+    """Latest EPS per company on the LIVE timeline.
+
+    Scoped to the live timeline so a branch's later-dated (e.g. 2028) quarter
+    can't be picked up as "latest" and written into the shared, timeline-agnostic
+    Company.intrinsic_value cache -- the same leak that made a live company page
+    read EPS $0.00 off a branch whose fast-forward ran past the live sim date.
+    """
+    live = session.query(Timeline).filter_by(is_live=True).first()
+    live_id = live.id if live else 1
     eps_by_company: dict[int, float] = {}
     for c in session.query(Company).all():
         inc = (
             session.query(IncomeStatement)
-            .filter_by(company_id=c.id)
+            .filter_by(company_id=c.id, timeline_id=live_id)
             .order_by(IncomeStatement.fiscal_period.desc())
             .first()
         )
