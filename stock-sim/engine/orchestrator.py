@@ -1962,14 +1962,43 @@ def _generate_fake_quarterly_financials(
     # shows up as better cost control too, not just top-line growth.
     if latest_inc:
         prev_rev = float(latest_inc.revenue)
+        # Cost ratios mean-revert toward a stable, quality-adjusted TARGET each
+        # quarter instead of compounding a fixed quality multiplier on the prior
+        # quarter's ratio. The old `prev_ratio * quality_adj` form re-applied the
+        # same directional factor every quarter, so a below-average company's cost
+        # ratios ratcheted geometrically to the clamp ceiling (AAP's opex/rev went
+        # 11% -> 31% over 7 quarters) and its margins -- and EPS -- collapsed toward
+        # zero, while above-average companies drifted the other way without bound.
+        # A company's moat/management quality should set the LEVEL its costs settle
+        # at, not a perpetual rate of change: so anchor to the company's baseline
+        # (first income statement on this timeline) ratio, tilt it by the quality
+        # factor to form a target, and move the prior ratio a fraction of the way
+        # toward that target -- a stable Ornstein-Uhlenbeck-style reversion.
+        COST_REVERSION = 0.30
+        base_inc = (
+            session.query(IncomeStatement)
+            .filter_by(company_id=company.id, timeline_id=timeline_id)
+            .order_by(IncomeStatement.fiscal_period.asc())
+            .first()
+        )
+        base_rev = float(base_inc.revenue) if base_inc and float(base_inc.revenue) > 0 else prev_rev
+        base_cogs_r = float(base_inc.cogs) / base_rev if base_inc and base_rev > 0 else 0.55
+        base_opex_r = (
+            float(base_inc.operating_expenses) / base_rev if base_inc and base_rev > 0 else 0.22
+        )
+
         moat_adj = 1.0 - (moat_score - 50.0) / 100.0 * 0.15  # ±7.5% around 50
-        prev_cogs_r = float(latest_inc.cogs) / prev_rev if prev_rev > 0 else 0.5
-        cogs_r = prev_cogs_r * moat_adj * (1 + rng.gauss(0, 0.02)) - margin_bias
+        target_cogs_r = base_cogs_r * moat_adj
+        prev_cogs_r = float(latest_inc.cogs) / prev_rev if prev_rev > 0 else base_cogs_r
+        cogs_r = prev_cogs_r + COST_REVERSION * (target_cogs_r - prev_cogs_r)
+        cogs_r = cogs_r * (1 + rng.gauss(0, 0.02)) - margin_bias
         cogs_r = _clamp_band(cogs_r, 0.25, 0.80)
 
         mgmt_adj = 1.0 - (mgmt_qual - 50.0) / 100.0 * 0.12  # ±6% around 50
-        prev_opex_r = float(latest_inc.operating_expenses) / prev_rev if prev_rev > 0 else 0.25
-        opex_r = prev_opex_r * mgmt_adj * (1 + rng.gauss(0, 0.025)) - margin_bias
+        target_opex_r = base_opex_r * mgmt_adj
+        prev_opex_r = float(latest_inc.operating_expenses) / prev_rev if prev_rev > 0 else base_opex_r
+        opex_r = prev_opex_r + COST_REVERSION * (target_opex_r - prev_opex_r)
+        opex_r = opex_r * (1 + rng.gauss(0, 0.025)) - margin_bias
         opex_r = _clamp_band(opex_r, 0.08, 0.45)
 
         prev_da_r = float(latest_inc.depreciation_amortization) / prev_rev if prev_rev > 0 else 0.04
@@ -2010,9 +2039,15 @@ def _generate_fake_quarterly_financials(
         shares_dil = prev_shares_dil * (1 + rng.gauss(0, 0.002))
     else:
         shares_dil = shares * rng.uniform(1.0, 1.02)
-    # net_profit is in "millions" of dollars (1 = $1M), shares_diluted is actual count.
-    # EPS = net_profit * 1,000,000 / shares_diluted to convert to $/share.
-    eps = ni * 1_000_000 / shares_dil if shares_dil > 0 else 0
+    # net_profit (ni) and shares_diluted are both stored in absolute units --
+    # net_profit in whole dollars, shares_diluted as an actual share count --
+    # so EPS is simply net_profit / shares_diluted. The seeded income rows use
+    # this same convention (e.g. ni 43,552,899 / 123,984,889 shares = 0.35 EPS);
+    # multiplying by 1,000,000 here (as an earlier revision did, on the mistaken
+    # assumption net_profit was in $M) inflated every engine-generated EPS by 1e6,
+    # which propagated into intrinsic_value = fair_pe * eps and blew valuations
+    # up into the hundreds of millions per share.
+    eps = ni / shares_dil if shares_dil > 0 else 0
 
     inc = IncomeStatement(
         company_id=company.id, timeline_id=timeline_id, fiscal_period=fiscal_period,

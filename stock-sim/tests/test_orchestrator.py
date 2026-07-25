@@ -1540,6 +1540,88 @@ def test_generate_fake_financials_no_prior(session):
 # ── Regression tests: A+B cleanup/correctness fixes ────────────────────────
 
 
+def test_engine_generated_eps_is_not_inflated_by_a_million(session):
+    """Regression: engine-generated EPS must be net_profit / shares_diluted.
+
+    net_profit and shares_diluted are both stored in absolute units (whole
+    dollars and an actual share count), so EPS = net_profit / shares_diluted.
+    An earlier revision multiplied by 1,000,000 on the mistaken belief that
+    net_profit was denominated in $M, which inflated every engine-generated
+    EPS by 1e6 and propagated into intrinsic_value = fair_pe * eps, blowing
+    per-share valuations up into the hundreds of millions.
+    """
+    timeline_id = _seed_minimal(session)
+    _setup_fq_factor_defs(session)
+    session.commit()
+
+    sim = session.query(SimulationState).filter_by(timeline_id=timeline_id).first()
+    sim.tick_count = 63
+    sim.current_sim_date = date(2026, 4, 1)
+    session.commit()
+
+    result = run_tick(session, timeline_id)
+    session.commit()
+    assert result["status"] == "completed"
+
+    new_inc = session.query(IncomeStatement).filter_by(
+        company_id=1, fiscal_period="2026Q2"
+    ).first()
+    assert new_inc is not None
+
+    # The invariant that the fix restores: EPS is exactly net_profit / shares.
+    expected_eps = float(new_inc.net_profit) / float(new_inc.shares_diluted)
+    assert math.isclose(float(new_inc.eps), round(expected_eps, 4), abs_tol=1e-4)
+
+    # And a scale sanity check: with ~$100k net profit on 100M shares, EPS is a
+    # fraction of a cent -- the pre-fix bug produced values in the thousands.
+    assert abs(float(new_inc.eps)) < 100.0
+
+    # Intrinsic value must not inherit a 1e6 inflation either.
+    company = session.query(Company).filter_by(id=1).first()
+    assert abs(float(company.intrinsic_value)) < 1_000_000.0
+
+
+def test_cost_ratios_do_not_ratchet_for_below_average_company(session):
+    """Regression: a below-average company's cost ratios must mean-revert to a
+    stable, quality-adjusted level -- not compound a fixed quality multiplier on
+    the prior quarter's ratio every quarter.
+
+    The old `opex_r = prev_opex_r * mgmt_adj` form re-applied mgmt_adj (>1 for a
+    below-50 management_quality) each quarter, so opex/revenue ratcheted
+    geometrically toward the 0.45 clamp ceiling over ~7 quarters and net margin
+    (and EPS) collapsed toward zero. With mean-reversion to base_opex_r *
+    mgmt_adj, it settles just above the baseline instead.
+    """
+    from engine.orchestrator import _generate_fake_quarterly_financials
+
+    timeline_id = _seed_minimal(session)
+    _setup_fq_factor_defs(session)
+    session.commit()
+
+    # _seed_minimal's 2026Q1 baseline: opex 200,000 / revenue 1,000,000 = 0.20.
+    base_opex_r = 0.20
+    rng = random.Random(12345)
+    periods = ["2026Q2", "2026Q3", "2026Q4"] + [
+        f"{y}Q{q}" for y in (2027, 2028, 2029) for q in (1, 2, 3, 4)
+    ]  # 15 quarters forward -- far more than the ~7 it took to ratchet before.
+
+    opex_ratios = []
+    for period in periods:
+        _generate_fake_quarterly_financials(
+            session, timeline_id, session.query(Company).filter_by(id=1).first(),
+            period, rng, management_quality=25.0,  # well below 50 -> mgmt_adj > 1
+        )
+        session.commit()
+        inc = session.query(IncomeStatement).filter_by(
+            company_id=1, fiscal_period=period, timeline_id=timeline_id,
+        ).first()
+        opex_ratios.append(float(inc.operating_expenses) / float(inc.revenue))
+
+    # Must stay near the quality-adjusted baseline, nowhere near the 0.45 ceiling.
+    # (Baseline 0.20 * mgmt_adj(25) 1.03 = ~0.206; the old code exceeded 0.40.)
+    assert max(opex_ratios) < 0.30, f"opex ratio ratcheted: {opex_ratios}"
+
+
 def test_quarter_refresh_preserves_prior_factor_scores(session):
     """_refresh_fundamentals must carry forward management_quality/growth_potential/
     fcf_quality from the prior CompanyFactorScore instead of re-rolling them from
