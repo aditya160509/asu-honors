@@ -21,7 +21,6 @@ import { StructuralDiffTable } from "./StructuralDiffTable";
 import { exportComparisonCsv } from "@/lib/charts/export/exportCsv";
 import { exportCanvasPng } from "@/lib/charts/export/exportPng";
 import { findDivergenceIndex } from "@/lib/charts/comparison/divergence";
-import { relativeDayAxisLabels } from "@/lib/charts/comparison/axisLabels";
 import { nearestIndexForX } from "@/lib/charts/comparison/hoverLookup";
 
 type Metric = "price";
@@ -181,9 +180,32 @@ export function TimelineComparisonView() {
 
   const divergenceIndex = findDivergenceIndex(series, DIVERGENCE_THRESHOLD_PCT);
 
-  const allPoints = series.flatMap((s) => s.points);
-  const yDomain = lineYDomain(allPoints);
   const maxLen = Math.max(0, ...series.map((s) => s.points.length));
+
+  // Focus the view on the fork region. Every series is a resolved chain that
+  // shares the same pre-fork parent prefix by array index, so plotting all of
+  // it means showing every tick since inception (often many hundreds) -- the
+  // post-fork ticks the user actually wants to compare get squeezed into a
+  // sliver on the right, and any pre-fork outlier (e.g. an early live-market
+  // spike) drags both the x-window and the y-domain. Instead window to
+  // [fork - a little context, end], so the axes describe the scenario, not the
+  // ancient shared history. With no branch selected (live only) there's no
+  // fork to focus on, so the window is the full range.
+  const branchForks = series.map((s) => s.ownHistoryStartIndex).filter((i) => i > 0);
+  const forkIndex = branchForks.length > 0 ? Math.min(...branchForks) : 0;
+  const postForkLen = maxLen - forkIndex;
+  const contextTicks =
+    forkIndex > 0 ? Math.min(forkIndex, Math.max(5, Math.round(postForkLen * 0.15))) : 0;
+  const windowStart = Math.max(0, forkIndex - contextTicks);
+  const windowEnd = maxLen;
+  const windowSpan = Math.max(1, windowEnd - windowStart - 1);
+
+  // Y-axis scales dynamically to only the data inside the window, so it adapts
+  // per ticker and per scenario instead of being pinned by out-of-view history.
+  const windowPoints = series.flatMap((s) =>
+    s.points.slice(Math.max(s.ownHistoryStartIndex, windowStart), windowEnd),
+  );
+  const yDomain = lineYDomain(windowPoints.length > 0 ? windowPoints : series.flatMap((s) => s.points));
 
   function handleExportCsv() {
     exportComparisonCsv(series.map((s) => ({ label: s.timeline.name, dates: s.dates, values: s.points.map((p) => p.value) })));
@@ -293,7 +315,7 @@ export function TimelineComparisonView() {
                 drawLineSeries({
                   ctx,
                   data: s.points,
-                  visibleRange: { from: s.ownHistoryStartIndex, to: s.points.length },
+                  visibleRange: { from: Math.max(s.ownHistoryStartIndex, windowStart), to: s.points.length },
                   width,
                   height,
                   padding: PADDING,
@@ -301,13 +323,13 @@ export function TimelineComparisonView() {
                   color: s.color,
                   lineWidth: 1.5,
                   dashed: s.dash,
-                  timeDomain: [0, maxLen - 1 || 1],
+                  timeDomain: [windowStart, windowEnd - 1 || 1],
                 });
               }
 
-              if (divergenceIndex !== null && maxLen > 0) {
+              if (divergenceIndex !== null && divergenceIndex >= windowStart && maxLen > 0) {
                 const plotW = width - PADDING.left - PADDING.right;
-                const x = PADDING.left + (divergenceIndex / (maxLen - 1 || 1)) * plotW;
+                const x = PADDING.left + ((divergenceIndex - windowStart) / windowSpan) * plotW;
                 ctx.save();
                 ctx.strokeStyle = "#ef4444";
                 ctx.setLineDash([4, 3]);
@@ -330,16 +352,19 @@ export function TimelineComparisonView() {
               // see relativeDayAxisLabels for why "Day N" is the only label
               // that's simultaneously true for every series on this axis.
               const plotW = width - PADDING.left - PADDING.right;
-              const labelStep = Math.max(1, Math.floor(maxLen / 6));
-              const timeLabels = relativeDayAxisLabels(maxLen, labelStep).map((l) => ({
-                x: PADDING.left + (l.x / (maxLen - 1 || 1)) * plotW,
-                text: l.text,
-              }));
+              const labelStep = Math.max(1, Math.floor((windowEnd - windowStart) / 6));
+              const timeLabels: { x: number; text: string }[] = [];
+              for (let idx = windowStart; idx < windowEnd; idx += labelStep) {
+                timeLabels.push({
+                  x: PADDING.left + ((idx - windowStart) / windowSpan) * plotW,
+                  text: `Day ${idx}`,
+                });
+              }
               if (timeLabels.length > 0) drawTimeAxis({ ctx, width, height, padding: PADDING, labels: timeLabels });
 
               if (hoverX !== null && maxLen > 0) {
-                const idx = nearestIndexForX(hoverX - PADDING.left, plotW, maxLen);
-                const hoverPxX = PADDING.left + (idx / (maxLen - 1 || 1)) * plotW;
+                const idx = windowStart + nearestIndexForX(hoverX - PADDING.left, plotW, windowEnd - windowStart);
+                const hoverPxX = PADDING.left + ((idx - windowStart) / windowSpan) * plotW;
 
                 ctx.save();
                 ctx.strokeStyle = "rgba(255,255,255,0.3)";
