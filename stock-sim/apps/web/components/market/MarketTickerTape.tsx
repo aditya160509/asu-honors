@@ -23,7 +23,7 @@ export function MarketTickerTape({ companies, onActivateRow }: MarketTickerTapeP
 
   return (
     <div className="group h-7 shrink-0 overflow-hidden border-b border-[var(--term-hairline)] bg-[var(--term-bg)]">
-      <div className="flex h-7 w-max animate-[ticker_45s_linear_infinite] items-center gap-6 whitespace-nowrap group-hover:[animation-play-state:paused]">
+      <div className="flex h-7 w-max animate-[ticker_45s_linear_infinite] items-center gap-4 whitespace-nowrap group-hover:[animation-play-state:paused]">
         {track.map((c, i) => {
           const up = Number(c.day_change_pct) >= 0;
           return (

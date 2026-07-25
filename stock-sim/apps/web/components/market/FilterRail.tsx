@@ -33,14 +33,14 @@ function FilterSection({
 }) {
   const [open, setOpen] = React.useState(defaultOpen);
   return (
-    <div className="border-b border-border/60 py-2.5 first:pt-0 last:border-b-0">
+    <div className="border-b border-border/60 py-2 first:pt-0 last:border-b-0">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         className="flex w-full items-center justify-between text-left group"
       >
         <span className="flex items-center gap-1.5">
-          <span className="text-micro font-semibold uppercase tracking-wider text-text-secondary group-hover:text-text-primary transition-colors">
+          <span className="text-micro font-semibold uppercase tracking-wider text-text-secondary group-hover:text-text-primary transition-colors duration-base">
             {title}
           </span>
           {count > 0 && (
@@ -54,7 +54,7 @@ function FilterSection({
           className={cn("text-text-tertiary transition-transform", open && "rotate-180")}
         />
       </button>
-      {open && <div className="mt-2">{children}</div>}
+      {open && <div className="mt-1.5">{children}</div>}
     </div>
   );
 }
@@ -72,7 +72,7 @@ export function FilterRail({
 
   if (collapsed) {
     return (
-      <div className="flex w-10 shrink-0 flex-col items-center gap-2 border-r border-border pt-1">
+      <div className="flex w-10 shrink-0 flex-col items-center gap-2 border-r border-border py-3">
         <Button variant="ghost" size="icon" onClick={onToggleCollapsed} aria-label="Expand filters" className="h-7 w-7">
           <ChevronsRight size={14} />
         </Button>
@@ -103,7 +103,7 @@ export function FilterRail({
 
   return (
     <div className="flex w-[260px] shrink-0 flex-col border-r border-border">
-      <div className="flex items-center justify-between px-3 pt-1 pb-1.5">
+      <div className="flex items-center justify-between px-3 pt-1.5 pb-2">
         <span className="text-micro font-semibold uppercase tracking-wider text-text-secondary">Filters</span>
         <div className="flex items-center gap-1">
           {activeCount > 0 && (
@@ -126,7 +126,7 @@ export function FilterRail({
       <div className="flex-1 overflow-y-auto px-3">
         {/* Market Cap Category — always visible, most used filter */}
         <FilterSection title="Market Cap" count={filters.marketCapCategory.length} defaultOpen={true}>
-          <div className="flex flex-wrap gap-1">
+          <div className="flex flex-wrap gap-1.5">
             {capCategories.map((cat) => (
               <Chip
                 key={cat}
@@ -142,7 +142,7 @@ export function FilterRail({
 
         {/* Industry — second most used */}
         <FilterSection title="Industry" count={filters.industries.length} defaultOpen={true}>
-          <div className="flex flex-wrap gap-1">
+          <div className="flex flex-wrap gap-1.5">
             {industries.map((name) => (
               <Chip
                 key={name}

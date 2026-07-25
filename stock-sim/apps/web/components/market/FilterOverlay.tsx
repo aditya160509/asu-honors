@@ -23,7 +23,7 @@ export interface FilterOverlayProps {
 function Group({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="border-b border-[var(--term-hairline)] px-4 py-3">
-      <div className="mb-2 font-mono text-[11px] uppercase tracking-[0.04em] text-[var(--term-amber)]">{label}</div>
+      <div className="mb-1.5 font-mono text-[11px] uppercase tracking-[0.04em] text-[var(--term-amber)]">{label}</div>
       {children}
     </div>
   );
@@ -99,7 +99,7 @@ export function FilterOverlay({
     >
       <div className="flex items-center justify-between border-b border-[var(--term-divider)] px-4 py-2">
         <span className="font-mono text-[11px] uppercase tracking-[0.04em] text-[var(--term-amber)]">Filters</span>
-        <button type="button" onClick={onClose} aria-label="Close filter overlay" className="text-[var(--term-ink-tertiary)] hover:text-[var(--term-ink)]">
+        <button type="button" onClick={onClose} aria-label="Close filter overlay" className="text-[var(--term-ink-tertiary)] hover:text-[var(--term-ink)] transition-colors">
           <X size={14} />
         </button>
       </div>
@@ -115,7 +115,7 @@ export function FilterOverlay({
                   type="button"
                   onClick={() => toggleCap(cat)}
                   className={cn(
-                    "font-mono text-[13px] uppercase",
+                    "font-mono text-[13px] uppercase transition-colors",
                     active ? "text-[var(--term-accent)]" : "text-[var(--term-ink-secondary)] hover:text-[var(--term-ink)]"
                   )}
                 >
@@ -136,7 +136,7 @@ export function FilterOverlay({
                   type="button"
                   onClick={() => toggleSector(name)}
                   className={cn(
-                    "flex items-center justify-between font-mono text-[13px]",
+                    "flex items-center justify-between font-mono text-[13px] transition-colors",
                     active ? "text-[var(--term-accent)]" : "text-[var(--term-ink-secondary)] hover:text-[var(--term-ink)]"
                   )}
                 >
@@ -187,7 +187,7 @@ export function FilterOverlay({
         </Group>
       </div>
 
-      <div className="border-t border-[var(--term-divider)] px-4 py-2 font-mono text-[11px] text-[var(--term-ink-tertiary)]">
+      <div className="border-t border-[var(--term-divider)] px-4 py-2.5 font-mono text-[11px] text-[var(--term-ink-tertiary)]">
         ESC to close · edits write into the command line
       </div>
     </div>

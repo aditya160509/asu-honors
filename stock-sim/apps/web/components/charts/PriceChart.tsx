@@ -125,6 +125,7 @@ export function PriceChart({
   const onRangeChangeRef = React.useRef(onRangeChange);
   onRangeChangeRef.current = onRangeChange;
   rangeRef.current = range;
+  const animatedCrosshair = React.useRef({ x: 0, y: 0 });
 
   const [placingPoints, setPlacingPoints] = React.useState<DrawingPoint[]>([]);
   const [previewPoint, setPreviewPoint] = React.useState<DrawingPoint | null>(null);
@@ -176,24 +177,26 @@ export function PriceChart({
     prevLenRef.current = ohlc.length;
 
     if (tickerChanged || prevLen === 0) {
-      // New instrument (or first load) — nothing to preserve, show the default window.
+      // New instrument (or first load) — reset to default range.
       updateRange(defaultRange(ohlc.length));
       return;
     }
     if (ohlc.length === prevLen) return;
 
-    // Same ticker, new candles arrived (e.g. live auto-advance). If the user
-    // was already looking at the latest bar, keep following it — same zoom
-    // width, window slides right — instead of yanking their pan/zoom back to
-    // the default every time a new tick lands. If they'd panned into history
-    // to look at older data, leave their view alone.
-    const wasAtLiveEdge = rangeRef.current.to >= prevLen;
-    if (wasAtLiveEdge) {
-      const span = rangeRef.current.to - rangeRef.current.from;
-      const to = ohlc.length;
-      const from = Math.max(0, to - span);
-      updateRange({ from, to });
+    // Data grew — live auto-advance
+    if (ohlc.length > prevLen) {
+      const wasAtLiveEdge = rangeRef.current.to >= prevLen;
+      if (wasAtLiveEdge) {
+        const span = rangeRef.current.to - rangeRef.current.from;
+        const to = ohlc.length;
+        const from = Math.max(0, to - span);
+        updateRange({ from, to });
+      }
+      return;
     }
+
+    // Data shrunk — time range changed (e.g. ALL → 1D): reset to default.
+    updateRange(defaultRange(ohlc.length));
   }, [ohlc.length, ticker, updateRange]);
 
   // Computed once per data/indicator-selection change, not per render frame —
@@ -333,7 +336,28 @@ export function PriceChart({
       const yScaleFn = (v: number) => pricePadding.top + plotH * (1 - (v - yMin) / ySpan);
       const visibleCount = Math.max(1, range.to - range.from);
       const candleWidth = Math.min(12, (width - pricePadding.left - pricePadding.right) / visibleCount);
-      const xScaleFn = (i: number) => pricePadding.left + (i - range.from + 0.5) * candleWidth;
+     const xScaleFn = (i: number) => pricePadding.left + (i - range.from + 0.5) * candleWidth;
+
+      // Candle glow under crosshair — soft radial column behind hovered candle
+      if (hoverRef.current && !activeDrawingTool) {
+        const phov = hoverRef.current;
+        const pPlotW = width - pricePadding.left - pricePadding.right;
+        const pIdx = Math.max(0, Math.min(ohlc.length - 1, range.from + Math.round(((phov.x - pricePadding.left) / pPlotW) * (range.to - range.from))));
+        if (pIdx >= range.from && pIdx < range.to) {
+          const pcx = xScaleFn(pIdx);
+          const pGlowRad = candleWidth * 5;
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(pricePadding.left, pricePadding.top, width - pricePadding.left - pricePadding.right, plotH);
+          ctx.clip();
+          const g = ctx.createRadialGradient(pcx, pricePadding.top + plotH * 0.5, 0, pcx, pricePadding.top + plotH * 0.5, pGlowRad);
+          g.addColorStop(0, "rgba(255,255,255,0.06)");
+          g.addColorStop(1, "rgba(255,255,255,0)");
+          ctx.fillStyle = g;
+          ctx.fillRect(pcx - pGlowRad, pricePadding.top, pGlowRad * 2, plotH);
+          ctx.restore();
+        }
+      }
 
       if (chartType === "candlestick") {
         drawCandlestickSeries({ ctx, data: ohlc, visibleRange: range, width, height: h, dpr, padding: pricePadding, yDomain });
@@ -395,7 +419,31 @@ export function PriceChart({
           ctx.lineTo(x + tickLen, clY);
           ctx.stroke();
         }
-        ctx.restore();
+       ctx.restore();
+     }
+ 
+      // Live-edge pulse — subtle breathing green glow on the newest candle (when in view)
+      if (ohlc.length > 0) {
+        const lastIdx = ohlc.length - 1;
+        if (lastIdx >= range.from && lastIdx < range.to) {
+          const pulseT = Date.now() / 800;
+          const pulseA = 0.06 + 0.04 * Math.sin(pulseT);
+          const pulseS = 1 + 0.06 * Math.sin(pulseT * 0.7);
+          const pcx = xScaleFn(lastIdx);
+          const pGlowRad = candleWidth * 4 * pulseS;
+          const pC = ohlc[lastIdx];
+          const pCy = yScaleFn((pC.high + pC.low) / 2);
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(pricePadding.left, pricePadding.top, width - pricePadding.left - pricePadding.right, plotH);
+          ctx.clip();
+          const pg = ctx.createRadialGradient(pcx, pCy, 0, pcx, pCy, pGlowRad);
+          pg.addColorStop(0, `rgba(34,197,94,${pulseA})`);
+          pg.addColorStop(1, "rgba(34,197,94,0)");
+          ctx.fillStyle = pg;
+          ctx.fillRect(pcx - pGlowRad, pricePadding.top, pGlowRad * 2, plotH);
+          ctx.restore();
+        }
       }
 
       indicatorSeries.forEach(({ color, points }) => {
@@ -495,8 +543,34 @@ export function PriceChart({
         width,
         panelTop: PADDING.top + priceAreaHeight,
         panelHeight: VOLUME_HEIGHT,
-        padding: PADDING,
-      });
+       padding: PADDING,
+     });
+ 
+      // Volume bar highlight under cursor
+      if (hoverRef.current && !activeDrawingTool) {
+        const vhov = hoverRef.current;
+        const vPlotW = width - PADDING.left - PADDING.right;
+        const vIdx = Math.max(0, Math.min(ohlc.length - 1, range.from + Math.round(((vhov.x - PADDING.left) / vPlotW) * (range.to - range.from))));
+        if (vIdx >= range.from && vIdx < range.to) {
+          const vCandle = ohlc[vIdx];
+          const vPrevClose = vIdx > 0 ? ohlc[vIdx - 1]?.close : vCandle.open;
+          const vIsUp = vCandle.close >= (vPrevClose ?? vCandle.open);
+          let vMax = 0;
+          for (let vi = range.from; vi < range.to && vi < ohlc.length; vi++) {
+            if (ohlc[vi].volume > vMax) vMax = ohlc[vi].volume;
+          }
+          if (vMax === 0) vMax = 1;
+          const vPanelTop = PADDING.top + priceAreaHeight;
+          const vBarH = (vCandle.volume / vMax) * VOLUME_HEIGHT;
+          const vx = xScaleFn(vIdx);
+          const vBodyW = Math.max(1, candleWidth * 0.8);
+          ctx.save();
+          ctx.fillStyle = vIsUp ? "rgba(34,197,94,0.4)" : "rgba(239,68,68,0.4)";
+          ctx.fillRect(vx - vBodyW / 2, vPanelTop + VOLUME_HEIGHT - vBarH, vBodyW, vBarH);
+          ctx.restore();
+        }
+      }
+ 
       drawPriceAxis({ ctx, width, height: h, padding: pricePadding, yDomain, formatY: formatPriceAxis });
 
       const visible = ohlc.slice(range.from, range.to);
@@ -513,8 +587,19 @@ export function PriceChart({
       }
 
       const hov = hoverRef.current;
+      const anim = animatedCrosshair.current;
       if (hov && !activeDrawingTool) {
-        drawCrosshair({ ctx, width, height: h, dpr, padding: pricePadding, x: hov.x, y: hov.y });
+        // Smooth follow: lerp crosshair position toward cursor
+        anim.x += (hov.x - anim.x) * 0.28;
+        anim.y += (hov.y - anim.y) * 0.28;
+      } else {
+        // Drift animated position off-screen when mouse leaves
+        anim.x += (-999 - anim.x) * 0.06;
+        anim.y += (-999 - anim.y) * 0.06;
+      }
+ 
+      if (hov && !activeDrawingTool) {
+        drawCrosshair({ ctx, width, height: h, dpr, padding: pricePadding, x: anim.x, y: anim.y });
         const plotW = width - PADDING.left - PADDING.right;
         const idx = range.from + Math.round(((hov.x - PADDING.left) / plotW) * (range.to - range.from));
         const candle = ohlc[Math.max(0, Math.min(ohlc.length - 1, idx))];
@@ -522,8 +607,8 @@ export function PriceChart({
         if (candle && item) {
           drawCrosshairTooltip({
             ctx,
-            x: hov.x,
-            y: hov.y,
+            x: anim.x,
+            y: anim.y,
             lines: [
               item.sim_date,
               `O ${candle.open.toFixed(2)}  H ${candle.high.toFixed(2)}`,

@@ -3,10 +3,12 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
+from fastapi.responses import Response
+from sqlalchemy.orm import Session, joinedload
 
 from apps.api.database import get_db
 from apps.api.schemas import ConCallItem
+from apps.api.services.pdf_service import generate_concall_pdf
 from db.models import Company, ConCall, ConsensusEstimate, IncomeStatement
 
 logger = logging.getLogger(__name__)
@@ -66,3 +68,40 @@ def get_concalls(
         )
         for r in rows
     ]
+
+
+@router.get("/companies/{ticker}/concalls/{concall_id}/pdf")
+def download_concall_pdf(
+    ticker: str,
+    concall_id: int,
+    db: Session = Depends(get_db),
+) -> Response:
+    company = db.query(Company).options(joinedload(Company.industry)).filter(Company.ticker == ticker.upper()).first()
+    if company is None:
+        raise HTTPException(status_code=404, detail=f"Company '{ticker}' not found")
+
+    concall = db.query(ConCall).filter(ConCall.id == concall_id, ConCall.company_id == company.id).first()
+    if concall is None:
+        raise HTTPException(status_code=404, detail="ConCall not found")
+
+    income = (
+        db.query(IncomeStatement)
+        .filter(IncomeStatement.company_id == company.id, IncomeStatement.fiscal_period == concall.fiscal_period)
+        .first()
+    )
+    consensus = (
+        db.query(ConsensusEstimate)
+        .filter(ConsensusEstimate.company_id == company.id, ConsensusEstimate.fiscal_period == concall.fiscal_period)
+        .first()
+    )
+    actual_eps = float(income.eps) if income else None
+    consensus_eps = float(consensus.consensus_eps) if consensus else None
+
+    pdf_bytes = generate_concall_pdf(company, concall, actual_eps, consensus_eps)
+    filename = f"{ticker}_{concall.fiscal_period}_concall.pdf"
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

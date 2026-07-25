@@ -137,10 +137,10 @@ function HeatmapTile({
       onClick={onActivate}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      className={cn(
-        "absolute flex flex-col items-start justify-between overflow-hidden transition-all cursor-pointer",
-        hovered && "ring-1 ring-white/40 z-10"
-      )}
+   className={cn(
+      "absolute flex flex-col items-start justify-between overflow-hidden transition-all duration-fast ease-out-expo cursor-pointer",
+       hovered && "ring-1 ring-white/40 z-10"
+     )}
       style={{
         left: rect.x,
         top: rect.y,
@@ -152,7 +152,7 @@ function HeatmapTile({
     >
       <div className="flex w-full items-start justify-between gap-1">
         <span
-          className="font-extrabold uppercase tracking-tight text-white/95 drop-shadow-sm leading-none"
+          className="font-bold uppercase tracking-tight text-white/95 drop-shadow-sm leading-none"
           style={{ fontSize: rect.w > 120 ? 11 : rect.w > 70 ? 9 : 7 }}
         >
           {company.ticker}
@@ -185,7 +185,7 @@ function HeatmapTile({
       )}
 
       {hovered && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/65 backdrop-blur-[2px] transition-opacity p-2">
+        <div className="absolute inset-0 flex items-center justify-center bg-black/65 backdrop-blur-[2px] transition-opacity duration-base ease-out-expo p-2">
           <div className="text-center min-w-0">
             <div className="text-[10px] font-bold text-white truncate">{company.name}</div>
             <div className="text-[8px] text-white/60 truncate">{company.industry_name}</div>

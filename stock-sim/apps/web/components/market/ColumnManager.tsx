@@ -62,7 +62,7 @@ export function ColumnManager({ columns, order, hidden, onToggle, onMove, onRese
                     onMove(col.key, -1);
                   }}
                   disabled={i === 0}
-                  className="p-0.5 text-text-tertiary hover:text-text-primary disabled:opacity-30"
+                  className="p-1 text-text-tertiary hover:text-text-primary disabled:opacity-30"
                 >
                   <ArrowUp size={11} />
                 </button>
@@ -74,7 +74,7 @@ export function ColumnManager({ columns, order, hidden, onToggle, onMove, onRese
                     onMove(col.key, 1);
                   }}
                   disabled={i === ordered.length - 1}
-                  className="p-0.5 text-text-tertiary hover:text-text-primary disabled:opacity-30"
+                  className="p-1 text-text-tertiary hover:text-text-primary disabled:opacity-30"
                 >
                   <ArrowDown size={11} />
                 </button>
@@ -83,7 +83,7 @@ export function ColumnManager({ columns, order, hidden, onToggle, onMove, onRese
           );
         })}
         <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={onReset} className="gap-1.5 text-text-secondary">
+        <DropdownMenuItem onSelect={onReset} className="gap-2 text-text-secondary">
           <RotateCcw size={13} />
           Reset to default
         </DropdownMenuItem>

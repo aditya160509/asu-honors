@@ -36,22 +36,31 @@ export function SpeedControl() {
   }, [setSpeed]);
 
   return (
-    <div style={{ display: "flex", gap: 2 }}>
-      {SPEED_OPTIONS.map((s) => {
+    <div style={{ display: "flex" }}>
+      {SPEED_OPTIONS.map((s, i) => {
         const active = s === speed;
+        const isFirst = i === 0;
+        const isLast = i === SPEED_OPTIONS.length - 1;
         return (
           <button
             key={s}
             type="button"
             onClick={() => setSpeed(s)}
             style={{
-              height: 26,
+              height: 28,
               padding: "0 8px",
               border: "1px solid",
               borderColor: active
                 ? "var(--mer-stroke-accent)"
                 : "var(--mer-stroke-hairline)",
-              borderRadius: "var(--mer-radius-sm)",
+              borderRadius: isFirst
+                ? "var(--mer-radius-sm) 0 0 var(--mer-radius-sm)"
+                : isLast
+                ? "0 var(--mer-radius-sm) var(--mer-radius-sm) 0"
+                : "0",
+              marginLeft: isFirst ? 0 : -1,
+              position: "relative",
+              zIndex: active ? 1 : 0,
               background: active
                 ? "rgba(62, 111, 224, 0.16)"
                 : "var(--mer-surface-2)",

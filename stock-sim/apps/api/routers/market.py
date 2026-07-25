@@ -4,8 +4,9 @@ import logging
 from datetime import date
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
+from sqlalchemy.orm import Session, joinedload
 
 from apps.api.config import settings
 from apps.api.database import get_db
@@ -20,6 +21,8 @@ from apps.api.schemas import (
     ValuationResponse,
 )
 from apps.api.services import dividend_service, market_service
+from apps.api.services.pdf_service import generate_financial_report_pdf
+from db.models import BalanceSheet, CashFlowStatement, Company, IncomeStatement
 
 logger = logging.getLogger(__name__)
 
@@ -96,3 +99,42 @@ def get_company_dividends(
     ticker: str, timeline_id: int = Query(default=settings.default_timeline_id), db: Session = Depends(get_db)
 ) -> CompanyDividendsResponse:
     return dividend_service.get_company_dividends(db, ticker, timeline_id)
+
+
+@router.get("/companies/{ticker}/report/{fiscal_period}/pdf")
+def download_financial_report_pdf(
+    ticker: str,
+    fiscal_period: str,
+    db: Session = Depends(get_db),
+) -> Response:
+    company = db.query(Company).options(joinedload(Company.industry)).filter(Company.ticker == ticker.upper()).first()
+    if company is None:
+        raise HTTPException(status_code=404, detail=f"Company '{ticker}' not found")
+
+    income = (
+        db.query(IncomeStatement)
+        .filter(IncomeStatement.company_id == company.id, IncomeStatement.fiscal_period == fiscal_period)
+        .first()
+    )
+    balance = (
+        db.query(BalanceSheet)
+        .filter(BalanceSheet.company_id == company.id, BalanceSheet.fiscal_period == fiscal_period)
+        .first()
+    )
+    cashflow = (
+        db.query(CashFlowStatement)
+        .filter(CashFlowStatement.company_id == company.id, CashFlowStatement.fiscal_period == fiscal_period)
+        .first()
+    )
+
+    if not income and not balance and not cashflow:
+        raise HTTPException(status_code=404, detail=f"No financial data for {ticker} / {fiscal_period}")
+
+    pdf_bytes = generate_financial_report_pdf(company, income, balance, cashflow, fiscal_period)
+    filename = f"{ticker}_{fiscal_period}_report.pdf"
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

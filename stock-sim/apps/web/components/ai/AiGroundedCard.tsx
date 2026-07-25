@@ -46,7 +46,7 @@ function CopyButton({ text }: { text: string }) {
     <Button
       variant="ghost"
       size="sm"
-      className="gap-1 text-mer-ink-tertiary"
+      className="gap-1 text-mer-ink-tertiary transition-all duration-150 active:scale-90"
       onClick={() => {
         navigator.clipboard.writeText(text).then(() => {
           setCopied(true);
@@ -87,18 +87,18 @@ export function AiGroundedCard({
   const relativeTime = useRelativeTime(generatedAt ?? null);
 
   const actions = (
-    <div className="flex items-center gap-1">
+    <div className="flex items-center gap-1.5">
       {data && !isPending && relativeTime && (
         <span className="num mr-1 text-micro text-mer-ink-tertiary">{relativeTime}</span>
       )}
       {data && !isPending && <CopyButton text={data.text} />}
       {data && !isPending ? (
-        <Button variant="ghost" size="sm" onClick={onGenerate} className="gap-1 text-mer-ink-tertiary">
+        <Button variant="ghost" size="sm" onClick={onGenerate} className="gap-1 text-mer-ink-tertiary transition-all duration-150 active:scale-90">
           <RotateCw size={12} />
           Regenerate
         </Button>
       ) : (
-        <Badge variant="default" className="border border-[color:var(--mer-stroke-hairline)] text-[#8b7cf6]">
+        <Badge variant="default" className="border border-[color:var(--mer-stroke-hairline)] text-[#8b7cf6] transition-all duration-150">
           AI
         </Badge>
       )}
@@ -106,9 +106,9 @@ export function AiGroundedCard({
   );
 
   const body = isPending ? (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-2.5">
       <span className="flex items-center gap-1.5 text-micro text-[#8b7cf6]">
-        <Sparkles size={11} className="animate-pulse" />
+        <Sparkles size={11} className="animate-pulse motion-reduce:animate-none" />
         Thinking...
       </span>
       <Skeleton width="100%" height={14} />
@@ -138,14 +138,14 @@ export function AiGroundedCard({
       <AiMarkdown text={data.text} />
       {children}
       {data.evidence.length > 0 && (
-        <div className={cn("flex flex-wrap gap-1.5 border-t pt-3", MER_HAIRLINE)}>
+        <div className={cn("flex flex-wrap gap-2 border-t pt-3", MER_HAIRLINE)}>
           {data.evidence.map((item, i) => {
             const chip = (
               <Badge
                 variant="default"
                 className={cn(
-                  "text-mer-ink-tertiary",
-                  item.type === "holding" && TICKER_PATTERN.test(item.ref_id) && "hover:text-[#8b7cf6] hover:underline"
+                  "text-mer-ink-tertiary transition-all duration-150",
+                  item.type === "holding" && TICKER_PATTERN.test(item.ref_id) && "hover:text-[#8b7cf6] hover:underline hover:shadow-mer-raised"
                 )}
               >
                 {item.label}

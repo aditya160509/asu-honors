@@ -165,24 +165,24 @@ export function ReplayControls({
   const liveBlocked = !timelineId || (!replayMode && advance.isPending);
 
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        gap: 5,
-        padding: "6px 14px",
-        borderTop: "1px solid var(--mer-stroke-hairline)",
-        background: "linear-gradient(180deg, var(--mer-surface-2), var(--mer-surface-1))",
-      }}
-    >
+   <div
+     style={{
+       display: "flex",
+       flexDirection: "column",
+       gap: "var(--space-2)",
+       padding: "var(--space-2) var(--space-4)",
+       borderTop: "1px solid var(--mer-stroke-hairline)",
+       background: "linear-gradient(180deg, var(--mer-surface-2), var(--mer-surface-1))",
+     }}
+   >
       {/* Progress bar */}
       <div
         ref={barRef}
         onClick={handleScrub}
         style={{
           position: "relative",
-          height: 5,
-          borderRadius: 3,
+          height: 4,
+          borderRadius: 2,
           background: "var(--mer-surface-3)",
           cursor: "pointer",
         }}
@@ -194,7 +194,7 @@ export function ReplayControls({
             left: 0,
             height: "100%",
             width: `${progress}%`,
-            borderRadius: 3,
+            borderRadius: 2,
             background: "var(--mer-accent-300)",
             transition: isPlaying ? "none" : "width 80ms",
           }}
@@ -220,9 +220,11 @@ export function ReplayControls({
         style={{
           display: "flex",
           alignItems: "center",
-          gap: 8,
+          gap: "var(--space-3)",
         }}
       >
+        {/* Transport buttons */}
+        <div style={{ display: "flex", gap: "var(--space-1)", alignItems: "center" }}>
         <button
           type="button"
           onClick={skipToStart}
@@ -248,8 +250,8 @@ export function ReplayControls({
           title={replayMode ? (isPlaying ? "Pause replay" : "Play replay") : isPlaying ? "Stop simulation" : "Start simulation"}
           style={{
             ...transportBtnStyle,
-            width: 34,
-            height: 34,
+            width: 30,
+            height: 30,
             borderRadius: "50%",
             border: "1px solid var(--mer-stroke-accent)",
             background: isPlaying ? "rgba(239, 68, 68, 0.16)" : "rgba(62, 111, 224, 0.18)",
@@ -278,8 +280,9 @@ export function ReplayControls({
         >
           <SkipToEndIcon />
         </button>
+        </div>
 
-        <div style={{ width: 1, height: 20, background: "var(--mer-stroke-hairline)", margin: "0 4px" }} />
+        <div style={{ width: 1, height: 18, background: "var(--mer-stroke-hairline)" }} />
 
         <button
           type="button"
@@ -303,15 +306,15 @@ export function ReplayControls({
           Replay
         </button>
 
-        <div style={{ width: 1, height: 20, background: "var(--mer-stroke-hairline)", margin: "0 4px" }} />
+        <div style={{ width: 1, height: 18, background: "var(--mer-stroke-hairline)" }} />
 
         <SpeedControl />
 
-        <div style={{ width: 1, height: 20, background: "var(--mer-stroke-hairline)", margin: "0 4px" }} />
+        <div style={{ width: 1, height: 18, background: "var(--mer-stroke-hairline)" }} />
 
         <StatusPill active={isPlaying} busy={advance.isPending} replayMode={replayMode} blocked={liveBlocked} />
 
-        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "var(--space-3)", minWidth: 0 }}>
           {advance.isError && (
             <span style={{ color: "var(--negative)", fontSize: "var(--fs-micro)" }}>
               {(advance.error as Error)?.message ?? "Advance failed"}
@@ -338,8 +341,8 @@ const transportBtnStyle: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
-  width: 30,
-  height: 30,
+  width: 28,
+  height: 28,
   border: "1px solid var(--mer-stroke-hairline)",
   borderRadius: "var(--mer-radius-sm)",
   background: "var(--mer-surface-2)",

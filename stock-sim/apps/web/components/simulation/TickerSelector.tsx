@@ -86,7 +86,7 @@ export function TickerSelector({ value, onChange }: TickerSelectorProps) {
             fontFamily: "var(--font-mono)",
             fontSize: "var(--fs-small)",
             fontWeight: 700,
-            letterSpacing: "0.01em",
+            letterSpacing: "0.03em",
           }}
         />
       </div>
@@ -153,6 +153,7 @@ function DropdownItem({
             fontFamily: "var(--font-mono)",
             fontSize: "var(--fs-small)",
             fontWeight: 700,
+            letterSpacing: "0.02em",
             color: "var(--mer-ink-primary)",
           }}
         >
@@ -162,6 +163,7 @@ function DropdownItem({
           style={{
             fontSize: "var(--fs-micro)",
             color: "var(--mer-ink-tertiary)",
+            letterSpacing: "0.02em",
             maxWidth: 120,
             overflow: "hidden",
             textOverflow: "ellipsis",
@@ -174,9 +176,9 @@ function DropdownItem({
       <span
         className="num"
         style={{
-          fontSize: "var(--fs-small)",
-          color: "var(--mer-ink-primary)",
-          fontWeight: 700,
+            fontSize: "var(--fs-small)",
+            color: "var(--mer-ink-primary)",
+            fontWeight: 500,
         }}
       >
         {formatPrice(company.current_price)}

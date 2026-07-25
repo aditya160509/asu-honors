@@ -16,14 +16,14 @@ function SectorAllocationMiniViz() {
   if (sectors.length === 0) return null;
 
   return (
-    <div className="flex flex-col gap-1.5 rounded-mer-sm border border-[color:var(--mer-stroke-hairline)] bg-mer-surface-1 p-2.5">
+    <div className="flex flex-col gap-1.5 rounded-mer-sm border border-[color:var(--mer-stroke-hairline)] bg-mer-surface-1 p-2.5 transition-all duration-fast ease-out-expo hover:border-[color:var(--mer-stroke-emphasis)]">
       <span className="text-micro font-medium uppercase tracking-wide text-mer-ink-tertiary">Sector Allocation</span>
       {sectors.map((s, i) => (
-        <div key={s.sector} className="flex items-center gap-2">
+        <div key={s.sector} className="flex items-center gap-2 rounded-mer-xs -mx-1 px-1 py-0.5 transition-colors duration-fast ease-out-expo hover:bg-mer-surface-2">
           <span className="w-28 shrink-0 truncate text-micro text-mer-ink-secondary">{s.sector}</span>
           <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-mer-surface-3">
             <div
-              className={cn("h-full rounded-full", SECTOR_BAR_COLORS[i % SECTOR_BAR_COLORS.length])}
+              className={cn("h-full rounded-full transition-[width] duration-700 ease-out-expo", SECTOR_BAR_COLORS[i % SECTOR_BAR_COLORS.length])}
               style={{ width: `${Math.min(100, s.pct)}%` }}
             />
           </div>

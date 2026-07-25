@@ -379,7 +379,7 @@ export function MarketExplorer({ companies, loading, error, onRetry, historicalD
         rightSlot={timeMachine}
       />
 
-      <StatusLine
+      <div className="border-b border-[var(--term-hairline)] shrink-0"><StatusLine
         tokens={activeTokens}
         onRemoveToken={handleRemoveToken}
         screenName={activeScreen?.name ?? "All"}
@@ -390,7 +390,7 @@ export function MarketExplorer({ companies, loading, error, onRetry, historicalD
         stale={Boolean(historicalDate)}
         staleSince={historicalDate ?? null}
         staleLabel="HISTORICAL"
-      />
+      /></div>
 
       {showHighlights && (
         <>
@@ -418,7 +418,7 @@ export function MarketExplorer({ companies, loading, error, onRetry, historicalD
         )}
 
         <div className="flex min-w-0 flex-1 overflow-hidden">
-          <div className={detailTicker ? "flex w-[55%] shrink-0 flex-col overflow-hidden" : "flex flex-1 flex-col overflow-hidden"}>
+          <div className={detailTicker ? "flex w-[55%] shrink-0 flex-col overflow-hidden transition-all duration-300 ease-out" : "flex flex-1 flex-col overflow-hidden transition-all duration-300 ease-out"}>
             {showSkeleton ? (
               <ExplorerSkeleton columns={visibleColumns} density={density} />
             ) : showError ? (
@@ -448,13 +448,15 @@ export function MarketExplorer({ companies, loading, error, onRetry, historicalD
           </div>
 
           {detailTicker && (
-            <DetailPanel
-              ticker={detailTicker}
-              watched={watchlist.watchedTickers.has(detailTicker)}
-              onToggleWatch={watchlist.toggle}
-              onClose={() => setDetailTicker(null)}
-              gridRow={enriched.find((c) => c.ticker === detailTicker)}
-            />
+            <div className="animate-[panel-slide-in_300ms_ease-out] border-l border-[var(--term-hairline)] overflow-hidden">
+              <DetailPanel
+                ticker={detailTicker}
+                watched={watchlist.watchedTickers.has(detailTicker)}
+                onToggleWatch={watchlist.toggle}
+                onClose={() => setDetailTicker(null)}
+                gridRow={enriched.find((c) => c.ticker === detailTicker)}
+              />
+            </div>
           )}
         </div>
       </div>

@@ -8,8 +8,8 @@ export function ExplorerSkeleton({ columns, density }: { columns: ColumnDef[]; d
   const rowHeight = DEFAULT_ROW_HEIGHT[density];
   return (
     <div className="flex-1 overflow-hidden">
-      <div className="flex border-b border-border bg-bg-secondary" style={{ height: 32 }}>
-        <div style={{ width: PINNED_COLUMN_WIDTH }} className="flex items-center pl-8">
+      <div className="flex border-b border-[var(--term-divider)] bg-[var(--term-bg)]" style={{ height: 32 }}>
+        <div style={{ width: PINNED_COLUMN_WIDTH }} className="flex items-center pl-2">
           <Skeleton width={60} height={10} />
         </div>
         {columns.map((c, i) => (
@@ -19,8 +19,8 @@ export function ExplorerSkeleton({ columns, density }: { columns: ColumnDef[]; d
         ))}
       </div>
       {Array.from({ length: 16 }).map((_, r) => (
-        <div key={r} className="flex items-center border-b border-border/60" style={{ height: rowHeight }}>
-          <div style={{ width: PINNED_COLUMN_WIDTH }} className="flex items-center gap-2 pl-8 pr-2">
+        <div key={r} className="flex items-center border-b border-[var(--term-hairline)]" style={{ height: rowHeight }}>
+          <div style={{ width: PINNED_COLUMN_WIDTH }} className="flex items-center gap-2 pl-2 pr-2">
             <Skeleton width={44} height={11} />
             <Skeleton width={90} height={9} />
           </div>
@@ -38,11 +38,11 @@ export function ExplorerSkeleton({ columns, density }: { columns: ColumnDef[]; d
 export function ExplorerErrorState({ onRetry }: { onRetry?: () => void }) {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center">
-      <div className="flex h-14 w-14 items-center justify-center rounded-full bg-negative-dim/40">
-        <ServerCrash size={24} className="text-negative" />
+      <div className="flex h-14 w-14 items-center justify-center rounded-full bg-[color:var(--term-down)]/10">
+        <ServerCrash size={24} className="text-[color:var(--term-down)]" />
       </div>
-      <p className="text-body font-medium text-text-primary">Couldn&apos;t load market data.</p>
-      <p className="max-w-sm text-small text-text-secondary">
+      <p className="text-body font-medium text-[color:var(--term-ink)]">Couldn&apos;t load market data.</p>
+      <p className="max-w-sm text-small text-[color:var(--term-ink-secondary)]">
         The screener couldn&apos;t reach the market feed. This module failed independently — the rest of the app is
         unaffected.
       </p>
@@ -58,11 +58,11 @@ export function ExplorerErrorState({ onRetry }: { onRetry?: () => void }) {
 export function ExplorerEmptyFiltered({ onReset }: { onReset: () => void }) {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center">
-      <div className="flex h-14 w-14 items-center justify-center rounded-full bg-bg-tertiary">
-        <SearchX size={22} className="text-text-tertiary" />
+      <div className="flex h-14 w-14 items-center justify-center rounded-full bg-[var(--term-bg)]">
+        <SearchX size={22} className="text-[color:var(--term-ink-tertiary)]" />
       </div>
-      <p className="text-body font-medium text-text-primary">No companies match this screen.</p>
-      <p className="max-w-sm text-small text-text-secondary">
+      <p className="text-body font-medium text-[color:var(--term-ink)]">No companies match this screen.</p>
+      <p className="max-w-sm text-small text-[color:var(--term-ink-secondary)]">
         Try widening a range filter, clearing an industry pill, or resetting the screen entirely.
       </p>
       <Button variant="outline" size="sm" onClick={onReset} className="mt-1">
@@ -75,11 +75,11 @@ export function ExplorerEmptyFiltered({ onReset }: { onReset: () => void }) {
 export function ExplorerEmptyUniverse() {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center">
-      <div className="flex h-14 w-14 items-center justify-center rounded-full bg-bg-tertiary">
-        <TelescopeIcon size={22} className="text-accent" />
+      <div className="flex h-14 w-14 items-center justify-center rounded-full bg-[var(--term-bg)]">
+        <TelescopeIcon size={22} className="text-[color:var(--term-accent)]" />
       </div>
-      <p className="text-body font-medium text-text-primary">No companies loaded yet.</p>
-      <p className="max-w-sm text-small text-text-secondary">
+      <p className="text-body font-medium text-[color:var(--term-ink)]">No companies loaded yet.</p>
+      <p className="max-w-sm text-small text-[color:var(--term-ink-secondary)]">
         The simulated market hasn&apos;t been seeded. Run the seed data job to populate the screener.
       </p>
     </div>

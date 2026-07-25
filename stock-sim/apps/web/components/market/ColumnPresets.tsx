@@ -39,14 +39,14 @@ export interface ColumnPresetsProps {
 
 export function ColumnPresets({ onPresetChange, activePreset }: ColumnPresetsProps) {
   return (
-    <div className="flex items-center gap-0.5">
+    <div className="flex items-center gap-1">
       {COLUMN_PRESETS.map((preset) => (
         <button
           key={preset.key}
           type="button"
           onClick={() => onPresetChange(preset.columns)}
           className={cn(
-            "px-2 py-0.5 text-micro font-medium rounded-sm transition-colors",
+            "px-2 py-1 text-micro font-medium rounded-sm transition-colors",
             activePreset === preset.key
               ? "bg-accent/15 text-accent"
               : "text-text-tertiary hover:text-text-secondary hover:bg-bg-hover"

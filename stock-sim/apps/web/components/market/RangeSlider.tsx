@@ -34,9 +34,9 @@ export function RangeSlider({ bounds, value, onChange, formatValue = (n) => n.to
         <span>{formatValue(value.max)}</span>
       </div>
       <div className="relative h-4 flex items-center">
-        <div className="absolute inset-x-0 h-[3px] rounded-full bg-bg-tertiary" />
+        <div className="absolute inset-x-0 h-[4px] rounded-full bg-bg-tertiary" />
         <div
-          className="absolute h-[3px] rounded-full bg-accent"
+          className="absolute h-[4px] rounded-full bg-accent"
           style={{ left: `${minPct}%`, right: `${100 - maxPct}%` }}
         />
         <input

@@ -173,7 +173,7 @@ export function SentimentGauge({
             color: "var(--mer-ink-tertiary)",
           }}
         >
-          prev {Math.round(previousValue)}
+          Prev {Math.round(previousValue)}
         </div>
       )}
     </div>

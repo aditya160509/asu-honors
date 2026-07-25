@@ -26,10 +26,10 @@ export function SavedScreensBar({ screens, activeId, onSelect, onRemove }: Saved
             role="tab"
             aria-selected={active}
             className={cn(
-              "group relative flex shrink-0 cursor-pointer items-center gap-1 px-2 py-1 text-micro font-medium transition-all rounded-sm",
-              active
-                ? "bg-accent/10 text-accent"
-                : "text-text-secondary hover:text-text-primary hover:bg-bg-hover"
+              "group relative flex shrink-0 cursor-pointer items-center gap-1 px-2 py-1 text-micro font-medium transition-all duration-fast ease-out-expo rounded-sm",
+             active
+                ? "bg-accent/10 text-accent shadow-[inset_0_-1px_0_var(--accent)]"
+               : "text-text-secondary hover:text-text-primary hover:bg-bg-hover"
             )}
             onClick={() => onSelect(screen.id)}
           >
@@ -42,7 +42,7 @@ export function SavedScreensBar({ screens, activeId, onSelect, onRemove }: Saved
                   e.stopPropagation();
                   onRemove(screen.id);
                 }}
-                className="text-text-tertiary opacity-0 hover:text-negative group-hover:opacity-100 ml-0.5"
+                className="text-text-tertiary opacity-0 hover:text-negative group-hover:opacity-100 ml-1 transition-all duration-fast ease-out-expo group-hover:scale-100 scale-75"
               >
                 <X size={10} />
               </button>

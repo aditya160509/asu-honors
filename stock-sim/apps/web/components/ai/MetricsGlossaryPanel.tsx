@@ -31,20 +31,20 @@ function GlossaryItem({ term, onExplained }: { term: string; onExplained?: () =>
   const notConfigured = explain.error instanceof ApiError && explain.error.status === 503;
 
   return (
-    <div className={cn("border-b py-2.5", MER_HAIRLINE)}>
+    <div className={cn("border-b py-2.5 transition-colors duration-150 hover:bg-mer-surface-1 -mx-1.5 px-1.5 rounded-mer-sm", MER_HAIRLINE)}>
       <button
         type="button"
         onClick={() => {
           if (!revealed) onExplained?.();
           setRevealed((v) => !v);
         }}
-        className="flex w-full items-center justify-between gap-2 text-left"
+        className="flex w-full items-center justify-between gap-3 text-left"
       >
-        <span className="text-small font-medium text-mer-ink-primary">{term}</span>
-        <ChevronDown size={14} className={cn("shrink-0 text-mer-ink-tertiary transition-transform", revealed && "rotate-180")} />
+        <span className="text-small font-medium tracking-[0.01em] text-mer-ink-primary">{term}</span>
+        <ChevronDown size={14} className={cn("shrink-0 text-mer-ink-tertiary transition-transform duration-[var(--duration-base)] ease-[var(--ease-out-expo)]", revealed && "rotate-180")} />
       </button>
       {revealed && (
-        <div className="mt-2">
+        <div className="mt-2 transition-all duration-[var(--duration-base)]">
           {explain.isLoading ? (
             <div className="flex flex-col gap-1.5">
               <Skeleton width="100%" height={12} />
@@ -71,7 +71,7 @@ function GlossaryItem({ term, onExplained }: { term: string; onExplained?: () =>
  * session, no duplicate calls. */
 export function MetricsGlossaryPanel({ onExplained }: { onExplained?: () => void } = {}) {
   return (
-    <DashboardPanel eyebrow="✦ AI GLOSSARY" title="Explain Metrics" icon={BookOpenText} edge="iris" bodyClassName="grid grid-cols-1 gap-x-6 sm:grid-cols-2">
+    <DashboardPanel eyebrow="✦ AI GLOSSARY" title="Explain Metrics" icon={BookOpenText} edge="iris" bodyClassName="grid grid-cols-1 gap-x-8 gap-y-0 sm:grid-cols-2">
       {TERMS.map((term) => (
         <GlossaryItem key={term} term={term} onExplained={onExplained} />
       ))}

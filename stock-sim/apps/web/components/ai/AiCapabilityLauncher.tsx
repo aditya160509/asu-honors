@@ -21,7 +21,7 @@ const TILES: Tile[] = [
 ];
 
 const TILE_BASE =
-  "group flex flex-col gap-1.5 rounded-mer-sm border border-[color:var(--mer-stroke-hairline)] bg-mer-surface-1 p-3 text-left transition-colors hover:border-[#8b7cf6]";
+  "group flex flex-col gap-1.5 rounded-mer-sm border border-[color:var(--mer-stroke-hairline)] bg-mer-surface-1 p-3 text-left transition-all duration-200 ease-[var(--ease-out-expo)] hover:-translate-y-0.5 hover:border-[#8b7cf6] hover:bg-mer-surface-2 hover:shadow-mer-raised active:scale-[0.98]";
 
 /** All 6 AI capabilities as real, in-page tabs -- no more "click here to
  * leave the workspace." Company Review and News Take used to link out to
@@ -52,11 +52,11 @@ export function AiCapabilityLauncher({
             key={tile.key}
             type="button"
             onClick={() => onSelectTab(tile.key)}
-            className={cn(TILE_BASE, isActive && "border-[#8b7cf6]")}
+            className={cn(TILE_BASE, isActive && "border-[#8b7cf6] shadow-mer-raised ring-1 ring-[#8b7cf6]/20")}
           >
-            <tile.icon size={16} className={cn(isActive ? "text-[#8b7cf6]" : "text-mer-ink-tertiary", "group-hover:text-[#8b7cf6]")} />
-            <span className={cn("text-small font-medium", isActive ? "text-[#8b7cf6]" : "text-mer-ink-primary")}>{tile.label}</span>
-            <span className="text-micro leading-relaxed text-mer-ink-tertiary">{tile.description}</span>
+            <tile.icon size={16} className={cn(isActive ? "text-[#8b7cf6]" : "text-mer-ink-tertiary", "transition-colors duration-200 group-hover:text-[#8b7cf6]")} />
+            <span className={cn("text-small font-medium transition-colors duration-200", isActive ? "text-[#8b7cf6]" : "text-mer-ink-primary")}>{tile.label}</span>
+            <span className="text-micro leading-normal text-mer-ink-tertiary">{tile.description}</span>
           </button>
         );
       })}

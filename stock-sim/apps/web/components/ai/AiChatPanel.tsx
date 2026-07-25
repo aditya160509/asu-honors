@@ -14,6 +14,13 @@ import {
 } from "@/lib/api/hooks/useAi";
 import { cn } from "@/lib/utils";
 
+const AI_CHAT_ANIMATIONS = `
+@keyframes ai-cursor-pulse {
+  0%, 100% { opacity: 1; transform: scaleY(1); }
+  50% { opacity: 0.35; transform: scaleY(0.6); }
+}
+`;
+
 const SUGGESTED_PROMPTS: Record<AiChatScope, string[]> = {
   portfolio: [
     "What's driving my portfolio's performance today?",
@@ -69,7 +76,7 @@ function CopyButton({ text }: { text: string }) {
           setTimeout(() => setCopied(false), 1500);
         });
       }}
-      className="flex items-center gap-1 text-micro text-mer-ink-tertiary hover:text-mer-ink-secondary"
+      className="flex items-center gap-1 text-micro text-mer-ink-tertiary hover:text-mer-ink-secondary transition-all duration-fast ease-out-expo hover:scale-105 active:scale-95"
     >
       {copied ? <Check size={11} /> : <Copy size={11} />}
       {copied ? "Copied" : "Copy"}
@@ -85,7 +92,7 @@ function ChatBubble({ turn }: { turn: ChatTurn }) {
   if (turn.role === "user") {
     return (
       <div className="flex justify-end">
-        <p className="max-w-[80%] rounded-mer-md border border-[color:var(--mer-stroke-hairline)] bg-mer-surface-3 px-3 py-2 text-body text-mer-ink-primary">
+        <p className="max-w-[80%] rounded-mer-md border border-[color:var(--mer-stroke-hairline)] bg-mer-surface-3 px-3 py-2 text-body text-mer-ink-primary transition-all duration-fast ease-out-expo hover:border-[color:var(--mer-stroke-emphasis)] active:scale-[0.98]">
           {turn.content}
         </p>
       </div>
@@ -94,7 +101,7 @@ function ChatBubble({ turn }: { turn: ChatTurn }) {
 
   return (
     <div className="flex justify-start">
-      <div className="max-w-[85%] rounded-mer-md border border-[color:var(--mer-stroke-hairline)] bg-mer-surface-2 px-3 py-2.5">
+      <div className="max-w-[85%] rounded-mer-md border border-[color:var(--mer-stroke-hairline)] bg-mer-surface-2 px-3 py-2.5 group transition-all duration-fast ease-out-expo hover:border-[color:var(--mer-stroke-emphasis)]">
         <div className="flex items-center justify-between gap-3">
           <span className="flex items-center gap-1.5 text-micro font-medium uppercase tracking-wide text-[#8b7cf6]">
             <Sparkles size={11} />
@@ -107,7 +114,7 @@ function ChatBubble({ turn }: { turn: ChatTurn }) {
             )}
           </span>
           {!isStreamingThisTurn && !turn.error && (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-fast ease-out-expo">
               {relativeTime && <span className="num text-micro text-mer-ink-tertiary">{relativeTime}</span>}
               <CopyButton text={turn.content} />
             </div>
@@ -119,7 +126,7 @@ function ChatBubble({ turn }: { turn: ChatTurn }) {
             {countdown > 0 && <span className="num"> Try again in {countdown}s.</span>}
           </p>
         ) : turn.content === "" ? (
-          <span className="mt-1 inline-block h-3 w-1.5 animate-pulse bg-[#8b7cf6]" />
+          <span className="mt-1 inline-block h-4 w-0.5 rounded-full bg-[#8b7cf6]" style={{ animation: 'ai-cursor-pulse 1.4s ease-in-out infinite' }} />
         ) : (
           <AiMarkdown text={turn.content} className="mt-1" />
         )}
@@ -198,30 +205,34 @@ export function AiChatPanel({ onMessageSent, heightClassName }: { onMessageSent?
   }
 
   return (
-    <div
-      className={cn(
-        "flex flex-col overflow-hidden rounded-mer-md border bg-mer-surface-2",
-        heightClassName ?? "h-[600px]"
-      )}
-      style={{ borderColor: "var(--mer-stroke-hairline)" }}
-    >
+    <>
+      <style>{AI_CHAT_ANIMATIONS}</style>
+      <div
+        className={cn(
+          "flex flex-col overflow-hidden rounded-mer-md border bg-mer-surface-2 transition-shadow duration-base ease-out-expo hover:shadow-mer-raised",
+          heightClassName ?? "h-[600px]",
+          MER_HAIRLINE
+        )}
+      >
       <div className={cn("flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2.5", MER_HAIRLINE)}>
-        <div className="flex items-center gap-1 rounded-mer-sm border border-[color:var(--mer-stroke-hairline)] p-0.5">
+        <div className="flex items-center gap-1 rounded-mer-sm border border-[color:var(--mer-stroke-hairline)] bg-mer-surface-1 p-0.5">
           {SCOPES.map((s) => (
             <button
               key={s.value}
               type="button"
               onClick={() => setScope(s.value)}
               className={cn(
-                "rounded-mer-sm px-2.5 py-1 text-micro font-medium uppercase tracking-wide transition-colors",
-                scope === s.value ? "bg-mer-surface-3 text-mer-ink-primary" : "text-mer-ink-tertiary hover:text-mer-ink-secondary"
+                "rounded-mer-sm px-2.5 py-1 text-micro font-medium uppercase tracking-wide transition-all duration-fast ease-out-expo",
+                scope === s.value
+                  ? "bg-mer-surface-3 text-mer-ink-primary"
+                  : "text-mer-ink-tertiary hover:text-mer-ink-secondary active:scale-95"
               )}
             >
               {s.label}
             </button>
           ))}
         </div>
-        <label className="flex items-center gap-1.5 text-micro text-mer-ink-tertiary">
+        <label className="flex items-center gap-1.5 text-micro text-mer-ink-tertiary cursor-pointer transition-colors duration-fast ease-out-expo hover:text-mer-ink-secondary">
           <input
             type="checkbox"
             checked={useContext}
@@ -232,7 +243,7 @@ export function AiChatPanel({ onMessageSent, heightClassName }: { onMessageSent?
         </label>
       </div>
 
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-3">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-3 scroll-smooth">
         {turns.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
             <Sparkles size={22} className="text-[#8b7cf6]" />
@@ -243,7 +254,7 @@ export function AiChatPanel({ onMessageSent, heightClassName }: { onMessageSent?
                   key={prompt}
                   type="button"
                   onClick={() => send(prompt)}
-                  className="rounded-full border border-[color:var(--mer-stroke-hairline)] px-2.5 py-1 text-micro text-mer-ink-secondary hover:border-[#8b7cf6] hover:text-[#8b7cf6]"
+                  className="rounded-full border border-[color:var(--mer-stroke-hairline)] px-2.5 py-1 text-micro text-mer-ink-secondary transition-all duration-fast ease-out-expo hover:-translate-y-0.5 hover:border-[#8b7cf6] hover:text-[#8b7cf6] active:scale-95"
                 >
                   {prompt}
                 </button>
@@ -267,12 +278,13 @@ export function AiChatPanel({ onMessageSent, heightClassName }: { onMessageSent?
           disabled={isStreaming}
           placeholder="Ask a question..."
           rows={1}
-          className="max-h-24 min-h-[32px] flex-1 resize-none rounded-mer-sm border border-[color:var(--mer-stroke-hairline)] bg-mer-surface-1 px-2.5 py-1.5 text-body text-mer-ink-primary placeholder:text-mer-ink-tertiary focus:border-[#8b7cf6] focus:outline-none disabled:opacity-60"
+          className="max-h-24 min-h-[32px] flex-1 resize-none rounded-mer-sm border border-[color:var(--mer-stroke-hairline)] bg-mer-surface-1 px-2.5 py-1.5 text-body text-mer-ink-primary placeholder:text-mer-ink-tertiary transition-shadow duration-fast ease-out-expo focus:border-[#8b7cf6] focus:shadow-[0_0_0_1px_#8b7cf6] focus:outline-none disabled:opacity-60"
         />
-        <Button size="icon" disabled={isStreaming || !input.trim()} onClick={() => send(input)} aria-label="Send">
+        <Button size="icon" disabled={isStreaming || !input.trim()} onClick={() => send(input)} aria-label="Send" className="transition-all duration-fast ease-out-expo hover:scale-105 active:scale-95 disabled:scale-100">
           <Send size={14} />
         </Button>
       </div>
     </div>
+    </>
   );
 }

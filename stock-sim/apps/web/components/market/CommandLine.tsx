@@ -127,10 +127,10 @@ export function CommandLine({
   }
 
   return (
-    <div className="relative flex h-10 items-center gap-3 border-b border-[var(--term-divider)] bg-[var(--term-bg)] px-4">
+    <div className="relative flex h-9 items-center gap-3 border-b border-[var(--term-divider)] bg-[var(--term-bg)] px-4">
       <span className="shrink-0 font-mono text-[13px] font-semibold text-[var(--term-amber)]">SCRN&gt;</span>
 
-      <div className="relative min-w-0 flex-1">
+      <div className="relative min-w-0 flex-1 rounded-sm transition-colors duration-fast focus-within:bg-white/[0.03]">
         <div
           aria-hidden
           className="pointer-events-none select-none whitespace-pre font-mono text-[13px] leading-[20px]"
@@ -155,7 +155,7 @@ export function CommandLine({
         />
 
         {focused && suggestions.length > 0 && (
-          <div className="absolute left-0 top-full z-30 mt-1 w-64 border-t border-[var(--term-divider)] bg-[var(--term-bg)] shadow-[0_8px_24px_rgba(4,6,10,0.5)]">
+          <div className="absolute left-0 top-full z-30 mt-1 w-64 border-t border-[var(--term-divider)] bg-[var(--term-bg)] shadow-[0_8px_24px_rgba(4,6,10,0.5)] shadow-[0_0_0_1px_var(--mer-stroke-emphasis)]">
             {suggestions.map((s) => (
               <button
                 key={s}
@@ -164,7 +164,7 @@ export function CommandLine({
                   e.preventDefault();
                   acceptSuggestion(s);
                 }}
-                className="flex w-full items-center px-3 py-1.5 text-left font-mono text-[13px] text-[var(--term-ink-secondary)] hover:bg-white/5 hover:text-[var(--term-ink)]"
+                className="flex w-full items-center px-3 py-1.5 text-left font-mono text-[13px] text-[var(--term-ink-secondary)] transition-all duration-fast ease-out-expo border-l-2 border-transparent hover:border-l-[var(--term-amber)] hover:bg-white/[0.07] hover:text-[var(--term-ink)]"
               >
                 {s}
               </button>
@@ -181,14 +181,14 @@ export function CommandLine({
         <button
           type="button"
           onClick={() => onViewModeChange("table")}
-          className={cn(viewMode === "table" ? "text-[var(--term-ink)]" : "text-[var(--term-ink-tertiary)] hover:text-[var(--term-ink-secondary)]")}
+          className={cn("transition-all duration-fast ease-out-expo", viewMode === "table" ? "text-[var(--term-ink)]" : "text-[var(--term-ink-tertiary)] hover:text-[var(--term-ink-secondary)]")}
         >
           TBL
         </button>
         <button
           type="button"
           onClick={() => onViewModeChange("heatmap")}
-          className={cn(viewMode === "heatmap" ? "text-[var(--term-ink)]" : "text-[var(--term-ink-tertiary)] hover:text-[var(--term-ink-secondary)]")}
+          className={cn("transition-all duration-fast ease-out-expo", viewMode === "heatmap" ? "text-[var(--term-ink)]" : "text-[var(--term-ink-tertiary)] hover:text-[var(--term-ink-secondary)]")}
         >
           HMP
         </button>

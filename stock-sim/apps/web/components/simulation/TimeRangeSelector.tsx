@@ -6,10 +6,11 @@ import { useTimeControlStore } from "@/lib/stores/timeControlStore";
 const TIME_RANGES = [
   { label: "1D", days: 1 },
   { label: "5D", days: 5 },
+  { label: "10D", days: 10 },
   { label: "1M", days: 30 },
   { label: "3M", days: 90 },
   { label: "6M", days: 180 },
-  { label: "YTD", days: null },
+  { label: "YTD", days: -1 },
   { label: "1Y", days: 365 },
   { label: "ALL", days: null },
 ] as const;
@@ -28,13 +29,14 @@ export function TimeRangeSelector({ compact = false }: { compact?: boolean }) {
   function handleApplyCustom() {
     if (start && end) {
       setCustomRange({ start, end });
+      setTimeRange("CUSTOM");
       setReplayMode(false);
       setShowCustom(false);
     }
   }
 
   function handleClearCustom() {
-    setCustomRange(null);
+    setTimeRange("ALL");
     setStart("");
     setEnd("");
   }
@@ -61,7 +63,6 @@ export function TimeRangeSelector({ compact = false }: { compact?: boolean }) {
               type="button"
               onClick={() => {
                 setTimeRange(range.label);
-                setCustomRange(null);
                 setReplayMode(false);
               }}
               style={{
@@ -138,6 +139,8 @@ export function TimeRangeSelector({ compact = false }: { compact?: boolean }) {
               background: "var(--mer-surface-2)",
               color: "var(--mer-ink-secondary)",
               fontSize: "var(--fs-micro)",
+              fontWeight: 500,
+              letterSpacing: "0.02em",
               cursor: "pointer",
             }}
           >
@@ -169,6 +172,7 @@ export function TimeRangeSelector({ compact = false }: { compact?: boolean }) {
               gap: 4,
               fontSize: "var(--fs-micro)",
               color: "var(--mer-ink-tertiary)",
+              letterSpacing: "0.05em",
             }}
           >
             Start
@@ -195,6 +199,7 @@ export function TimeRangeSelector({ compact = false }: { compact?: boolean }) {
               gap: 4,
               fontSize: "var(--fs-micro)",
               color: "var(--mer-ink-tertiary)",
+              letterSpacing: "0.05em",
             }}
           >
             End
@@ -227,6 +232,7 @@ export function TimeRangeSelector({ compact = false }: { compact?: boolean }) {
               color: "var(--mer-accent-300)",
               fontSize: "var(--fs-micro)",
               fontWeight: 700,
+              letterSpacing: "0.04em",
               cursor: "pointer",
             }}
           >
@@ -244,6 +250,7 @@ export function TimeRangeSelector({ compact = false }: { compact?: boolean }) {
               color: "var(--mer-ink-secondary)",
               fontSize: "var(--fs-micro)",
               fontWeight: 700,
+              letterSpacing: "0.04em",
               cursor: "pointer",
             }}
           >

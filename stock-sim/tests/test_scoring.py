@@ -76,6 +76,6 @@ def test_financial_quality_composite_missing_pillar_skips():
     assert math.isclose(result, 0.7 * 80.0)
 
 
-def test_moat_composite_empty_subscores_returns_zero():
+def test_moat_composite_empty_subscores_returns_midpoint():
     weights = {"brand": 0.5, "network_effect": 0.5}
-    assert scoring.moat_composite({}, weights) == 0.0
+    assert scoring.moat_composite({}, weights) == 50.0
