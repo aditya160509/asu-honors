@@ -130,6 +130,14 @@ Terms (`_weighted_trailing_growth`, `_management_quality_bias_and_noise`, `_fina
 
 Deterministic given `rng` — no wall-clock or global-random dependence, consistent with the idempotency guarantees elsewhere in `_generate_fake_quarterly_financials`/`_refresh_fundamentals`.
 
+### 2.5b EPS units and cost-ratio dynamics — `_generate_fake_quarterly_financials()` in `orchestrator.py`
+
+**Fixed 2026-07-25.** Two unit/dynamics bugs in the same generator that both surfaced as absurd on-screen numbers:
+
+- **EPS units.** `revenue`, `net_profit`, and `Company.market_cap` are all stored in **absolute dollars** (`market_cap = price · shares_outstanding`), and `shares_diluted` is an actual share count, so `EPS = net_profit / shares_diluted`. A prior revision computed `net_profit · 1_000_000 / shares_diluted` on the mistaken assumption net_profit was denominated in $M — inflating every engine-generated EPS by 1e6, which propagated straight into `IntrinsicValue = FairPE · EPS` (§2.4) and produced per-share valuations in the hundreds of millions. The seeded rows already used the correct form (e.g. `43,552,899 / 123,984,889 = 0.35`), so the discontinuity appeared exactly at the seed→engine quarter boundary. `scripts/repair_eps_inflation.py` corrected the 1e6-inflated rows already in the DB (idempotent, backed up) and rebuilt the valuation caches.
+
+- **Cost-ratio mean-reversion.** `cogs_r`/`opex_r` now mean-revert toward a stable, quality-adjusted **target** each quarter — `ratio ← prev + 0.30·(base_ratio·quality_adj − prev)` where `base_ratio` is the company's first income statement's ratio and `quality_adj` is derived from `moat_score`/`management_quality`. The prior form compounded a fixed multiplier on the prior quarter (`prev_ratio · quality_adj`), so a below-average company's cost ratios ratcheted geometrically to the clamp ceiling over ~7 quarters (AAP opex/rev 11%→31%) and its margins/EPS collapsed toward zero, while above-average companies drifted the other way without bound. Quality now sets the *level* margins settle at, not a perpetual *rate of change*; the reversion is self-healing, so advancing the sim pulls already-collapsed companies back toward baseline.
+
 ### 2.6 Daily IV drift — `drift_iv()` in `engine/valuation.py`
 
 Between quarterly re-anchors, IV drifts smoothly toward its expected annual growth rate every tick:
@@ -187,6 +195,8 @@ Price_{t+1} = IV · e^(y_{t+1})
 The `economic_outlook` driver (§3, weight 0.10) is likewise jittered per-company: `market_sentiment + rng.gauss(0, ECON_OUTLOOK_JITTER_STD=0.3)` in `orchestrator.py`. **Added 2026-07-18:** this driver previously fed the byte-identical `cycle_state["market_sentiment"]` to all 153 companies and turned out to be the single largest shared lockstep term in the whole tick (larger than `β_m·F_m` itself) — see §9.3 for the measured before/after correlation.
 
 `run_tick()` in `engine/tick.py` vectorizes this across all ~150 companies with NumPy in a single call (`update_market_tick`). This is pure — no DB access; `orchestrator.py` builds `CompanyTickInput` per company and calls it, passing `pressure_scale=params.get("k_drift", 0.03)`.
+
+**Log-gap guardrail (`MAX_LOG_GAP`, added 2026-07-25).** After the OU step, `run_tick()` clamps `y` to `±log(10)` before `Price = IV·e^y`, bounding price to `[IV/10, IV·10]`. The mean-reversion `−θ·y` and the per-tick circuit breaker (`r_cap`, §4.4) shape ordinary moves, but neither caps the *cumulative* decoupling from IV: a persistent one-directional `β_m·F_m`/`β_s·F_s` run across a long cycle phase can outpace mean-reversion (which the saturating `value_opportunity` driver, capped at −1, cannot counter once price is far above IV) and compound price to absurd multiples at the daily `r_cap` limit — observed a stock worth ~3 run to ~480 (~140× IV) before the phase flipped and it crashed back through IV to near zero (the "spike then flat" chart artifact). The 10× band is far wider than any legitimate price/IV ratio here, so it only ever binds on that runaway.
 
 ### 4.1 Economic cycle — `engine/cycle.py`
 
