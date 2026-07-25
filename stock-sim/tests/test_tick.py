@@ -50,6 +50,29 @@ def test_run_tick_price_near_iv_with_no_pressure():
     assert math.isclose(price, 100.0, rel_tol=0.01)
 
 
+def test_run_tick_clamps_runaway_gap_to_iv_band():
+    """A stock already far above IV, driven by a large persistent factor return,
+    must not decouple past the [IV/10, IV*10] guardrail band in a single tick.
+
+    Regression for the "spike then flat" artifact: a sustained one-directional
+    macro/sector factor run outpaced OU mean-reversion and compounded price to
+    ~140x IV before crashing back. The MAX_LOG_GAP clamp bounds the log-gap so
+    price can deviate widely from IV but never run away to an absurd multiple.
+    """
+    # y already at log(8) (price 8x IV), huge market factor pushing further up.
+    inp = _make_input(y=math.log(8.0), beta_market=2.0, intrinsic_value=100.0)
+    state = TickState(sim_day=0, market_factor_return=5.0, companies=(inp,))
+    out = run_tick(state).outputs[0]
+    assert out.price <= 100.0 * 10.0 + 1e-6, f"price {out.price} exceeded 10x IV band"
+    assert out.y <= math.log(10.0) + 1e-9
+
+    # Symmetric on the downside: a huge negative factor can't drive price below IV/10.
+    inp_dn = _make_input(y=-math.log(8.0), beta_market=2.0, intrinsic_value=100.0)
+    state_dn = TickState(sim_day=0, market_factor_return=-5.0, companies=(inp_dn,))
+    out_dn = run_tick(state_dn).outputs[0]
+    assert out_dn.price >= 100.0 / 10.0 - 1e-6, f"price {out_dn.price} fell below IV/10 band"
+
+
 def test_run_tick_positive_pressure_increases_price():
     inp_zero = _make_input(company_id=1, y=0.0, driver_values={"v": 0.0}, driver_weights={"v": 1.0})
     inp_pos = _make_input(company_id=2, y=0.0, driver_values={"v": 0.5}, driver_weights={"v": 1.0})

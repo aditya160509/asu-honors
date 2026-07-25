@@ -1,11 +1,24 @@
 """Section 6.O — single simulation tick orchestrator, a pure function of its inputs."""
 
+import math
 from dataclasses import dataclass, field
 
 import numpy as np
 
 from engine.drivers import composite_price_pressure
 from engine.market import price_from_gap, update_market_tick
+
+# Widest the price may decouple from intrinsic value, as a log-gap bound: y is
+# log(price / IV), so ±log(10) confines price to [IV/10, IV*10]. This is a
+# guardrail, not a normal-regime force -- the OU mean-reversion (-theta*y) and
+# the per-tick circuit breaker (r_cap) shape ordinary moves, but neither caps
+# the CUMULATIVE decoupling that builds when a persistent one-directional macro/
+# sector factor run (beta*f) outpaces mean-reversion across a long cycle phase.
+# Left unbounded that compounded a stock worth ~3 up to ~480 (≈140x IV) before
+# the phase flipped and it crashed back through IV to near zero -- the "spike
+# then flat" artifact. A 10x band is far wider than any legitimate price/IV
+# ratio here, so it only ever binds on that runaway.
+MAX_LOG_GAP = math.log(10.0)
 
 
 @dataclass(frozen=True)
@@ -82,6 +95,7 @@ def run_tick(state: TickState, k_drift: float = 0.03) -> TickResult:
         epsilon=epsilon,
         k_drift=k_drift,
     )
+    new_y = np.clip(new_y, -MAX_LOG_GAP, MAX_LOG_GAP)
     new_price = price_from_gap(iv, new_y)
 
     outputs = tuple(
