@@ -35,12 +35,33 @@ const METRIC_LABELS: Record<Metric, string> = {
 // generating arbitrary colors keeps the legend legible.
 const SERIES_COLORS = ["#3b82f6", "#f59e0b", "#22c55e", "#ef4444", "#a855f7", "#14b8a6", "#ec4899", "#84cc16"];
 
+// Sibling branches sharing the same fork date start their visible segment at
+// the identical pixel, and their post-fork prices are often a small fraction
+// of the chart's y-range (e.g. an early spike elsewhere sets the axis scale
+// to ~100 while every branch trades at ~2) -- at that compression two
+// distinct lines can land within a sub-pixel of each other despite being
+// genuinely different data. A per-series dash pattern (index 0 = baseline
+// stays solid) keeps overlapping lines visually separable regardless of
+// how compressed the y-axis is, since one line's dash gaps reveal the
+// other's color underneath instead of blending into a single stroke.
+const SERIES_DASH_PATTERNS: Array<[number, number] | undefined> = [
+  undefined,
+  [7, 3],
+  [2, 2],
+  [1, 4],
+  [10, 3],
+  [4, 2],
+  [1, 1],
+  [12, 4],
+];
+
 const PADDING = { top: 16, right: 56, bottom: 24, left: 8 };
 const DIVERGENCE_THRESHOLD_PCT = 3;
 
 interface SeriesEntry {
   timeline: TimelineResponse;
   color: string;
+  dash: [number, number] | undefined;
   points: LinePoint[];
   dates: string[];
   // A branch that hasn't finished fast-forwarding (or failed) may still have
@@ -50,6 +71,14 @@ interface SeriesEntry {
   // is misleading when comparing outcomes. Chip + tooltip surface this
   // instead of silently plotting it as if it were complete.
   isIncomplete: boolean;
+  // Index into `points`/`dates` where this branch's OWN history begins.
+  // Everything before it is a read-time fallback to the parent chain (see
+  // resolve_price_history_range) -- real rows, not synthesized, but
+  // identical to the parent/other siblings that share the same ancestor.
+  // Redrawing that shared prefix once per branch stacks N identical lines
+  // on top of each other, so each series is only drawn from here forward;
+  // the shared prefix is still visible via the root/live series' own line.
+  ownHistoryStartIndex: number;
 }
 
 function parseIdsParam(raw: string | null): number[] {
@@ -134,12 +163,18 @@ export function TimelineComparisonView() {
       const timeline = timelines?.find((t) => t.id === id);
       const data = histories[i]?.data;
       if (!timeline || !data) return null;
+      const dates = data.map((item: PriceHistoryItem) => item.sim_date);
+      const ownHistoryStartIndex = timeline.branch_point_sim_date
+        ? Math.max(0, dates.findIndex((d) => d >= timeline.branch_point_sim_date!))
+        : 0;
       return {
         timeline,
         color: SERIES_COLORS[i % SERIES_COLORS.length],
+        dash: SERIES_DASH_PATTERNS[i % SERIES_DASH_PATTERNS.length],
         points: data.map((item: PriceHistoryItem, idx: number) => ({ time: idx, value: Number(item.close) })),
-        dates: data.map((item: PriceHistoryItem) => item.sim_date),
+        dates,
         isIncomplete: !timeline.is_live && timeline.status !== "ready",
+        ownHistoryStartIndex,
       };
     })
     .filter((s): s is SeriesEntry => s !== null);
@@ -258,12 +293,14 @@ export function TimelineComparisonView() {
                 drawLineSeries({
                   ctx,
                   data: s.points,
+                  visibleRange: { from: s.ownHistoryStartIndex, to: s.points.length },
                   width,
                   height,
                   padding: PADDING,
                   yDomain,
                   color: s.color,
                   lineWidth: 1.5,
+                  dashed: s.dash,
                   timeDomain: [0, maxLen - 1 || 1],
                 });
               }

@@ -214,9 +214,9 @@ export function StrategyBuilderForm({ onGenerated }: { onGenerated?: () => void 
             }
             description={
               notConfigured
-                ? "Ask whoever runs this deployment to set GEMINI_API_KEY."
+                ? "Ask whoever runs this deployment to set OPENROUTER_API_KEY."
                 : upstreamUnavailable
-                  ? "This is a Gemini-side capacity issue -- try again shortly."
+                  ? "This is an AI provider capacity issue -- try again shortly."
                   : "Try again in a moment."
             }
           />

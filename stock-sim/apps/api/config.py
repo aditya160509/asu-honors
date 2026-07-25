@@ -32,10 +32,11 @@ class Settings(BaseSettings):
     # pattern as resend_api_key. Unlike email (which degrades to console-log
     # when unset), ai_service must fail loudly with a clear error when this
     # is empty rather than fabricate a response -- see ai_service.py.
-    # Gemini (Google AI Studio), not Anthropic -- has a genuinely free tier,
-    # picked over Claude specifically to avoid a billing-credit requirement.
-    gemini_api_key: str = ""
-    ai_model: str = "gemini-3.5-flash"
+    # OpenRouter (openrouter.ai) -- OpenAI-compatible API in front of many
+    # providers/models, including free-tier models with no billing-credit
+    # requirement.
+    openrouter_api_key: str = ""
+    ai_model: str = "poolside/laguna-s-2.1:free"
 
 
 settings = Settings()

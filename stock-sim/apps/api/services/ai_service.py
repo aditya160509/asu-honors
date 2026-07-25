@@ -3,7 +3,7 @@ capabilities: Explain Metrics, AI Chat, Portfolio Review, Company Review,
 Explain News, Strategy Builder.
 
 Never fabricates a response when unconfigured: every capability here checks
-settings.gemini_api_key at call time and raises AiNotConfiguredError
+settings.openrouter_api_key at call time and raises AiNotConfiguredError
 immediately if it's empty, rather than returning a placeholder/fake
 explanation (the same anti-fabrication rule the app's existing rule-based
 "AI Insight Panel" already follows for a different reason -- see
@@ -16,21 +16,22 @@ problem (grounded narrative over a server-assembled JSON payload) applied to
 three different data sources, per the design doc's own note that these
 should stay consistent rather than each inventing its own shape.
 
-Uses Google's Gemini API (google-genai SDK), not Anthropic -- picked
-specifically for its free tier (no billing-credit purchase required), see
-config.py's gemini_api_key. The google-genai SDK has no `.parsed` response
-convenience (confirmed against the installed package, not assumed) --
-structured output is requested via response_schema and parsed manually with
-Pydantic's model_validate_json against response.text.
+Uses OpenRouter (openrouter.ai) via the `openai` SDK pointed at OpenRouter's
+base_url -- OpenRouter speaks the OpenAI chat-completions wire format in
+front of many providers/models, including free-tier models with no
+billing-credit requirement (see config.py's openrouter_api_key/ai_model).
+Structured output uses response_format={"type": "json_object"} rather than
+OpenAI-style response_format json_schema: not every model routed through
+OpenRouter enforces json_schema strictly, so the schema is also spelled out
+in the prompt as a second line of defense, and the result is parsed with
+Pydantic's model_validate_json against the response content.
 """
 
 import json
 import logging
 from typing import Any, Iterator, Optional
 
-from google import genai
-from google.genai import errors as genai_errors
-from google.genai import types
+import openai
 from sqlalchemy.orm import Session
 
 from apps.api.config import settings
@@ -53,20 +54,21 @@ logger = logging.getLogger(__name__)
 
 
 class AiNotConfiguredError(RuntimeError):
-    """Raised when an AI capability is called but GEMINI_API_KEY isn't set."""
+    """Raised when an AI capability is called but OPENROUTER_API_KEY isn't set."""
 
 
-_client: Optional[genai.Client] = None
+_client: Optional[openai.OpenAI] = None
+
+_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 # Every capability here is a short narrative over data the caller already
-# assembled -- not a task that benefits from Gemini's extended "thinking"
-# step. Worse than just wasted tokens/latency: thinking tokens count against
-# max_output_tokens, so a verbose thinking pass can eat the whole budget and
-# truncate the actual (JSON) output mid-string -- confirmed via
-# response.usage_metadata.thoughts_token_count during debugging. Disabling
-# it outright is more robust than just raising max_output_tokens, since the
-# thinking budget the model chooses to spend isn't bounded otherwise.
-_NO_THINKING = types.ThinkingConfig(thinking_budget=0)
+# assembled -- not a task that benefits from an extended "thinking"/reasoning
+# step. Worse than just wasted tokens/latency: on models where reasoning
+# tokens count against max_tokens, a verbose reasoning pass can eat the whole
+# budget and truncate the actual (JSON) output mid-string. Disabling it via
+# effort="none" is more robust than just raising max_tokens, since the
+# reasoning budget a model chooses to spend isn't otherwise bounded.
+_NO_REASONING = {"reasoning": {"effort": "none"}}
 
 
 def _r(value: Optional[float]) -> Optional[float]:
@@ -85,14 +87,14 @@ def _r(value: Optional[float]) -> Optional[float]:
 _generic_explanation_cache: dict[str, str] = {}
 
 
-def _get_client() -> genai.Client:
+def _get_client() -> openai.OpenAI:
     global _client
-    if not settings.gemini_api_key:
+    if not settings.openrouter_api_key:
         raise AiNotConfiguredError(
-            "AI advisor is not configured -- set GEMINI_API_KEY in .env (repo root)"
+            "AI advisor is not configured -- set OPENROUTER_API_KEY in .env (repo root)"
         )
     if _client is None:
-        _client = genai.Client(api_key=settings.gemini_api_key)
+        _client = openai.OpenAI(api_key=settings.openrouter_api_key, base_url=_OPENROUTER_BASE_URL)
     return _client
 
 
@@ -129,16 +131,16 @@ def explain_metric(
     if context is not None:
         prompt += f"\nAdditional context: {context}"
 
-    response = client.models.generate_content(
+    response = client.chat.completions.create(
         model=settings.ai_model,
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            system_instruction=_EXPLAIN_METRIC_SYSTEM_PROMPT,
-            max_output_tokens=512,
-            thinking_config=_NO_THINKING,
-        ),
+        messages=[
+            {"role": "system", "content": _EXPLAIN_METRIC_SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ],
+        max_tokens=512,
+        extra_body=_NO_REASONING,
     )
-    text = (response.text or "").strip()
+    text = (response.choices[0].message.content or "").strip()
 
     if value is None and context is None:
         _generic_explanation_cache[cache_key] = text
@@ -149,22 +151,28 @@ def explain_metric(
 # Shared grounded-response generation (Portfolio/Company Review, Explain News)
 # ---------------------------------------------------------------------------
 
+_GROUNDED_RESPONSE_SCHEMA = json.dumps(AiGroundedResponse.model_json_schema())
+
 
 def _generate_grounded_response(system_prompt: str, context: dict[str, Any]) -> AiGroundedResponse:
     client = _get_client()
-    user_prompt = "Context (JSON) -- only cite figures that appear in here:\n" + json.dumps(context, default=str)
-    response = client.models.generate_content(
-        model=settings.ai_model,
-        contents=user_prompt,
-        config=types.GenerateContentConfig(
-            system_instruction=system_prompt,
-            max_output_tokens=2048,
-            thinking_config=_NO_THINKING,
-            response_mime_type="application/json",
-            response_schema=AiGroundedResponse,
-        ),
+    system = (
+        system_prompt
+        + "\n\nRespond with a single JSON object matching exactly this schema "
+        + "(no prose outside the JSON): " + _GROUNDED_RESPONSE_SCHEMA
     )
-    return AiGroundedResponse.model_validate_json(response.text)
+    user_prompt = "Context (JSON) -- only cite figures that appear in here:\n" + json.dumps(context, default=str)
+    response = client.chat.completions.create(
+        model=settings.ai_model,
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": user_prompt},
+        ],
+        max_tokens=2048,
+        response_format={"type": "json_object"},
+        extra_body=_NO_REASONING,
+    )
+    return AiGroundedResponse.model_validate_json(response.choices[0].message.content or "{}")
 
 
 # ---------------------------------------------------------------------------
@@ -407,16 +415,16 @@ def strategy_builder(
         prompt_parts.append(f"Current portfolio context (JSON): {json.dumps(portfolio_context, default=str)}")
     prompt = "\n".join(prompt_parts)
 
-    response = client.models.generate_content(
+    response = client.chat.completions.create(
         model=settings.ai_model,
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            system_instruction=_STRATEGY_BUILDER_SYSTEM_PROMPT,
-            max_output_tokens=800,
-            thinking_config=_NO_THINKING,
-        ),
+        messages=[
+            {"role": "system", "content": _STRATEGY_BUILDER_SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ],
+        max_tokens=800,
+        extra_body=_NO_REASONING,
     )
-    text = (response.text or "").strip()
+    text = (response.choices[0].message.content or "").strip()
     return {"narrative": text, "disclaimer": STRATEGY_BUILDER_DISCLAIMER}
 
 
@@ -483,13 +491,8 @@ def stream_chat(
     if use_context and context is not None:
         system += "\n\nCurrent context (JSON) -- only cite figures from here: " + json.dumps(context, default=str)
 
-    # Gemini has no "assistant" role -- prior model turns are "model".
-    contents = [
-        types.Content(
-            role="model" if m["role"] == "assistant" else "user",
-            parts=[types.Part(text=m["content"])],
-        )
-        for m in messages
+    contents = [{"role": "system", "content": system}] + [
+        {"role": m["role"], "content": m["content"]} for m in messages
     ]
 
     # Can't turn this into a clean HTTP error status once streaming starts
@@ -497,16 +500,16 @@ def stream_chat(
     # it here and yield a plain-text notice instead of letting the
     # exception propagate and truncate the HTTP response silently.
     try:
-        for chunk in client.models.generate_content_stream(
+        stream = client.chat.completions.create(
             model=settings.ai_model,
-            contents=contents,
-            config=types.GenerateContentConfig(
-                system_instruction=system,
-                max_output_tokens=1536,
-                thinking_config=_NO_THINKING,
-            ),
-        ):
-            if chunk.text:
-                yield chunk.text
-    except genai_errors.APIError:
+            messages=contents,
+            max_tokens=1536,
+            extra_body=_NO_REASONING,
+            stream=True,
+        )
+        for chunk in stream:
+            delta = chunk.choices[0].delta.content if chunk.choices else None
+            if delta:
+                yield delta
+    except openai.APIError:
         yield "\n\n**The AI provider is temporarily unavailable -- try again in a moment.**"

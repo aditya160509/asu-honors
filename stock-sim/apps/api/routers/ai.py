@@ -2,9 +2,9 @@
 capabilities: Explain Metrics, AI Chat, Portfolio Review, Company Review,
 Explain News, Strategy Builder."""
 
+import openai
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
-from google.genai import errors as genai_errors
 from sqlalchemy.orm import Session
 
 from apps.api.auth import get_current_user
@@ -31,16 +31,16 @@ def _not_configured(exc: ai_service.AiNotConfiguredError) -> HTTPException:
     return HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc))
 
 
-def _upstream_unavailable(exc: genai_errors.APIError) -> HTTPException:
-    # Gemini's own transient errors (e.g. "high demand" 503s on the free
-    # tier) would otherwise surface as an unhandled 500 with a full
-    # traceback logged -- this is an expected, retryable condition, not a
-    # bug in our code, so it gets a clean error response instead of
+def _upstream_unavailable(exc: openai.APIError) -> HTTPException:
+    # OpenRouter/upstream-provider transient errors (e.g. "high demand" 503s
+    # on a free-tier model) would otherwise surface as an unhandled 500 with
+    # a full traceback logged -- this is an expected, retryable condition,
+    # not a bug in our code, so it gets a clean error response instead of
     # crashing the request. Deliberately 502, not 503: the frontend only
     # has the HTTP status to distinguish "not configured" (our own 503)
     # from "upstream provider is down" (this) -- reusing 503 for both
-    # made a real Gemini outage render as "you forgot to set
-    # GEMINI_API_KEY", which is actively misleading when the key is fine.
+    # made a real upstream outage render as "you forgot to set
+    # OPENROUTER_API_KEY", which is actively misleading when the key is fine.
     return HTTPException(
         status_code=status.HTTP_502_BAD_GATEWAY,
         detail="The AI provider is temporarily unavailable -- try again in a moment.",
@@ -63,7 +63,7 @@ def explain_metric(
         )
     except ai_service.AiNotConfiguredError as exc:
         raise _not_configured(exc) from exc
-    except genai_errors.APIError as exc:
+    except openai.APIError as exc:
         raise _upstream_unavailable(exc) from exc
     return ExplainMetricResponse(explanation=explanation)
 
@@ -79,7 +79,7 @@ def portfolio_review(
         return ai_service.portfolio_review(db, user, timeline_id)
     except ai_service.AiNotConfiguredError as exc:
         raise _not_configured(exc) from exc
-    except genai_errors.APIError as exc:
+    except openai.APIError as exc:
         raise _upstream_unavailable(exc) from exc
 
 
@@ -95,7 +95,7 @@ def company_review(
         return ai_service.company_review(db, request.ticker, timeline_id)
     except ai_service.AiNotConfiguredError as exc:
         raise _not_configured(exc) from exc
-    except genai_errors.APIError as exc:
+    except openai.APIError as exc:
         raise _upstream_unavailable(exc) from exc
 
 
@@ -111,7 +111,7 @@ def explain_news(
         return ai_service.explain_news(db, request.news_id, timeline_id)
     except ai_service.AiNotConfiguredError as exc:
         raise _not_configured(exc) from exc
-    except genai_errors.APIError as exc:
+    except openai.APIError as exc:
         raise _upstream_unavailable(exc) from exc
 
 
@@ -132,7 +132,7 @@ def strategy_builder(
         )
     except ai_service.AiNotConfiguredError as exc:
         raise _not_configured(exc) from exc
-    except genai_errors.APIError as exc:
+    except openai.APIError as exc:
         raise _upstream_unavailable(exc) from exc
     return StrategyBuilderResponse(**result)
 
@@ -149,9 +149,9 @@ def chat(
     # stream_chat -- stream_chat is a generator, so its body (including
     # _get_client()'s check) doesn't run until the response has already
     # started sending; by then it's too late to return a clean 503.
-    if not settings.gemini_api_key:
+    if not settings.openrouter_api_key:
         raise _not_configured(ai_service.AiNotConfiguredError(
-            "AI advisor is not configured -- set GEMINI_API_KEY in .env (repo root)"
+            "AI advisor is not configured -- set OPENROUTER_API_KEY in .env (repo root)"
         ))
     messages = [{"role": m.role, "content": m.content} for m in request.messages]
     return StreamingResponse(

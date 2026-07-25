@@ -126,9 +126,9 @@ export function AiGroundedCard({
       }
       description={
         notConfigured
-          ? "Ask whoever runs this deployment to set GEMINI_API_KEY."
+          ? "Ask whoever runs this deployment to set OPENROUTER_API_KEY."
           : upstreamUnavailable
-            ? "This is a Gemini-side capacity issue, not a problem with your setup -- try again shortly."
+            ? "This is an AI provider capacity issue, not a problem with your setup -- try again shortly."
             : "The request failed -- try again in a moment."
       }
       action={notConfigured ? undefined : { label: "Try again", onClick: onGenerate }}
