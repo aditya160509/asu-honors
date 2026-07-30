@@ -5,6 +5,7 @@ ohlc, cycle, events) to the database.  Each call to run_tick() advances the
 simulation by one business day for all companies.
 """
 
+import logging
 import math
 import random
 from datetime import date, datetime, timezone, timedelta
@@ -15,6 +16,8 @@ from typing import Optional
 import numpy as np
 from sqlalchemy import insert
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
 
 from db.models import (
     BalanceSheet,
@@ -1876,6 +1879,42 @@ def _load_concall_extended_signals(
     return result
 
 
+def _load_previous_concalls(
+    session: Session, company_ids: list[int], current_period: str,
+) -> dict[int, ConCall]:
+    """Most recent prior ConCall ORM row per company, one batched query --
+    mirrors _load_concall_guidance_signal/_load_concall_extended_signals'
+    query shape and dedup-by-first-row-per-company pattern, but keeps the
+    full ConCall row (rather than extracting a scalar/dict of driver_deltas)
+    since _generate_concalls_for_quarter's generate_concall() call needs the
+    whole object (.trend_context, .guidance_revenue_growth, etc.) as its
+    previous_concall argument.
+
+    Unlike the two signal loaders above, this has no neutral-default
+    fallback -- callers treat a missing company_id as "no prior con-call"
+    (None), which is the same semantics the per-company query it replaces
+    had via .first() returning None.
+    """
+    if not company_ids:
+        return {}
+
+    rows = (
+        session.query(ConCall)
+        .filter(ConCall.company_id.in_(company_ids), ConCall.fiscal_period < current_period)
+        .order_by(ConCall.company_id.asc(), ConCall.fiscal_period.desc())
+        .all()
+    )
+
+    seen: set[int] = set()
+    result: dict[int, ConCall] = {}
+    for row in rows:
+        if row.company_id in seen:
+            continue  # already took the most recent row for this company
+        seen.add(row.company_id)
+        result[row.company_id] = row
+    return result
+
+
 def _generate_fake_quarterly_financials(
     session: Session,
     timeline_id: int,
@@ -2410,6 +2449,14 @@ def _generate_concalls_for_quarter(
                 session, timeline_id, [c.id for c in companies], quarter_start, sim_date,
             )
 
+            # Batched single-query load of each company's most recent prior
+            # ConCall, replacing what used to be an unbatched per-company
+            # query inside the loop below (see _load_previous_concalls'
+            # docstring).
+            previous_concall_by_company = _load_previous_concalls(
+                session, [c.id for c in companies], latest_period,
+            )
+
             for company in companies:
                 if company.id in existing_calls:
                     continue  # already generated for this (company, fiscal_period) -- retried advance
@@ -2439,14 +2486,9 @@ def _generate_concalls_for_quarter(
                 cfs = fresh_cfs_by_company.get(company.id) or stale_latest_cfs.get(company.id)
                 management_quality = float(cfs.management_quality) if cfs else 50.0
                 growth_potential = float(cfs.growth_potential) if cfs else 50.0
-                moat_score = float(cfs.moat_score) if cfs else None
+                moat_score = float(cfs.moat_score) if cfs is not None and cfs.moat_score is not None else None
 
-                previous_concall = (
-                    session.query(ConCall)
-                    .filter(ConCall.company_id == company.id, ConCall.fiscal_period < latest_period)
-                    .order_by(ConCall.fiscal_period.desc())
-                    .first()
-                )
+                previous_concall = previous_concall_by_company.get(company.id)
                 prior_balance_sheet = session.query(BalanceSheet).filter(
                     BalanceSheet.company_id == company.id,
                     BalanceSheet.timeline_id == timeline_id,
@@ -2496,11 +2538,18 @@ def _generate_concalls_for_quarter(
                         -CONCALL_FACTOR_NUDGE_CLAMP,
                         min(CONCALL_FACTOR_NUDGE_CLAMP, concall.driver_deltas.get("earnings_surprise", 0.0) * CONCALL_FACTOR_NUDGE_SCALE),
                     )
+                    # 50.0 is the neutral-midpoint default used elsewhere in
+                    # this file for a null factor-score column (see e.g.
+                    # _generate_fake_quarterly_financials' management_quality
+                    # default) -- guards a null column from raising TypeError
+                    # in float() rather than silently defaulting to neutral.
+                    current_mgmt = float(cfs_for_nudge.management_quality) if cfs_for_nudge.management_quality is not None else 50.0
+                    current_moat = float(cfs_for_nudge.moat_score) if cfs_for_nudge.moat_score is not None else 50.0
                     cfs_for_nudge.management_quality = round(
-                        max(0.0, min(100.0, float(cfs_for_nudge.management_quality) + mgmt_delta)), 4,
+                        max(0.0, min(100.0, current_mgmt + mgmt_delta)), 4,
                     )
                     cfs_for_nudge.moat_score = round(
-                        max(0.0, min(100.0, float(cfs_for_nudge.moat_score) + moat_delta)), 4,
+                        max(0.0, min(100.0, current_moat + moat_delta)), 4,
                     )
 
                 # Give the con-call a real entry in the news feed pipeline
@@ -2533,10 +2582,17 @@ def _generate_concalls_for_quarter(
                 }
 
             session.flush()
-    except Exception:
+    except Exception as exc:
         # Con-call generation is an optional narrative layer. Local/dev
         # databases may not have the con_calls migration yet; never let that
-        # block the market simulation tick.
+        # block the market simulation tick. This savepoint spans the WHOLE
+        # per-company loop (including Task 5's factor-score nudges and
+        # NewsFeed inserts), so any single company's exception rolls back
+        # every company's ConCall/nudge/news for this quarter -- log it so
+        # that isn't silent.
+        logger.warning(
+            "Con-call generation failed for quarter %s: %s", latest_period, exc, exc_info=True,
+        )
         return
 
 
