@@ -161,19 +161,49 @@ def generate_concall_pdf(company: Company, concall: ConCall, actual_eps: float |
 
     # management commentary
     story.append(Paragraph("Management Commentary", s["h1"]))
-    statement_order = ["opening", "revenue", "margins", "guidance", "closing"]
+    statement_order = [
+        "opening", "revenue", "margins", "capex_debt", "order_book_strategy",
+        "guidance", "closing", "market_context", "trend_note",
+    ]
     labels = {
         "opening": "Opening Remarks",
         "revenue": "Revenue Commentary",
         "margins": "Margin Commentary",
+        "capex_debt": "Capex & Debt",
+        "order_book_strategy": "Order Book & Strategy",
         "guidance": "Outlook & Guidance",
         "closing": "Closing Remarks",
+        "market_context": "Market Context",
+        "trend_note": "Trend",
     }
     for key in statement_order:
         text = concall.statements.get(key)
         if text:
             story.append(Paragraph(labels.get(key, key.replace("_", " ").title()), s["h2"]))
             story.append(Paragraph(text, s["body"]))
+            story.append(Spacer(1, 4))
+
+    if concall.segment_guidance:
+        story.append(Paragraph("Segment / Geography Guidance", s["h1"]))
+        seg_rows = [
+            [Paragraph(segment, s["cell_label"]), Paragraph(f"{growth * 100:+.2f}%", s["body_bold"])]
+            for segment, growth in concall.segment_guidance.items()
+        ]
+        seg_t = Table(seg_rows, colWidths=[3.0 * inch, 1.5 * inch])
+        seg_t.setStyle(TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ]))
+        story.append(seg_t)
+        story.append(Spacer(1, 10))
+
+    if concall.qa_transcript:
+        story.append(Paragraph("Analyst Q&A", s["h1"]))
+        for exchange in concall.qa_transcript:
+            story.append(Paragraph(f"{exchange['analyst_name']} — {exchange['analyst_firm']}", s["h2"]))
+            story.append(Paragraph(f"Q: {exchange['question']}", s["body"]))
+            story.append(Paragraph(f"A: {exchange['answer']}", s["body"]))
             story.append(Spacer(1, 4))
 
     # footer
