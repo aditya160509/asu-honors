@@ -390,6 +390,13 @@ export interface NewsItem {
 // Con-Calls
 // ---------------------------------------------------------------------------
 
+export interface ConCallQAExchange {
+  analyst_name: string;
+  analyst_firm: string;
+  question: string;
+  answer: string;
+}
+
 export interface ConCallItem {
   id: number;
   company_id: number;
@@ -400,6 +407,10 @@ export interface ConCallItem {
   tone_score: number;
   guidance_revenue_growth: number;
   statements: Record<string, string>;
+  segment_guidance: Record<string, number>;
+  qa_transcript: ConCallQAExchange[];
+  trend_context: Record<string, number>;
+  applied_deltas: Record<string, number | null>;
   actual_eps: number | null;
   consensus_eps: number | null;
 }
