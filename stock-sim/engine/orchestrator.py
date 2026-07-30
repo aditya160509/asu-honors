@@ -3523,8 +3523,12 @@ def _bulk_tick_iteration(
             "institutional_buying",
         ]
         for k_idx, drv_key in enumerate(DRIVER_KEYS_ORDERED_LOCAL):
-            drv_val = float(inp.driver_values[k_idx])
-            drv_w = float(inp.driver_weights[k_idx])
+            if isinstance(inp.driver_values, dict):
+                drv_val = float(inp.driver_values.get(drv_key, 0.0))
+                drv_w = float(inp.driver_weights.get(drv_key, 0.0))
+            else:
+                drv_val = float(inp.driver_values[k_idx])
+                drv_w = float(inp.driver_weights[k_idx])
             raw_contribution = drv_w * drv_val / max(abs(composite_price_pressure_val), 1e-10)
             contribution = round(max(-1.0, min(1.0, raw_contribution)), 6)
             driver_score_rows.append(dict(
@@ -3838,18 +3842,11 @@ def bulk_run_ticks(
             arrays.current_sim_date = sim_date
 
     # Load price/IV overlays from DB
-    arrays.price_overlay = {
-        cid: float(price)
-        for cid, price in get_latest_prices(
-            session, [c.id for c in arrays.companies], timeline_id, arrays.timeline_chain
-        ).items()
-    }
-    arrays.iv_overlay = {
-        cid: float(iv)
-        for cid, iv in get_latest_intrinsic_values(
-            session, [c.id for c in arrays.companies], timeline_id, arrays.timeline_chain
-        ).items()
-    }
+    latest_prices, latest_ivs = get_latest_prices_and_ivs(
+        session, [c.id for c in arrays.companies], timeline_id, arrays.timeline_chain
+    )
+    arrays.price_overlay = {cid: float(price) for cid, price in latest_prices.items()}
+    arrays.iv_overlay = {cid: float(iv) for cid, iv in latest_ivs.items()}
 
     # Load sector shocks for initial cycle state
     arrays.f_m = sim_state.f_m if hasattr(sim_state, 'f_m') else 0.0
