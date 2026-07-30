@@ -1490,6 +1490,9 @@ def _refresh_fundamentals(
     guidance_signal_by_company: dict[int, float] = _load_concall_guidance_signal(
         session, [c.id for c in companies], latest_period,
     )
+    extended_signal_by_company: dict[int, dict[str, float]] = _load_concall_extended_signals(
+        session, [c.id for c in companies], latest_period,
+    )
 
     # Batch the "does this company's quarter already exist" idempotency
     # check (SPEED.md #7/1.4) into 3 IN (...) queries covering every company
@@ -1530,6 +1533,7 @@ def _refresh_fundamentals(
             mgmt_quality_signal = float(prior_cfs_for_mgmt.management_quality)
         else:
             mgmt_quality_signal = 50.0
+        extended_signal = extended_signal_by_company.get(company.id, {})
         raw = _generate_fake_quarterly_financials(
             session, timeline_id, company, latest_period, rng,
             management_quality=mgmt_quality_signal,
@@ -1539,6 +1543,9 @@ def _refresh_fundamentals(
             event_sentiment=event_sentiment_by_company.get(company.id, 0.0)
                 + event_sentiment_by_industry.get(company.industry_id, 0.0),
             guidance_signal=guidance_signal_by_company.get(company.id, 0.0),
+            concall_margin_bias=extended_signal.get("margin_bias", 0.0),
+            concall_capex_bias=extended_signal.get("capex_bias", 0.0),
+            concall_debt_bias=extended_signal.get("debt_bias", 0.0),
         )
         company_rows.append(dict(company=company, raw=raw, fq_subscores={}, fq_percentiles={}))
 
@@ -1723,6 +1730,7 @@ def _compute_quarterly_growth_and_margin_bias(
     event_sentiment: float,
     guidance_signal: float,
     rng: random.Random,
+    concall_margin_bias: float = 0.0,
 ) -> tuple[float, float]:
     """Combine every signal into (growth_rate, margin_bias) for one company's
     new quarter. See _generate_fake_quarterly_financials' docstring for what
@@ -1763,7 +1771,11 @@ def _compute_quarterly_growth_and_margin_bias(
     # guidance, which are revenue-specific) at a smaller scale, since a
     # well-run company with improving fundamentals and positive news flow
     # should also show better cost discipline, not just top-line growth.
-    margin_bias = max(-0.05, min(0.05, mgmt_mean_bias * 0.5 + fq_bias * 0.5 + event_bias * 0.3))
+    # concall_margin_bias is the prior quarter's con-call margin commentary
+    # signal (engine/concalls.py's driver_deltas["margin_bias"], already
+    # clamped to [-0.03, 0.03] there) -- added directly, same small scale as
+    # the other terms here.
+    margin_bias = max(-0.08, min(0.08, mgmt_mean_bias * 0.5 + fq_bias * 0.5 + event_bias * 0.3 + concall_margin_bias))
 
     return growth_rate, margin_bias
 
@@ -1811,6 +1823,49 @@ def _load_concall_guidance_signal(
     return result
 
 
+def _load_concall_extended_signals(
+    session: Session, company_ids: list[int], current_period: str,
+) -> dict[int, dict[str, float]]:
+    """Prior-quarter con-call margin/capex/debt bias signals, one dict per
+    company, mirroring _load_concall_guidance_signal's single-query,
+    degrade-to-neutral-on-any-failure contract. Pulled from the same most
+    recent prior ConCall.driver_deltas that guidance/tone_score come from,
+    so this adds no extra query beyond what _load_concall_guidance_signal
+    already issues in the same tick (both could be merged into one query in
+    a future pass; kept separate here for a smaller, more reviewable diff).
+    """
+    neutral = {cid: {"margin_bias": 0.0, "capex_bias": 0.0, "debt_bias": 0.0} for cid in company_ids}
+    if not company_ids:
+        return neutral
+    try:
+        from db.models import ConCall  # type: ignore[attr-defined]
+    except ImportError:
+        return neutral
+
+    try:
+        with session.begin_nested():
+            rows = session.query(ConCall).filter(
+                ConCall.company_id.in_(company_ids),
+                ConCall.fiscal_period < current_period,
+            ).order_by(ConCall.company_id.asc(), ConCall.fiscal_period.desc()).all()
+    except Exception:
+        return neutral
+
+    seen: set[int] = set()
+    result = dict(neutral)
+    for row in rows:
+        if row.company_id in seen:
+            continue
+        seen.add(row.company_id)
+        deltas = row.driver_deltas or {}
+        result[row.company_id] = {
+            "margin_bias": max(-0.03, min(0.03, float(deltas.get("margin_bias", 0.0)))),
+            "capex_bias": max(-0.10, min(0.10, float(deltas.get("capex_bias", 0.0)))),
+            "debt_bias": max(-0.05, min(0.05, float(deltas.get("debt_bias", 0.0)))),
+        }
+    return result
+
+
 def _generate_fake_quarterly_financials(
     session: Session,
     timeline_id: int,
@@ -1823,6 +1878,9 @@ def _generate_fake_quarterly_financials(
     event_sentiment: float = 0.0,
     guidance_signal: float = 0.0,
     already_refreshed: Optional[bool] = None,
+    concall_margin_bias: float = 0.0,
+    concall_capex_bias: float = 0.0,
+    concall_debt_bias: float = 0.0,
 ) -> dict[str, float]:
     """Generate plausible next-quarter financials from the company's trailing
     history and quality/context signals.
@@ -1944,6 +2002,7 @@ def _generate_fake_quarterly_financials(
             event_sentiment=event_sentiment,
             guidance_signal=guidance_signal,
             rng=rng,
+            concall_margin_bias=concall_margin_bias,
         )
         rev = float(latest_inc.revenue) * (1 + growth_rate)
         rev = max(rev, 1e3)
@@ -2064,7 +2123,7 @@ def _generate_fake_quarterly_financials(
     if latest_bal:
         ta = float(latest_bal.total_assets) * (1 + rng.gauss(0.005, 0.02))
         cash = float(latest_bal.cash_and_equivalents) * (1 + rng.gauss(0.01, 0.05))
-        td = float(latest_bal.total_debt) * (1 + rng.gauss(0.0, 0.02))
+        td = float(latest_bal.total_debt) * (1 + rng.gauss(0.0, 0.02) + concall_debt_bias)
         se = float(latest_bal.shareholders_equity) * (1 + rng.gauss(0.005, 0.01))
         prev_ta = float(latest_bal.total_assets)
         # Carry forward composition ratios from previous balance sheet
@@ -2128,7 +2187,7 @@ def _generate_fake_quarterly_financials(
         div_payout_r = 0.25
         bb_r = 0.15
 
-    capex = -ppe * capex_r * (1 + rng.gauss(0, 0.05))
+    capex = -ppe * capex_r * (1 + rng.gauss(0, 0.05) + concall_capex_bias)
     ocf = ni + da - recv * rng.uniform(0, 0.05)
     fcf = ocf + capex
     icf = -capex - recv * rng.uniform(0, 0.03)
