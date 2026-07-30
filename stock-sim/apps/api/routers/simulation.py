@@ -42,7 +42,10 @@ def advance(
     _user: User = Depends(get_current_user),
 ) -> AdvanceResponse:
     try:
-        result = sim_service.advance_simulation(db, request.timeline_id, request.days)
+        if request.mode == "bulk":
+            result = sim_service.bulk_advance_simulation(db, request.timeline_id, request.days)
+        else:
+            result = sim_service.advance_simulation(db, request.timeline_id, request.days)
     except ValueError as exc:
         db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

@@ -288,6 +288,7 @@ def seed(session: Session) -> None:
             if existing_sub is None:
                 session.add(MoatSubscore(
                     company_id=company_id,
+                    timeline_id=1,
                     subfactor_key=key,
                     score=round(rng.uniform(lo, hi), 1),
                 ))
@@ -302,6 +303,7 @@ def seed(session: Session) -> None:
         if existing_cfs is None:
             session.add(CompanyFactorScore(
                 company_id=company_id,
+                timeline_id=1,
                 fiscal_period="SEED",
                 management_quality=round(rng.uniform(mgmt_lo, mgmt_hi), 1),
                 moat_score=0,
@@ -347,14 +349,14 @@ def seed(session: Session) -> None:
             if existing:
                 existing.score = val
             else:
-                session.add(MoatSubscore(company_id=cid, subfactor_key=key, score=val))
+                session.add(MoatSubscore(company_id=cid, timeline_id=1, subfactor_key=key, score=val))
         existing_cfs = session.query(CompanyFactorScore).filter_by(company_id=cid, fiscal_period="SEED").first()
         if existing_cfs:
             for k, v in overrides["factor"].items():
                 setattr(existing_cfs, k, v)
         else:
             session.add(CompanyFactorScore(
-                company_id=cid, fiscal_period="SEED", computed_at=now,
+                company_id=cid, timeline_id=1, fiscal_period="SEED", computed_at=now,
                 intrinsic_score=0, fair_pe=0, intrinsic_value=0,
                 **overrides["factor"],
             ))

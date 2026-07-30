@@ -2,7 +2,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional
 
-from sqlalchemy import CheckConstraint, Date, DateTime, ForeignKey, Integer, Numeric, String, UniqueConstraint
+from sqlalchemy import CheckConstraint, Date, DateTime, ForeignKey, Index, Integer, Numeric, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from db.models.base import Base, TimestampMixin
@@ -91,6 +91,7 @@ class Order(Base, TimestampMixin):
         CheckConstraint("order_type in ('market', 'limit')", name="ck_orders_type"),
         CheckConstraint("status in ('open', 'filled', 'cancelled')", name="ck_orders_status"),
         CheckConstraint("quantity > 0", name="ck_orders_quantity_positive"),
+        Index("ix_orders_open_limit", "portfolio_id", "status", "order_type"),
     )
 
 

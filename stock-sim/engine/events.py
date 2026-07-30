@@ -1,6 +1,10 @@
 """Section 6.N — applying market event effect profiles to drivers and factor scores."""
 
 import math
+try:
+    from numba import njit
+except ImportError:
+    def njit(f): return f
 
 
 def decay(rho: float, days_elapsed: int) -> float:

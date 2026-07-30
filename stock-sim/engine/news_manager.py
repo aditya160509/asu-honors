@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session
 
 from db.models.events import EventInstance, MarketEvent, NewsFeed, NewsTemplate
 
-
 def select_and_fire_events(
     session: Session,
     timeline_id: int,
@@ -32,6 +31,9 @@ def select_and_fire_events(
     when is_quarter_boundary is True, preventing earnings news from appearing
     on random days between quarterly reports.
     """
+    # Do not use a process-global cache here: tests and workers can create
+    # MarketEvent rows in different SQLAlchemy sessions, and a global cache
+    # would silently omit newly-added events.
     market_events = session.query(MarketEvent).order_by(MarketEvent.id).all()
 
     new_instances: list[EventInstance] = []
@@ -142,13 +144,17 @@ def generate_news(
     company_name: Optional[str] = None,
     industry_name: Optional[str] = None,
     extra_replacements: Optional[dict[str, str]] = None,
+    event_def: Optional[MarketEvent] = None,
 ) -> Optional[NewsFeed]:
     """Section 6.N — generate a NewsFeed row from an EventInstance + NewsTemplate.
 
     Picks a matching template, substitutes placeholders, creates the NewsFeed record.
     Returns None for market-scope events (no company/industry target).
+
+    `event_def` lets a caller that already has the MarketEvent row pass it in
+    instead of re-querying (SPEED.md #11).
     """
-    event = session.query(MarketEvent).filter_by(id=event_instance.event_id).first()
+    event = event_def if event_def is not None else session.query(MarketEvent).filter_by(id=event_instance.event_id).first()
     if event is None:
         return None
 

@@ -1,6 +1,7 @@
 from datetime import date
 
 from sqlalchemy import BigInteger, CheckConstraint, Date, ForeignKey, Numeric, String, UniqueConstraint
+from sqlalchemy import BigInteger, CheckConstraint, Date, ForeignKey, Index, Numeric, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from db.models.base import Base, TimestampMixin
@@ -28,6 +29,7 @@ class PriceHistory(Base, TimestampMixin):
         UniqueConstraint(
             "company_id", "timeline_id", "sim_date", name="uq_price_history_company_timeline_date"
         ),
+        Index("ix_price_history_timeline_company_date", "timeline_id", "company_id", "sim_date"),
     )
 
 
@@ -51,6 +53,7 @@ class PriceDriverScore(Base, TimestampMixin):
             "driver_key",
             name="uq_price_driver_scores_company_timeline_date_driver",
         ),
+        Index("ix_pds_timeline_date_driver", "timeline_id", "sim_date", "driver_key"),
     )
 
 
@@ -72,4 +75,5 @@ class EconomicCycleState(Base, TimestampMixin):
             "cycle_phase in ('expansion', 'peak', 'contraction', 'trough')",
             name="ck_economic_cycle_states_phase",
         ),
+        Index("ix_ecs_timeline_date", "timeline_id", "sim_date"),
     )

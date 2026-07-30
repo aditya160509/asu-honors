@@ -104,7 +104,7 @@ def seed(session: Session) -> None:
             # ── Insert with idempotency ──────────────────────────────
             if not session.query(IncomeStatement).filter_by(company_id=company.id, fiscal_period=period).first():
                 session.add(IncomeStatement(
-                    company_id=company.id, fiscal_period=period,
+                    company_id=company.id, timeline_id=1, fiscal_period=period,
                     revenue=revenue, cogs=cogs, gross_profit=gross_profit,
                     operating_expenses=operating_expenses, ebitda=ebitda,
                     depreciation_amortization=depreciation_amortization, ebit=ebit,
@@ -114,7 +114,7 @@ def seed(session: Session) -> None:
 
             if not session.query(BalanceSheet).filter_by(company_id=company.id, fiscal_period=period).first():
                 session.add(BalanceSheet(
-                    company_id=company.id, fiscal_period=period,
+                    company_id=company.id, timeline_id=1, fiscal_period=period,
                     cash_and_equivalents=cash, receivables=receivables,
                     inventory=inventory, current_assets=current_assets,
                     ppe=ppe, intangibles=intangibles, total_assets=total_assets,
@@ -126,7 +126,7 @@ def seed(session: Session) -> None:
 
             if not session.query(CashFlowStatement).filter_by(company_id=company.id, fiscal_period=period).first():
                 session.add(CashFlowStatement(
-                    company_id=company.id, fiscal_period=period,
+                    company_id=company.id, timeline_id=1, fiscal_period=period,
                     operating_cash_flow=operating_cash_flow, capex=capex,
                     free_cash_flow=free_cash_flow, investing_cash_flow=investing_cash_flow,
                     financing_cash_flow=financing_cash_flow, dividends_paid=dividends_paid,
@@ -135,7 +135,7 @@ def seed(session: Session) -> None:
 
             if not session.query(ConsensusEstimate).filter_by(company_id=company.id, fiscal_period=period).first():
                 session.add(ConsensusEstimate(
-                    company_id=company.id, fiscal_period=period,
+                    company_id=company.id, timeline_id=1, fiscal_period=period,
                     consensus_eps=consensus_eps, consensus_revenue=consensus_revenue,
                 ))
 

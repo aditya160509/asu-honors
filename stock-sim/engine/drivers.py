@@ -1,7 +1,13 @@
 """Section 6.G-6.H — the 7 price drivers and their composite pressure."""
 
 import math
-from typing import Literal
+from typing import Literal, Optional
+
+import numpy as np
+try:
+    from numba import njit
+except ImportError:
+    def njit(f): return f
 
 DEFAULT_DRIVER_WEIGHTS = {
     "value_opportunity": 0.10,
@@ -12,6 +18,12 @@ DEFAULT_DRIVER_WEIGHTS = {
     "technical_momentum": 0.10,
     "institutional_buying": 0.15,
 }
+
+DRIVER_KEYS_ORDERED = [
+    "value_opportunity", "earnings_surprise", "news_severity",
+    "economic_outlook", "guidance", "technical_momentum",
+    "institutional_buying",
+]
 
 
 def _clamp(x: float, lo: float = -1.0, hi: float = 1.0) -> float:
@@ -60,7 +72,7 @@ def economic_outlook(cycle_signal: float) -> float:
     return _clamp(cycle_signal)
 
 
-def guidance(direction: Literal["raised", "maintained", "cut"], jump_size: float, days_since: int, decay_rate: float) -> float:
+def guidance(direction: str, jump_size: float, days_since: int, decay_rate: float) -> float:
     """Section 6.G — G = signed jump_size (raised=+1, cut=-1, maintained=0) decayed over time, clamped."""
     sign = {"raised": 1.0, "maintained": 0.0, "cut": -1.0}[direction]
     decayed = sign * jump_size * math.exp(-decay_rate * days_since)
@@ -77,6 +89,11 @@ def institutional_buying(net_flow_signal: float) -> float:
     return _clamp(net_flow_signal)
 
 
-def composite_price_pressure(drivers: dict[str, float], weights: dict[str, float] = DEFAULT_DRIVER_WEIGHTS) -> float:
-    """Section 6.H — weighted sum of the 7 price drivers (VO/ES/NS/EO/G/TM/IB)."""
-    return sum(weights.get(key, 0) * value for key, value in drivers.items())
+def composite_price_pressure(
+    driver_values: "np.ndarray",
+    driver_weights: "np.ndarray" = DEFAULT_DRIVER_WEIGHTS,
+) -> float:
+    """Section 6.H — weighted sum preserving legacy Python evaluation order."""
+    if isinstance(driver_values, dict):
+        return sum(float(driver_weights.get(key, 0.0)) * float(value) for key, value in driver_values.items())
+    return sum(float(weight) * float(value) for value, weight in zip(driver_values, driver_weights))

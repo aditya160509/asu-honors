@@ -11,7 +11,7 @@ from apps.api.schemas import AdvanceResponse
 from apps.api.services import notification_service
 from apps.api.services.trade_service import check_and_fill_limit_orders
 from db.models import ConfigParameter, EventInstance, MarketEvent, SimulationState, Timeline
-from engine.orchestrator import run_ticks
+from engine.orchestrator import bulk_run_ticks, run_ticks
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +45,37 @@ def advance_simulation(db: Session, timeline_id: int, days: int) -> AdvanceRespo
     else:
         new_sim_date = last.get("next_date") or last.get("sim_date") or date.today()  # pragma: no cover — run_ticks always creates sim_state
         tick_count = last.get("tick_count", 0)  # pragma: no cover
+
+    cycle_phase = last.get("cycle_phase")
+
+    return AdvanceResponse(
+        ticks_executed=ticks_executed,
+        new_sim_date=new_sim_date,
+        tick_count=tick_count,
+        cycle_phase=cycle_phase,
+    )
+
+
+def bulk_advance_simulation(db: Session, timeline_id: int, days: int) -> AdvanceResponse:
+    """Advance the simulation by `days` ticks using the bulk in-memory path.
+
+    Calls bulk_run_ticks which loads static reference data once, runs N ticks
+    entirely in memory, and bulk-flushes all writes once at the end. The
+    post-bulk bookkeeping (limit orders, price alerts, watchlist movers) is
+    handled inside bulk_run_ticks.
+    """
+    results = bulk_run_ticks(db, timeline_id, num_ticks=days)
+
+    ticks_executed = sum(1 for r in results if r.get("status") == "completed")
+    last = results[-1] if results else {}
+
+    sim_state = db.query(SimulationState).filter_by(timeline_id=timeline_id).first()
+    if sim_state is not None:
+        new_sim_date = sim_state.current_sim_date
+        tick_count = sim_state.tick_count
+    else:
+        new_sim_date = last.get("next_date") or last.get("sim_date") or date.today()
+        tick_count = last.get("tick_count", 0)
 
     cycle_phase = last.get("cycle_phase")
 

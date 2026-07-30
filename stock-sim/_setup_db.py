@@ -26,8 +26,8 @@ def run_seed(name):
         session.commit()
     print(f"OK: {name}")
 
-for s in ["seed_config", "seed_industries", "seed_companies", "seed_financials",
-          "seed_events", "seed_demo", "seed_initial_prices", "seed_dividends"]:
+for s in ["seed_config", "seed_industries", "seed_demo", "seed_companies", "seed_financials",
+          "seed_events", "seed_initial_prices", "seed_dividends"]:
     run_seed(s)
 
 print("\nDatabase setup complete.")

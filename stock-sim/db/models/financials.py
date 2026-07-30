@@ -1,4 +1,4 @@
-from sqlalchemy import ForeignKey, Numeric, String, UniqueConstraint
+from sqlalchemy import ForeignKey, Index, Numeric, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from db.models.base import Base, TimestampMixin
@@ -29,6 +29,7 @@ class IncomeStatement(Base, TimestampMixin):
         UniqueConstraint(
             "company_id", "fiscal_period", "timeline_id", name="uq_income_statements_company_period"
         ),
+        Index("ix_is_timeline_company_period", "timeline_id", "company_id", "fiscal_period"),
     )
 
 
@@ -59,6 +60,7 @@ class BalanceSheet(Base, TimestampMixin):
         UniqueConstraint(
             "company_id", "fiscal_period", "timeline_id", name="uq_balance_sheets_company_period"
         ),
+        Index("ix_bs_timeline_company_period", "timeline_id", "company_id", "fiscal_period"),
     )
 
 
@@ -82,6 +84,7 @@ class CashFlowStatement(Base, TimestampMixin):
         UniqueConstraint(
             "company_id", "fiscal_period", "timeline_id", name="uq_cash_flow_statements_company_period"
         ),
+        Index("ix_cf_timeline_company_period", "timeline_id", "company_id", "fiscal_period"),
     )
 
 
@@ -99,4 +102,5 @@ class ConsensusEstimate(Base, TimestampMixin):
         UniqueConstraint(
             "company_id", "fiscal_period", "timeline_id", name="uq_consensus_estimates_company_period"
         ),
+        Index("ix_ce_timeline_company_period", "timeline_id", "company_id", "fiscal_period"),
     )

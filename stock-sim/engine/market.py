@@ -1,6 +1,10 @@
 """Section 6.I-6.J — Ornstein-Uhlenbeck mean-reversion core and volatility sizing."""
 
 import numpy as np
+try:
+    from numba import njit
+except ImportError:
+    def njit(f): return f
 
 
 def company_volatility(sigma_ind: float, market_cap: float, leverage: float) -> float:

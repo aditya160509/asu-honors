@@ -28,21 +28,31 @@ from sqlalchemy.orm import Session
 from db.models import EconomicCycleState, PriceHistory, Timeline
 
 
-def get_timeline_chain(session: Session, timeline_id: int) -> list[int]:
+def get_timeline_chain(session: Session, timeline_id: int, timeline: Optional[Timeline] = None) -> list[int]:
     """[timeline_id, parent_id, grandparent_id, ...] up to the root.
 
     Walks Timeline.parent_timeline_id. Bounded defensively at 100 hops --
     the parent chain is meant to be a simple tree with no cycles, but a
     corrupt/manually-edited row forming a cycle must not hang the caller.
+
+    `timeline` lets a caller that already fetched the Timeline row pass it
+    in instead of re-querying (SPEED.md #2).
     """
     chain = [timeline_id]
     current_id: Optional[int] = timeline_id
     seen = {timeline_id}
-    for _ in range(100):
-        timeline = session.query(Timeline).filter_by(id=current_id).first()
-        if timeline is None or timeline.parent_timeline_id is None:
-            break
+    # Use the pre-fetched timeline for the first hop if provided
+    if timeline is not None and timeline.parent_timeline_id is not None:
         parent_id = timeline.parent_timeline_id
+        if parent_id not in seen:
+            chain.append(parent_id)
+            seen.add(parent_id)
+            current_id = parent_id
+    for _ in range(100):
+        tl = session.query(Timeline).filter_by(id=current_id).first()
+        if tl is None or tl.parent_timeline_id is None:
+            break
+        parent_id = tl.parent_timeline_id
         if parent_id in seen:
             break
         chain.append(parent_id)
@@ -132,6 +142,44 @@ def get_latest_intrinsic_values(
     See get_latest_prices's docstring for `timeline_chain`.
     """
     return _latest_column_batch(session, company_ids, timeline_id, PriceHistory.intrinsic_value, timeline_chain)
+
+
+def get_latest_prices_and_ivs(
+    session: Session, company_ids: list[int], timeline_id: int,
+    timeline_chain: Optional[list[int]] = None,
+) -> tuple[dict[int, Decimal], dict[int, Decimal]]:
+    """Batch form that fetches both `close` and `intrinsic_value` in one pass
+    instead of two separate queries (SPEED.md #6).
+
+    Same parent-chain fallback, same `timeline_chain` shortcut, same semantics
+    as calling get_latest_prices + get_latest_intrinsic_values separately, but
+    resolves both columns from the same PriceHistory rows in a single traversal.
+    """
+    if not company_ids:
+        return {}, {}
+    remaining = set(company_ids)
+    prices: dict[int, Decimal] = {}
+    ivs: dict[int, Decimal] = {}
+    for tid in (timeline_chain if timeline_chain is not None else get_timeline_chain(session, timeline_id)):
+        if not remaining:
+            break
+        rows = (
+            session.query(PriceHistory.company_id, PriceHistory.close, PriceHistory.intrinsic_value, PriceHistory.sim_date)
+            .filter(PriceHistory.timeline_id == tid, PriceHistory.company_id.in_(remaining))
+            .order_by(PriceHistory.company_id.asc(), PriceHistory.sim_date.desc())
+            .all()
+        )
+        seen_this_level: set[int] = set()
+        for company_id, close, iv, _sim_date in rows:
+            if company_id in seen_this_level:
+                continue
+            seen_this_level.add(company_id)
+            if company_id not in prices and close is not None:
+                prices[company_id] = close
+            if company_id not in ivs and iv is not None:
+                ivs[company_id] = iv
+        remaining -= seen_this_level
+    return prices, ivs
 
 
 def _latest_column_batch(

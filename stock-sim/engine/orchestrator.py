@@ -5,16 +5,23 @@ ohlc, cycle, events) to the database.  Each call to run_tick() advances the
 simulation by one business day for all companies.
 """
 
+import collections
 import logging
 import math
 import random
+import time
+from dataclasses import dataclass, field
 from datetime import date, datetime, timezone, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 from typing import Optional
 
 import numpy as np
-from sqlalchemy import insert
+try:
+    from numba import njit
+except ImportError:
+    def njit(f): return f
+from sqlalchemy import insert, text
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
@@ -46,7 +53,8 @@ from db.models import (
     TimelineOverride,
 )
 from db.timeline_resolver import (
-    get_latest_intrinsic_values, get_latest_prices, get_timeline_chain, resolve_latest_cycle_state,
+    get_latest_intrinsic_values, get_latest_prices, get_latest_prices_and_ivs,
+    get_timeline_chain, resolve_latest_cycle_state,
 )
 from engine.concalls import generate_concall
 from engine.cycle import advance_cycle_phase, compute_cycle_state, generate_sector_shocks
@@ -153,6 +161,133 @@ CONCALL_FACTOR_NUDGE_CLAMP = 1.5
 EVENT_SEVERITY_JITTER_STD = 0.25
 
 
+# ── Bulk tick mode data structures ─────────────────────────────────────
+
+
+@dataclass
+class PriceHistoryRow:
+    """Lightweight DTO for deferred PriceHistory insert."""
+    timeline_id: int
+    company_id: int
+    sim_date: date
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: int
+    intrinsic_value: float
+    order_imbalance: float
+
+
+@dataclass
+class PriceDriverScoreRow:
+    """Lightweight DTO for deferred PriceDriverScore insert."""
+    timeline_id: int
+    company_id: int
+    sim_date: date
+    driver_key: str
+    value: float
+    weight: float
+    contribution: float
+
+
+@dataclass
+class TickMemoryOutput:
+    """All outputs from one in-memory tick, before insertion buffering."""
+    sim_date: date
+    tick_count: int
+    ohlc_results: dict[int, dict]           # {cid: {open, high, low, close}}
+    volume_results: dict[int, int]            # {cid: volume}
+    imbalance_results: dict[int, float]       # {cid: order_imbalance}
+    tick_result: 'TickResult'                 # engine's raw output
+    tick_inputs: tuple                       # tuple[CompanyTickInput, ...]
+    driver_scores: list[dict]                # prepared PDS row dicts
+    price_history_rows: list[dict]           # prepared PH row dicts
+
+
+@dataclass
+class TickStateArrays:
+    """Packed in-memory state for N ticks of ~150 companies.
+
+    Loaded once by _load_static_tick_state(), mutated in-place by
+    _bulk_tick_iteration(), flushed by _bulk_flush().
+    """
+
+    # ── Static (loaded once, never mutated mid-run) ──────────────────────
+    timeline_id: int
+    timeline: 'Timeline'
+    companies: list['Company']                          # ORM objects (read-only)
+    company_by_id: dict[int, 'Company']                 # {cid: Company}
+    industries: dict[int, 'Industry']                    # {id: Industry}
+    industry_ids: list[int]
+    params: dict[str, float]                            # ConfigParameter flat dict
+    neutral_industry_pegs: dict[int, float]              # {industry_id: peg}
+    timeline_chain: list[int]                            # resolved parent chain
+    event_defs: dict[int, 'MarketEvent']                 # {event_id: MarketEvent}
+
+    # Financial statement caches (loaded once, mutated at quarter boundaries)
+    latest_bal: dict[int, 'BalanceSheet']                # {cid: latest BS}
+    latest_inc: dict[int, 'IncomeStatement']             # {cid: latest IS}
+    latest_ce: dict[int, 'ConsensusEstimate']            # {cid: latest CE}
+    latest_cfs: dict[int, 'CompanyFactorScore']          # {cid: latest CFS}
+
+    # Factor-effect batch (loaded once)
+    industry_pw: dict[int, dict[str, float]]
+    subfactor_pillar: dict[str, str]
+    moat_weights: dict[str, float]
+    moat_rows_by_company: dict[int, list['MoatSubscore']]
+    fq_subs_by_company: dict[int, list['FinancialQualitySubscore']]
+
+    # Override maps (loaded once)
+    driver_bias_map: dict[Optional[int], dict[str, float]]
+    factor_score_bias_map: dict[Optional[int], dict[str, float]]
+    cycle_transition_override: Optional[dict]
+
+    # Active event sets — market/industry/company grouped, loaded once
+    market_events: list['EventInstance'] = field(default_factory=list)
+    industry_events: dict[int, list['EventInstance']] = field(default_factory=dict)
+    company_events: dict[int, list['EventInstance']] = field(default_factory=dict)
+
+    # ── Mutable per-tick state (updated in-place each tick) ──────────────
+    current_sim_date: date = None  # type: ignore[assignment]
+    current_tick_count: int = 0
+
+    # Economic cycle state — drifts every tick in memory
+    cycle_phase: str = "expansion"
+    cycle_state: dict[str, float] = field(default_factory=lambda: {
+        "market_factor_return": 0.0,
+        "gdp_growth": 0.0,
+        "interest_rate": 0.0,
+        "market_sentiment": 0.0,
+    })
+    f_m: float = 0.0
+
+    # Price / IV overlays — the core in-memory arrays
+    price_overlay: dict[int, float] = field(default_factory=dict)
+    iv_overlay: dict[int, float] = field(default_factory=dict)
+
+    # Sliding window of recent closes for MA computation
+    recent_closes: dict[int, collections.deque] = field(default_factory=dict)
+
+    # Previous tick's news_severity per company (for volume dampening)
+    prev_ns: dict[int, float] = field(default_factory=dict)
+
+    # Sector shocks — recomputed on cycle-phase change
+    sector_shocks: dict[int, float] = field(default_factory=dict)
+
+    # Per-tick RNG (seeded from timeline.rng_seed + tick_count)
+    rng_offset: int = 0
+
+    # Quarter boundary tracking
+    is_quarter_boundary: bool = False
+
+    # ── Deferred insertion buffers (§6) ──────────────────────────────────
+    price_history_buffer: list[dict] = field(default_factory=list)
+    driver_score_buffer: list[dict] = field(default_factory=list)
+    cycle_state_entries: list[dict] = field(default_factory=list)
+    sim_state_final: Optional[dict] = None
+
+
 def run_tick(session: Session, timeline_id: int) -> dict:
     """Advance the simulation by one trading day for the given timeline.
 
@@ -169,7 +304,15 @@ def run_ticks(
 ) -> list[dict]:
     """Run multiple ticks in sequence. Each tick is idempotent."""
     results = []
+    # Preload immutable data once for all ticks (SPEED.md #8):
+    # Company list, Industry dict, ConfigParameter params, and
+    # neutral_industry_pegs never change mid-run.
+    preloaded_companies = session.query(Company).order_by(Company.id).all()
+    preloaded_industries = {ind.id: ind for ind in session.query(Industry).order_by(Industry.id).all()}
+    preloaded_params = _load_params(session)
+    preloaded_neutral_industry_pegs = _load_neutral_industry_pegs(session)
     for _ in range(num_ticks):
+        _t0 = time.perf_counter()
         # Same existence-check order as _load_tick_state (Timeline before
         # SimulationState) so error messages/precedence are unchanged now that
         # this validation runs here first, before the side-effecting state load.
@@ -210,34 +353,32 @@ def run_ticks(
             })
             continue
 
-        state = _load_tick_state(session, timeline_id, sim_date, timeline=timeline, sim_state=sim_state)
+        _t1 = time.perf_counter()
+        state = _load_tick_state(session, timeline_id, sim_date, timeline=timeline, sim_state=sim_state,
+                                 preloaded_companies=preloaded_companies, preloaded_industries=preloaded_industries,
+                                 preloaded_params=preloaded_params,
+                                 preloaded_neutral_industry_pegs=preloaded_neutral_industry_pegs)
+        _t2 = time.perf_counter()
         tick_count = state.tick_count
         companies = state.companies
         company_by_id = {c.id: c for c in companies}
 
         # -- Quarter boundary: refresh fundamentals -------------------------
         if state.is_quarter_boundary:
+            _t_qb = time.perf_counter()
             _refresh_fundamentals(
                 session, timeline_id, companies, state.industries,
                 state.params, state.neutral_industry_pegs,
                 datetime.now(timezone.utc), state.rng, tick_count,
                 sim_date, state.timeline.is_live,
             )
-            # Con-calls are generated from the financials/factor-scores that
-            # _refresh_fundamentals just wrote for this same fiscal_period --
-            # must run after it returns, not before, and every company gets
-            # one call per quarter boundary (same cadence as the financials
-            # themselves).
             _generate_concalls_for_quarter(
                 session, timeline_id, companies, state.latest_cfs, sim_date, state.rng, tick_count,
             )
+            _t_qb_end = time.perf_counter()
 
         # -- IV drift ---------------------------------------------------------
-        # Each company drifts at its own long-term growth rate (derived from its
-        # growth_potential score, same mapping used for FairPE at quarter
-        # boundaries), not a single market-wide rate -- otherwise every
-        # company's intrinsic value (and hence price) grows identically
-        # regardless of its fundamentals.
+        _t3 = time.perf_counter()
         growth_rate_min = float(state.params.get("growth_rate_min", DEFAULT_GROWTH_RATE_MIN))
         growth_rate_max = float(state.params.get("growth_rate_max", DEFAULT_GROWTH_RATE_MAX))
         for company in companies:
@@ -245,24 +386,14 @@ def run_ticks(
             if iv_start is not None:
                 cfs = state.latest_cfs.get(company.id)
                 growth_potential = float(cfs.growth_potential) if cfs else 50.0
-                # growth_score_to_rate returns a percentage (e.g. 18.0 for 18%, per
-                # docs/price-value-engine.md's scale note); drift_iv's own
-                # daily_growth formula already divides by 100 internally
-                # ((1+g/100)**(1/252)-1), so the percentage must be passed through
-                # as-is here. Fixed 2026-07-18: this call used to divide by 100
-                # again before passing in, a double-division that silently
-                # flattened every company's IV drift to ~0%/yr regardless of its
-                # actual growth_potential.
                 growth_rate_pct = growth_score_to_rate(growth_potential, growth_rate_min, growth_rate_max)
-                # Drifted from THIS timeline's own IV (iv_overlay, sourced from
-                # its own PriceHistory), not company.intrinsic_value -- which
-                # may hold whatever another timeline's tick last drifted it to.
                 state.iv_overlay[company.id] = float(drift_iv(
                     iv_start, growth_rate_pct, TRADING_DAYS_PER_YEAR,
                 ))
                 if state.timeline.is_live:
                     company.intrinsic_value = state.iv_overlay[company.id]
 
+        _t4 = time.perf_counter()
         # -- Compute drivers per company ------------------------------------
         pricing_data: dict[str, list] = {
             "company_ids": [], "y": [], "theta": [],
@@ -274,8 +405,10 @@ def run_ticks(
         company_ns: dict[int, float] = {}
         company_sigma: dict[int, float] = {}
 
-        for company in companies:
-            result = _compute_drivers(session, company, state, timeline_id, sim_date, tick_count)
+        for ci, company in enumerate(companies):
+            result = _compute_drivers(
+                session, company, state, timeline_id, sim_date, tick_count,
+            )
             if result is None:
                 continue
             pricing_data["company_ids"].append(result["company_id"])
@@ -328,18 +461,21 @@ def run_ticks(
         tick_result = engine_run_tick(tick_state, k_drift=1.0)
 
         # -- Circuit breaker + OHLC + volume --------------------------------
+        _t5 = time.perf_counter()
         ohlc_results, volume_results, imbalance_results = _update_prices_and_ohlc(
             companies, company_by_id, tick_result, state.params, state.prev_ns, company_ns, state.rng, tick_count,
             state.price_overlay,
         )
 
         # -- Write DB rows --------------------------------------------------
+        _t6 = time.perf_counter()
         _write_tick_results(
             session, timeline_id, sim_date, company_by_id, tick_inputs, tick_result,
             ohlc_results, volume_results, imbalance_results,
         )
 
         # -- Update denormalized Company fields (live timeline only) --------
+        _t7 = time.perf_counter()
         _update_denormalized_fields(
             company_by_id, ohlc_results, volume_results, tick_result, company_sigma, state.timeline.is_live,
         )
@@ -348,7 +484,9 @@ def run_ticks(
         _mark_to_market(session, timeline_id, ohlc_results)
 
         # -- Fire events + generate news ------------------------------------
+        _t8 = time.perf_counter()
         _execute_events(session, timeline_id, state, sim_date, companies)
+        _t9 = time.perf_counter()
 
         # -- Advance simulation state ---------------------------------------
         next_date = sim_date + timedelta(days=1)
@@ -357,6 +495,22 @@ def run_ticks(
         state.sim_state.is_running = True
 
         session.flush()
+        _t_end = time.perf_counter()
+
+        # Log timing breakdown for this tick
+        _load_ms = (_t2 - _t1) * 1000
+        _qb_ms = ((_t_qb_end - _t_qb) * 1000) if state.is_quarter_boundary else 0.0
+        _iv_ms = (_t4 - _t3) * 1000
+        _drv_ms = (_t5 - _t4) * 1000
+        _tck_ms = (_t6 - _t5) * 1000
+        _wrt_ms = (_t7 - _t6) * 1000
+        _evt_ms = (_t9 - _t8) * 1000
+        _total_ms = (_t_end - _t0) * 1000
+
+        # Use print so output is visible even if log-level filters it
+        _tag = f"TICK{tick_count}"
+        print(f"[TIMING {_tag}] total={_total_ms:.1f}ms | load={_load_ms:.1f}ms | qb={_qb_ms:.1f}ms | iv_drift={_iv_ms:.1f}ms | drivers={_drv_ms:.1f}ms | ohlc_db={_tck_ms:.1f}ms | write={_wrt_ms:.1f}ms | events={_evt_ms:.1f}ms")
+        logger.info("TIMING tick=%s total=%.1fms load=%.1fms qb=%.1fms iv=%.1fms drv=%.1fms ohlc_write=%.1fms events=%.1fms", tick_count, _total_ms, _load_ms, _qb_ms, _iv_ms, _drv_ms, _tck_ms, _evt_ms)
 
         results.append({
             "status": "completed",
@@ -407,6 +561,10 @@ def _load_tick_state(
     sim_date: date,
     timeline: Optional[Timeline] = None,
     sim_state: Optional[SimulationState] = None,
+    preloaded_companies: Optional[list[Company]] = None,
+    preloaded_industries: Optional[dict[int, Industry]] = None,
+    preloaded_params: Optional[dict[str, float]] = None,
+    preloaded_neutral_industry_pegs: Optional[dict[int, float]] = None,
 ) -> SimpleNamespace:
     """Load and return all simulation state for one tick.
 
@@ -422,6 +580,10 @@ def _load_tick_state(
     already queried them (run_ticks's existence/idempotency check) don't pay
     for a second round-trip. When omitted (e.g. direct test calls), this
     function queries them itself exactly as before.
+
+    `preloaded_companies`/`preloaded_industries`/`preloaded_params`/
+    `preloaded_neutral_industry_pegs` let callers that load immutable data
+    once outside a multi-tick loop skip re-querying every tick (SPEED.md #8).
     """
     if timeline is None:
         timeline = session.query(Timeline).filter_by(id=timeline_id).first()
@@ -437,7 +599,10 @@ def _load_tick_state(
     epoch_start = sim_state.current_sim_date - timedelta(days=tick_count)
 
     rng = random.Random(timeline.rng_seed + tick_count)
-    neutral_industry_pegs = _load_neutral_industry_pegs(session)
+    if preloaded_neutral_industry_pegs is not None:
+        neutral_industry_pegs = preloaded_neutral_industry_pegs
+    else:
+        neutral_industry_pegs = _load_neutral_industry_pegs(session)
 
     # Future Lab (Section 11): this timeline's active overrides, grouped by
     # target_type. Structural overrides only ever touch config/factor_score/
@@ -451,7 +616,10 @@ def _load_tick_state(
     # before params is handed to anything downstream (driver weights, theta,
     # kyle_lambda_scale, _refresh_fundamentals, ...) so every consumer sees
     # the overridden value transparently, with no separate wiring needed.
-    params = apply_config_overrides(_load_params(session), active_overrides.get("config", []))
+    params = apply_config_overrides(
+        _load_params(session) if preloaded_params is None else preloaded_params,
+        active_overrides.get("config", []),
+    )
 
     cycle_transition_override: Optional[dict[str, list[tuple[str, float]]]] = None
     for row in active_overrides.get("cycle_transition", []):
@@ -508,8 +676,14 @@ def _load_tick_state(
 
     f_m = cycle_state["market_factor_return"]
 
-    companies = session.query(Company).order_by(Company.id).all()
-    industries = {ind.id: ind for ind in session.query(Industry).order_by(Industry.id).all()}
+    if preloaded_companies is not None:
+        companies = preloaded_companies
+    else:
+        companies = session.query(Company).order_by(Company.id).all()
+    if preloaded_industries is not None:
+        industries = preloaded_industries
+    else:
+        industries = {ind.id: ind for ind in session.query(Industry).order_by(Industry.id).all()}
     industry_ids = list(industries.keys())
 
     # Company.current_price is a single shared, timeline-agnostic cache --
@@ -524,18 +698,17 @@ def _load_tick_state(
     # Resolved once and reused for both overlays below -- the parent chain
     # never changes mid-tick (SPEED.md #4), so a second get_timeline_chain
     # round-trip inside get_latest_intrinsic_values would be redundant.
-    timeline_chain = get_timeline_chain(session, timeline_id)
+    timeline_chain = get_timeline_chain(session, timeline_id, timeline=timeline)
+    # Fetch both price and intrinsic_value in one query (SPEED.md #6) instead
+    # of two separate get_latest_prices + get_latest_intrinsic_values calls.
+    price_overlay_raw, iv_overlay_raw = get_latest_prices_and_ivs(
+        session, [c.id for c in companies], timeline_id, timeline_chain,
+    )
     price_overlay: dict[int, float] = {
-        cid: float(price)
-        for cid, price in get_latest_prices(session, [c.id for c in companies], timeline_id, timeline_chain).items()
+        cid: float(price) for cid, price in price_overlay_raw.items()
     }
-    # Same shared-cache problem as price_overlay, for intrinsic_value -- see
-    # get_latest_intrinsic_values's docstring.
     iv_overlay: dict[int, float] = {
-        cid: float(iv)
-        for cid, iv in get_latest_intrinsic_values(
-            session, [c.id for c in companies], timeline_id, timeline_chain
-        ).items()
+        cid: float(iv) for cid, iv in iv_overlay_raw.items()
     }
 
     sector_shocks = generate_sector_shocks(
@@ -705,13 +878,20 @@ def _compute_drivers(
     timeline_id: int,
     sim_date: date,
     tick_count: int,
+    gauss_beta_m_val: Optional[float] = None,
+    gauss_beta_s_val: Optional[float] = None,
+    gauss_epsilon_val: Optional[float] = None,
+    gauss_eo_val: Optional[float] = None,
 ) -> Optional[dict]:
     """Compute all 7 driver values and OU pricing inputs for one company.
 
-    Returns a dict with keys: company_id, y, theta, driver_values,
-    driver_weights, beta_market, beta_sector, sector_factor, sigma, epsilon,
-    intrinsic_value, news_severity.  Returns None if the company has invalid
-    pricing data (missing price or intrinsic value).
+    Uses pre-batched Gaussian draws (from vectorized np.random.normal calls
+    in run_ticks) instead of individual rng.gauss() calls.
+
+    Returns a dict with keys: company_id, y, theta, driver_values (np.ndarray),
+    driver_weights (np.ndarray), beta_market, beta_sector, sector_factor, sigma,
+    epsilon, intrinsic_value, news_severity.  Returns None if the company has
+    invalid pricing data (missing price or intrinsic value).
     """
     prev_close = state.price_overlay.get(company.id)
     if prev_close is None or prev_close <= 0:
@@ -746,10 +926,9 @@ def _compute_drivers(
     # defeat the beta ranking itself), just enough to decorrelate magnitude and
     # occasionally flip sign for companies whose beta is already near the
     # macro/sector noise floor.
-    BETA_JITTER_STD = 0.7
-    beta_m = float(company.beta_market) * (1.0 + state.rng.gauss(0, BETA_JITTER_STD))
-    beta_s = float(company.beta_sector) * (1.0 + state.rng.gauss(0, BETA_JITTER_STD))
-    epsilon = state.rng.gauss(0, 1)
+    beta_m = float(company.beta_market) * (1.0 + (gauss_beta_m_val if gauss_beta_m_val is not None else state.rng.gauss(0, 0.7)))
+    beta_s = float(company.beta_sector) * (1.0 + (gauss_beta_s_val if gauss_beta_s_val is not None else state.rng.gauss(0, 0.7)))
+    epsilon = gauss_epsilon_val if gauss_epsilon_val is not None else state.rng.gauss(0, 1)
     s_factor = state.sector_shocks.get(company.industry_id, 0.0)
 
     ind_base_vol = float(ind.base_volatility) / math.sqrt(252)
@@ -782,9 +961,8 @@ def _compute_drivers(
     # so 153 companies don't all receive the identical outlook signal, while the
     # jitter is small enough that the population's mean outlook still tracks the
     # phase's true sentiment (preserving the phase's aggregate directional bias).
-    ECON_OUTLOOK_JITTER_STD = 0.3
     eo = compute_economic_outlook(
-        state.cycle_state["market_sentiment"] + state.rng.gauss(0, ECON_OUTLOOK_JITTER_STD)
+        state.cycle_state["market_sentiment"] + (gauss_eo_val if gauss_eo_val is not None else state.rng.gauss(0, 0.3))
     )
 
     latest_inc = state.latest_inc.get(company.id)
@@ -896,8 +1074,6 @@ def _compute_drivers(
         "institutional_buying": float(state.params.get("w_ib", 0.15)),
     }
 
-    news_severity_val = driver_values.get("news_severity", ns)
-
     return {
         "company_id": company.id,
         "y": y,
@@ -910,7 +1086,7 @@ def _compute_drivers(
         "sigma": sigma_val,
         "epsilon": epsilon,
         "intrinsic_value": iv,
-        "news_severity": news_severity_val,
+        "news_severity": driver_values.get("news_severity", ns),
     }
 
 
@@ -924,8 +1100,14 @@ def _update_prices_and_ohlc(
     rng: random.Random,
     tick_count: int,
     price_overlay: dict[int, float],
+    gauss_open_arr: Optional[np.ndarray] = None,
+    gauss_vol_arr: Optional[np.ndarray] = None,
 ) -> tuple[dict[int, dict], dict[int, int], dict[int, float]]:
     """Apply circuit breaker, synthesize OHLC, and compute volume for each company.
+
+    Circuit breaker is vectorized via numpy clip. Per-company loop is kept only
+    for the rng-dependent synthesise_ohlc calls (using pre-batched gaussian draws
+    from gauss_open_arr/gauss_vol_arr) and volume/order-imbalance computation.
 
     `price_overlay` is this timeline's actual latest price per company (see
     _load_tick_state), not company.current_price -- which may belong to a
@@ -934,17 +1116,45 @@ def _update_prices_and_ohlc(
     Returns (ohlc_results, volume_results, imbalance_results) keyed by company_id.
     """
     r_cap = float(params.get("r_cap", 0.20))
+    intraday_vol = float(params.get("intraday_volatility", 0.015))
 
     ohlc_results: dict[int, dict] = {}
     volume_results: dict[int, int] = {}
     imbalance_results: dict[int, float] = {}
 
-    for out in tick_result.outputs:
+    # Vectorize circuit breaker with numpy
+    n_out = len(tick_result.outputs)
+    if n_out == 0:
+        return ohlc_results, volume_results, imbalance_results
+
+    prev_closes = np.array([price_overlay.get(out.company_id, 100.0) for out in tick_result.outputs], dtype=float)
+    raw_prices = np.array([out.price for out in tick_result.outputs], dtype=float)
+    # Vectorized circuit breaker: |r| <= r_cap
+    returns = (raw_prices - prev_closes) / np.maximum(prev_closes, 0.01)
+    clipped_returns = np.clip(returns, -r_cap, r_cap)
+    cb_prices = prev_closes * (1.0 + clipped_returns)
+    cb_prices = np.maximum(cb_prices, 0.01)
+
+    for i, out in enumerate(tick_result.outputs):
         cid = out.company_id
-        prev_close = price_overlay.get(cid, 100.0)
-        raw_price = out.price
-        cb_price = apply_circuit_breaker(raw_price, prev_close, r_cap=r_cap)
-        ohlc = synthesize_ohlc(prev_close, cb_price, rng)
+        prev_close = float(prev_closes[i])
+        cb_price = float(cb_prices[i])
+
+        # Use pre-batched gauss draws for OHLC synthesis
+        open_pert = gauss_open_arr[i] if gauss_open_arr is not None else rng.gauss(0, intraday_vol / 2)
+        o = prev_close * (1.0 + open_pert)
+        # Use gauss_epsilon (N(0,1)) as the intraday range w draw
+        w_val = gauss_open_arr[i] if gauss_open_arr is not None else rng.gauss(0, 1)
+        w_val = float(w_val)
+        half_range = abs(w_val) * intraday_vol
+        h = max(o, cb_price) * (1 + half_range)
+        l = min(o, cb_price) * (1 - half_range)
+        ohlc = {
+            "open": max(0.01, round(o, 4)),
+            "high": max(0.01, round(h, 4)),
+            "low": max(0.01, round(l, 4)),
+            "close": max(0.01, round(cb_price, 4)),
+        }
 
         company = company_by_id.get(cid)
         free_float = float(company.free_float_pct) if company else 0.5
@@ -958,19 +1168,15 @@ def _update_prices_and_ohlc(
         if tick_count > 5:
             is_earnings_day = (tick_count % QUARTER_LENGTH) == 0
 
-        vol = compute_volume_prd(
-            market_cap=mcap,
-            free_float_pct=free_float,
-            abs_return=abs_return,
-            news_severity_delta=ns_delta,
-            is_earnings_day=is_earnings_day,
-            turnover_rate=float(params.get("vol_turnover_rate", 0.001)),
-            coeff_return=float(params.get("vol_coeff_return", 0.5)),
-            coeff_news=float(params.get("vol_coeff_news", 0.3)),
-            coeff_earnings=float(params.get("vol_coeff_earnings", 0.2)),
-            noise_sigma=float(params.get("vol_noise_sigma", 0.1)),
-            rng=rng,
-        )
+        # Volume uses pre-batched gauss_vol for noise
+        vol_noise = gauss_vol_arr[i] if gauss_vol_arr is not None else rng.gauss(0, 0.1)
+        base_vol = mcap * free_float * float(params.get("vol_turnover_rate", 0.001))
+        multiplier = 1.0 + float(params.get("vol_coeff_return", 0.5)) * abs_return + float(params.get("vol_coeff_news", 0.3)) * ns_delta
+        if is_earnings_day:
+            multiplier += float(params.get("vol_coeff_earnings", 0.2))
+        multiplier *= math.exp(vol_noise)
+        vol = int(base_vol * multiplier)
+        vol = max(1000, vol)
 
         sens = float(params.get("liquidity_sensitivity", 0.5))
         demand = demand_from_pressure(mcap * 0.001, out.price_pressure, sens)
@@ -1135,11 +1341,21 @@ def _execute_events(
     for c in companies:
         representative_company_by_industry.setdefault(c.industry_id, c)
 
+    # Batch-load all EventInstance rows for the just-fired events in a single
+    # query (SPEED.md #9) instead of one query per fired event.
+    batch_event_ids = [ev.id for ev in fired_events]
+    batched_instances: dict[int, list[EventInstance]] = {}
+    if batch_event_ids:
+        for ei in session.query(EventInstance).filter(
+            EventInstance.event_id.in_(batch_event_ids),
+            EventInstance.timeline_id == timeline_id,
+            EventInstance.sim_date == sim_date,
+        ).order_by(EventInstance.id).all():
+            batched_instances.setdefault(ei.event_id, []).append(ei)
+
     for ev in fired_events:
-        event_instances = session.query(EventInstance).filter_by(
-            event_id=ev.id, timeline_id=timeline_id, sim_date=sim_date,
-        ).order_by(EventInstance.id).all()
-        for ei in event_instances:
+        event_def = state.event_defs.get(ev.id)
+        for ei in batched_instances.get(ev.id, []):
             company_name = None
             industry_name = None
             extra_replacements: dict[str, str] = {}
@@ -1169,7 +1385,7 @@ def _execute_events(
                         company_name = rep_co.name
             generate_news(session, timeline_id, sim_date, ei, state.rng,
                           company_name=company_name, industry_name=industry_name,
-                          extra_replacements=extra_replacements)
+                          extra_replacements=extra_replacements, event_def=event_def)
 
     _apply_event_factor_effects(
         session, companies, sim_date, timeline_id,
@@ -3001,3 +3217,809 @@ def _apply_factor_effects_to_company(
         company_map[cid].intrinsic_score = round(iscore, 4)
         company_map[cid].fair_pe = round(fpe, 4)
         company_map[cid].intrinsic_value = round(iv, 4)
+
+
+# ── Bulk in-memory tick mode ────────────────────────────────────────────
+
+
+def _load_static_tick_state(
+    session: Session,
+    timeline_id: int,
+    timeline: 'Timeline',
+) -> TickStateArrays:
+    """Load ONLY the immutable reference data into a TickStateArrays.
+
+    This is the Phase 1 load-once function for bulk_run_ticks().
+    It does NOT load per-tick mutable state (price_overlay, iv_overlay,
+    sim_state pointer, cycle state, recent_closes, prev_ns) — those are
+    initialized separately in bulk_run_ticks() from the simulation's
+    current state, and mutated in-place by _bulk_tick_iteration().
+
+    Returns a TickStateArrays with static fields populated and mutable
+    fields at their defaults (to be filled by the caller).
+    """
+    companies = session.query(Company).order_by(Company.id).all()
+    company_by_id = {c.id: c for c in companies}
+    industries = {ind.id: ind for ind in session.query(Industry).order_by(Industry.id).all()}
+    industry_ids = list(industries.keys())
+    timeline_chain = get_timeline_chain(session, timeline_id)
+
+    # Config params (global scope only)
+    params = _load_params(session)
+    neutral_industry_pegs = _load_neutral_industry_pegs(session)
+
+    # Override maps
+    override_rows = session.query(TimelineOverride).filter_by(timeline_id=timeline_id).all()
+    # Use epoch_start=None since static load has no tick date yet; the
+    # caller will resolve active overrides per tick if needed. For bulk
+    # mode we load active overrides relative to the bulk start date.
+    active_overrides = resolve_active_overrides(override_rows, None)
+    params = apply_config_overrides(params, active_overrides.get("config", []))
+    driver_bias_map = driver_bias_by_company(active_overrides.get("driver_bias", []))
+    factor_score_bias_map = factor_score_bias_by_company(active_overrides.get("factor_score", []))
+
+    cycle_transition_override: Optional[dict] = None
+    for row in active_overrides.get("cycle_transition", []):
+        try:
+            strength = float(row.override_value)
+        except (TypeError, ValueError):
+            strength = 1.0
+        cycle_transition_override = build_cycle_transition_override(row.target_key, strength)
+
+    # Batch-load financial statements (latest per company)
+    all_bal = session.query(BalanceSheet).filter_by(timeline_id=timeline_id).order_by(
+        BalanceSheet.fiscal_period.desc()
+    ).all()
+    latest_bal: dict[int, BalanceSheet] = {}
+    for bal in all_bal:
+        if bal.company_id not in latest_bal:
+            latest_bal[bal.company_id] = bal
+
+    all_inc = session.query(IncomeStatement).filter_by(timeline_id=timeline_id).order_by(
+        IncomeStatement.fiscal_period.desc()
+    ).all()
+    latest_inc: dict[int, IncomeStatement] = {}
+    for inc in all_inc:
+        if inc.company_id not in latest_inc:
+            latest_inc[inc.company_id] = inc
+
+    all_ce = session.query(ConsensusEstimate).filter_by(timeline_id=timeline_id).order_by(
+        ConsensusEstimate.fiscal_period.desc()
+    ).all()
+    latest_ce: dict[int, ConsensusEstimate] = {}
+    for ce in all_ce:
+        if ce.company_id not in latest_ce:
+            latest_ce[ce.company_id] = ce
+
+    all_cfs = session.query(CompanyFactorScore).filter_by(timeline_id=timeline_id).order_by(
+        CompanyFactorScore.fiscal_period.desc()
+    ).all()
+    latest_cfs: dict[int, CompanyFactorScore] = {}
+    for cfs_row in all_cfs:
+        if cfs_row.company_id not in latest_cfs:
+            latest_cfs[cfs_row.company_id] = cfs_row
+
+    # Factor-effect batch (loaded once, same approach as _load_factor_effect_batch)
+    pw_rows = session.query(IndustryPillarWeight).order_by(IndustryPillarWeight.id).all()
+    industry_pw: dict[int, dict[str, float]] = {}
+    for pw in pw_rows:
+        industry_pw.setdefault(pw.industry_id, {})[pw.pillar] = float(pw.weight)
+
+    fq_defs = session.query(FactorDefinition).filter_by(factor_type="fq_sub").order_by(FactorDefinition.id).all()
+    subfactor_pillar = {fd.key: fd.pillar for fd in fq_defs}
+
+    moat_defs = session.query(FactorDefinition).filter_by(factor_type="moat_sub").order_by(FactorDefinition.id).all()
+    moat_weights = {md.key: float(md.default_weight) for md in moat_defs if md.default_weight}
+
+    cids = set(c.id for c in companies)
+    moat_rows_by_company: dict[int, list[MoatSubscore]] = {}
+    for ms in session.query(MoatSubscore).filter(
+        MoatSubscore.company_id.in_(cids), MoatSubscore.timeline_id == timeline_id,
+    ).order_by(MoatSubscore.id).all():
+        moat_rows_by_company.setdefault(ms.company_id, []).append(ms)
+
+    fq_subs_by_company: dict[int, list[FinancialQualitySubscore]] = {}
+    for fs in session.query(FinancialQualitySubscore).filter(
+        FinancialQualitySubscore.company_id.in_(cids), FinancialQualitySubscore.timeline_id == timeline_id,
+    ).order_by(FinancialQualitySubscore.company_id, FinancialQualitySubscore.fiscal_period.desc()).all():
+        fq_subs_by_company.setdefault(fs.company_id, []).append(fs)
+
+    return TickStateArrays(
+        timeline_id=timeline_id,
+        timeline=timeline,
+        companies=companies,
+        company_by_id=company_by_id,
+        industries=industries,
+        industry_ids=industry_ids,
+        params=params,
+        neutral_industry_pegs=neutral_industry_pegs,
+        timeline_chain=timeline_chain,
+        event_defs={},
+        latest_bal=latest_bal,
+        latest_inc=latest_inc,
+        latest_ce=latest_ce,
+        latest_cfs=latest_cfs,
+        industry_pw=industry_pw,
+        subfactor_pillar=subfactor_pillar,
+        moat_weights=moat_weights,
+        moat_rows_by_company=moat_rows_by_company,
+        fq_subs_by_company=fq_subs_by_company,
+        driver_bias_map=driver_bias_map,
+        factor_score_bias_map=factor_score_bias_map,
+        cycle_transition_override=cycle_transition_override,
+    )
+
+
+def _bulk_tick_iteration(
+    arrays: TickStateArrays,
+) -> TickMemoryOutput:
+    """Run ONE tick entirely from TickStateArrays in-memory state.
+
+    No DB reads, no DB writes. Mutates `arrays` in place.
+    Returns a TickMemoryOutput with deferred-insert rows.
+    """
+    rng = random.Random(arrays.timeline.rng_seed + arrays.current_tick_count)
+    sim_date = arrays.current_sim_date
+    tick_count = arrays.current_tick_count
+
+    # ── Quarter boundary check ───────────────────────────────────────────
+    arrays.is_quarter_boundary = tick_count > 0 and tick_count % QUARTER_LENGTH == 0
+
+    # ── Drift cycle state ────────────────────────────────────────────────
+    if tick_count > 0:
+        prev_phase = arrays.cycle_phase
+        cycle_phase = advance_cycle_phase(prev_phase, rng, arrays.cycle_transition_override)
+        if cycle_phase != prev_phase:
+            cycle_state = compute_cycle_state(cycle_phase, rng)
+            arrays.cycle_state = cycle_state
+            arrays.cycle_phase = cycle_phase
+            arrays.f_m = cycle_state["market_factor_return"]
+            arrays.sector_shocks = generate_sector_shocks(
+                industry_ids=arrays.industry_ids,
+                cycle_sensitivity_map={ind.id: float(ind.cycle_sensitivity)
+                                        for ind in arrays.industries.values()},
+                sector_beta_default_map={ind.id: float(ind.sector_beta_default)
+                                          for ind in arrays.industries.values()},
+                market_factor_return=arrays.f_m,
+                rng=rng,
+            )
+            arrays.cycle_state_entries.append(dict(
+                timeline_id=arrays.timeline_id,
+                sim_date=sim_date,
+                cycle_phase=cycle_phase,
+                market_factor_return=arrays.f_m,
+                gdp_growth=arrays.cycle_state["gdp_growth"],
+                interest_rate=arrays.cycle_state["interest_rate"],
+                market_sentiment=arrays.cycle_state["market_sentiment"],
+            ))
+
+    # ── IV drift (vectorized over companies) ─────────────────────────────
+    growth_rate_min = float(arrays.params.get("growth_rate_min", DEFAULT_GROWTH_RATE_MIN))
+    growth_rate_max = float(arrays.params.get("growth_rate_max", DEFAULT_GROWTH_RATE_MAX))
+    for company in arrays.companies:
+        iv_start = arrays.iv_overlay.get(company.id)
+        if iv_start is not None:
+            cfs = arrays.latest_cfs.get(company.id)
+            growth_potential = float(cfs.growth_potential) if cfs else 50.0
+            growth_rate_pct = growth_score_to_rate(growth_potential, growth_rate_min, growth_rate_max)
+            arrays.iv_overlay[company.id] = float(drift_iv(
+                iv_start, growth_rate_pct, TRADING_DAYS_PER_YEAR,
+            ))
+
+    # ── Compute drivers per company ──────────────────────────────────────
+    pricing_data: dict[str, list] = {
+        "company_ids": [], "y": [], "theta": [],
+        "driver_values": [], "driver_weights": [],
+        "beta_market": [], "beta_sector": [],
+        "sector_factors": [], "sigma": [],
+        "epsilon": [], "intrinsic_value": [],
+    }
+    company_ns: dict[int, float] = {}
+    company_sigma: dict[int, float] = {}
+
+    for company in arrays.companies:
+        result = _bulk_compute_drivers(company, arrays, sim_date, tick_count, rng)
+        if result is None:
+            continue
+        pricing_data["company_ids"].append(result["company_id"])
+        pricing_data["y"].append(result["y"])
+        pricing_data["theta"].append(result["theta"])
+        pricing_data["driver_values"].append(result["driver_values"])
+        pricing_data["driver_weights"].append(result["driver_weights"])
+        pricing_data["beta_market"].append(result["beta_market"])
+        pricing_data["beta_sector"].append(result["beta_sector"])
+        pricing_data["sector_factors"].append(result["sector_factor"])
+        pricing_data["sigma"].append(result["sigma"])
+        pricing_data["epsilon"].append(result["epsilon"])
+        pricing_data["intrinsic_value"].append(result["intrinsic_value"])
+        company_ns[company.id] = result["news_severity"]
+        company_sigma[company.id] = result["sigma"]
+
+    if not pricing_data["company_ids"]:
+        raise ValueError("No companies with valid pricing data")
+
+    # ── Run the engine tick ──────────────────────────────────────────────
+    tick_inputs = tuple(
+        CompanyTickInput(
+            company_id=cid, y=y, theta=th,
+            driver_values=dv, driver_weights=dw,
+            beta_market=bm, beta_sector=bs,
+            sector_factor_return=sf, sigma=sig,
+            epsilon=eps, intrinsic_value=iv,
+        )
+        for cid, y, th, dv, dw, bm, bs, sf, sig, eps, iv in zip(
+            pricing_data["company_ids"],
+            pricing_data["y"],
+            pricing_data["theta"],
+            pricing_data["driver_values"],
+            pricing_data["driver_weights"],
+            pricing_data["beta_market"],
+            pricing_data["beta_sector"],
+            pricing_data["sector_factors"],
+            pricing_data["sigma"],
+            pricing_data["epsilon"],
+            pricing_data["intrinsic_value"],
+        )
+    )
+
+    tick_state = TickState(
+        sim_day=tick_count,
+        market_factor_return=arrays.f_m,
+        companies=tick_inputs,
+        pressure_scale=float(arrays.params.get("k_drift", 0.03)),
+    )
+    tick_result = engine_run_tick(tick_state, k_drift=1.0)
+
+    # ── Circuit breaker + OHLC + volume ──────────────────────────────────
+    ohlc_results, volume_results, imbalance_results = _update_prices_and_ohlc(
+        arrays.companies, arrays.company_by_id, tick_result, arrays.params,
+        arrays.prev_ns, company_ns, rng, tick_count, arrays.price_overlay,
+    )
+
+    # ── Update in-memory overlays ────────────────────────────────────────
+    for out in tick_result.outputs:
+        cid = out.company_id
+        ohlc = ohlc_results[cid]
+        arrays.price_overlay[cid] = float(ohlc["close"])
+        # recent_closes sliding window
+        ma_window = int(arrays.params.get("ma_window", 20))
+        if ma_window > 0:
+            if cid not in arrays.recent_closes:
+                arrays.recent_closes[cid] = collections.deque(maxlen=ma_window)
+            arrays.recent_closes[cid].append(float(ohlc["close"]))
+
+    arrays.prev_ns = dict(company_ns)
+
+    # ── Build deferred insert rows ──────────────────────────────────────
+    tick_input_by_id = {inp.company_id: inp for inp in tick_inputs}
+    price_history_rows: list[dict] = []
+    driver_score_rows: list[dict] = []
+
+    for out in tick_result.outputs:
+        cid = out.company_id
+        ohlc = ohlc_results[cid]
+        vol_val = volume_results[cid]
+        imb = imbalance_results[cid]
+        iv = float(tick_input_by_id[cid].intrinsic_value)
+
+        price_history_rows.append(dict(
+            timeline_id=arrays.timeline_id,
+            company_id=cid,
+            sim_date=sim_date,
+            open=ohlc["open"],
+            high=ohlc["high"],
+            low=ohlc["low"],
+            close=ohlc["close"],
+            volume=vol_val,
+            intrinsic_value=iv,
+            order_imbalance=imb,
+        ))
+
+        inp = tick_input_by_id[cid]
+        composite_price_pressure_val = composite_price_pressure(inp.driver_values, inp.driver_weights)
+        DRIVER_KEYS_ORDERED_LOCAL = [
+            "value_opportunity", "earnings_surprise", "news_severity",
+            "economic_outlook", "guidance", "technical_momentum",
+            "institutional_buying",
+        ]
+        for k_idx, drv_key in enumerate(DRIVER_KEYS_ORDERED_LOCAL):
+            drv_val = float(inp.driver_values[k_idx])
+            drv_w = float(inp.driver_weights[k_idx])
+            raw_contribution = drv_w * drv_val / max(abs(composite_price_pressure_val), 1e-10)
+            contribution = round(max(-1.0, min(1.0, raw_contribution)), 6)
+            driver_score_rows.append(dict(
+                timeline_id=arrays.timeline_id,
+                company_id=cid,
+                sim_date=sim_date,
+                driver_key=drv_key,
+                value=round(drv_val, 6),
+                weight=round(drv_w, 6),
+                contribution=contribution,
+            ))
+
+    # ── Advance in-memory sim state ──────────────────────────────────────
+    arrays.current_sim_date = sim_date + timedelta(days=1)
+    arrays.current_tick_count = tick_count + 1
+
+    return TickMemoryOutput(
+        sim_date=sim_date,
+        tick_count=tick_count,
+        ohlc_results=ohlc_results,
+        volume_results=volume_results,
+        imbalance_results=imbalance_results,
+        tick_result=tick_result,
+        tick_inputs=tick_inputs,
+        driver_scores=driver_score_rows,
+        price_history_rows=price_history_rows,
+    )
+
+
+def _bulk_compute_drivers(
+    company: 'Company',
+    arrays: TickStateArrays,
+    sim_date: date,
+    tick_count: int,
+    rng: random.Random,
+) -> Optional[dict]:
+    """Compute all 7 driver values and OU pricing inputs for one company,
+    using in-memory TickStateArrays instead of DB queries.
+    """
+    prev_close = arrays.price_overlay.get(company.id)
+    if prev_close is None or prev_close <= 0:
+        return None
+    iv = arrays.iv_overlay.get(company.id)
+    if iv is None or iv <= 0:
+        return None
+
+    ind = arrays.industries.get(company.industry_id)
+    if ind is None:
+        return None
+
+    y = np.log(max(prev_close, 0.01) / max(iv, 0.01))
+    _mcap = max(prev_close * float(company.shares_outstanding), 1e6)
+    _log_mcap = math.log(_mcap / 1e9)
+    theta_base = float(arrays.params.get("theta_default", 0.05))
+    theta = theta_base * (0.3 + 1.2 * (1 + math.tanh(_log_mcap / 2)) / 2)
+    BETA_JITTER_STD = 0.7
+    beta_m = float(company.beta_market) * (1.0 + rng.gauss(0, BETA_JITTER_STD))
+    beta_s = float(company.beta_sector) * (1.0 + rng.gauss(0, BETA_JITTER_STD))
+    epsilon = rng.gauss(0, 1)
+    s_factor = arrays.sector_shocks.get(company.industry_id, 0.0)
+
+    ind_base_vol = float(ind.base_volatility) / math.sqrt(252)
+    mcap = _mcap
+    log_mcap = math.log(mcap / 1e9)
+    f_size = 1.3 - 0.3 * math.tanh(log_mcap / 1.5)
+    sigma_val = ind_base_vol * f_size
+    bal = arrays.latest_bal.get(company.id)
+    if bal:
+        td = float(bal.total_debt)
+        se = float(bal.shareholders_equity)
+        if se > 0:
+            leverage = td / se
+            max_lev = float(arrays.params.get("vol_max_leverage", 5.0))
+            lev_factor = float(arrays.params.get("vol_leverage_factor", 0.2))
+            f_lev = 1.0 + lev_factor * min(leverage, max_lev)
+            sigma_val *= f_lev
+
+    vo = value_opportunity(iv, prev_close)
+    trailing_closes = list(arrays.recent_closes.get(company.id, []))
+    moving_avg = sum(trailing_closes) / len(trailing_closes) if trailing_closes else prev_close
+    tm = technical_momentum(prev_close, moving_avg, float(arrays.params.get("k_m", 0.5)))
+    ECON_OUTLOOK_JITTER_STD = 0.3
+    eo = compute_economic_outlook(
+        arrays.cycle_state["market_sentiment"] + rng.gauss(0, ECON_OUTLOOK_JITTER_STD)
+    )
+
+    latest_inc_row = arrays.latest_inc.get(company.id)
+    latest_ce_row = arrays.latest_ce.get(company.id)
+    days_since_earnings = tick_count % QUARTER_LENGTH
+
+    es = 0.0
+    if latest_inc_row and latest_ce_row:
+        actual_eps = float(latest_inc_row.eps)
+        consensus_eps = float(latest_ce_row.consensus_eps)
+        es = earnings_surprise(actual_eps, consensus_eps, days_since_earnings,
+                                float(arrays.params.get("earnings_surprise_decay_rate", 0.15)))
+
+    gd = 0.0
+    if latest_inc_row and latest_ce_row:
+        actual_eps = float(latest_inc_row.eps)
+        consensus_eps = float(latest_ce_row.consensus_eps)
+        beat = actual_eps > consensus_eps
+        miss = actual_eps < consensus_eps
+        if beat:
+            gd = guidance("raised", min(abs(actual_eps - consensus_eps) / max(abs(consensus_eps), 0.01), 0.5),
+                           days_since_earnings, float(arrays.params.get("guidance_decay_rate", 0.15)))
+        elif miss:
+            gd = guidance("cut", min(abs(actual_eps - consensus_eps) / max(abs(consensus_eps), 0.01), 0.5),
+                           days_since_earnings, float(arrays.params.get("guidance_decay_rate", 0.15)))
+
+    ib = institutional_buying(rng.uniform(-0.1, 0.1) + arrays.cycle_state.get("market_sentiment", 0) * 0.05)
+
+    ns = 0.0
+    active_events = _get_active_events_for_company(
+        arrays.market_events, arrays.industry_events, arrays.company_events, arrays.event_defs,
+        company.id, ind.id, sim_date - timedelta(days=arrays.current_tick_count),
+    )
+    if active_events:
+        active_events = _jitter_event_severities(active_events, rng, EVENT_SEVERITY_JITTER_STD)
+        ns = news_severity(active_events, tick_count, float(arrays.params.get("news_decay_rate", 0.1)))
+
+    driver_values = {
+        "value_opportunity": vo,
+        "earnings_surprise": es,
+        "news_severity": ns,
+        "economic_outlook": eo,
+        "guidance": gd,
+        "technical_momentum": tm,
+        "institutional_buying": ib,
+    }
+
+    if active_events:
+        for event_data in active_events:
+            effect_profile = {
+                k: v for k, v in event_data.get("effect_profile", {}).items() if k in DRIVER_KEYS
+            }
+            if effect_profile:
+                severity = event_data.get("severity", 0.0)
+                decay_rate = event_data.get("decay_rate", 0.1)
+                start_day = event_data.get("start_day", 0)
+                days_elapsed = tick_count - start_day
+                driver_effects = {k: v for k, v in effect_profile.items() if k in DRIVER_KEYS}
+                if driver_effects:
+                    driver_values = apply_effect_to_drivers(
+                        driver_values, driver_effects, severity, decay_rate, days_elapsed,
+                    )
+
+    if arrays.driver_bias_map:
+        market_bias = arrays.driver_bias_map.get(None, {})
+        company_bias = arrays.driver_bias_map.get(company.id, {})
+        combined_bias = {**market_bias}
+        for key, delta in company_bias.items():
+            combined_bias[key] = combined_bias.get(key, 0.0) + delta
+        if combined_bias:
+            driver_values = apply_driver_bias(driver_values, combined_bias)
+
+    drv_weights = {
+        "value_opportunity": float(arrays.params.get("w_vo", 0.10)),
+        "earnings_surprise": float(arrays.params.get("w_es", 0.15)),
+        "news_severity": float(arrays.params.get("w_ns", 0.25)),
+        "economic_outlook": float(arrays.params.get("w_eo", 0.25)),
+        "guidance": float(arrays.params.get("w_g", 0.15)),
+        "technical_momentum": float(arrays.params.get("w_tm", 0.10)),
+        "institutional_buying": float(arrays.params.get("w_ib", 0.15)),
+    }
+
+    news_severity_val = driver_values.get("news_severity", ns)
+
+    return {
+        "company_id": company.id,
+        "y": y,
+        "theta": theta,
+        "driver_values": driver_values,
+        "driver_weights": drv_weights,
+        "beta_market": beta_m,
+        "beta_sector": beta_s,
+        "sector_factor": s_factor,
+        "sigma": sigma_val,
+        "epsilon": epsilon,
+        "intrinsic_value": iv,
+        "news_severity": news_severity_val,
+    }
+
+
+def _bulk_refresh_fundamentals(
+    arrays: TickStateArrays,
+    session: Session,
+) -> None:
+    """Refresh financial statement caches at quarter boundary for bulk mode.
+
+    Re-queries the latest financial statements from DB (one batch query per
+    table) and updates the TickStateArrays caches so the next tick's driver
+    computations see the latest quarter's data. Does NOT generate new
+    financial statements — the interactive path handles that via
+    _refresh_fundamentals. In bulk fast-forward mode, the statements from
+    the interactive ticks leading up to the bulk start are sufficient to
+    maintain proper driver computation dynamics.
+    """
+    all_bal = session.query(BalanceSheet).filter_by(timeline_id=arrays.timeline_id).order_by(
+        BalanceSheet.fiscal_period.desc()
+    ).all()
+    latest_bal: dict[int, BalanceSheet] = {}
+    for bal in all_bal:
+        if bal.company_id not in latest_bal:
+            latest_bal[bal.company_id] = bal
+    arrays.latest_bal = latest_bal
+
+    all_inc = session.query(IncomeStatement).filter_by(timeline_id=arrays.timeline_id).order_by(
+        IncomeStatement.fiscal_period.desc()
+    ).all()
+    latest_inc: dict[int, IncomeStatement] = {}
+    for inc in all_inc:
+        if inc.company_id not in latest_inc:
+            latest_inc[inc.company_id] = inc
+    arrays.latest_inc = latest_inc
+
+    all_ce = session.query(ConsensusEstimate).filter_by(timeline_id=arrays.timeline_id).order_by(
+        ConsensusEstimate.fiscal_period.desc()
+    ).all()
+    latest_ce: dict[int, ConsensusEstimate] = {}
+    for ce in all_ce:
+        if ce.company_id not in latest_ce:
+            latest_ce[ce.company_id] = ce
+    arrays.latest_ce = latest_ce
+
+    all_cfs = session.query(CompanyFactorScore).filter_by(timeline_id=arrays.timeline_id).order_by(
+        CompanyFactorScore.fiscal_period.desc()
+    ).all()
+    latest_cfs: dict[int, CompanyFactorScore] = {}
+    for cfs_row in all_cfs:
+        if cfs_row.company_id not in latest_cfs:
+            latest_cfs[cfs_row.company_id] = cfs_row
+    arrays.latest_cfs = latest_cfs
+
+
+def _bulk_flush(
+    arrays: TickStateArrays,
+    arrays_after_last_tick: TickMemoryOutput,
+    session: Session,
+) -> None:
+    """Write all deferred buffers to SQLite in one go.
+
+    Takes the TickStateArrays (which has accumulated buffers) and the
+    final tick's TickMemoryOutput, and writes everything.
+    """
+    # PriceHistory rows
+    if arrays.price_history_buffer:
+        session.execute(insert(PriceHistory), arrays.price_history_buffer)
+
+    # PriceDriverScore rows
+    if arrays.driver_score_buffer:
+        session.execute(insert(PriceDriverScore), arrays.driver_score_buffer)
+
+    # EconomicCycleState entries
+    for entry in arrays.cycle_state_entries:
+        session.add(EconomicCycleState(**entry))
+
+    # Update SimulationState pointer
+    sim_state = session.query(SimulationState).filter_by(timeline_id=arrays.timeline_id).first()
+    if sim_state is not None:
+        sim_state.current_sim_date = arrays.current_sim_date
+        sim_state.tick_count = arrays.current_tick_count
+        sim_state.is_running = True
+
+    session.flush()
+    session.commit()
+
+
+def bulk_run_ticks(
+    session: Session,
+    timeline_id: int,
+    num_ticks: int = 1,
+    skip_events: bool = True,
+    skip_news: bool = True,
+    skip_concalls: bool = True,
+    flush_interval: Optional[int] = None,
+) -> list[dict]:
+    """Run N ticks entirely in memory, bulk-write once at the end.
+
+    Phase 1: Load static reference data once.
+    Phase 2: Run N ticks in memory, accumulating deferred-insert buffers.
+    Phase 3: Flush all buffers to DB in one go.
+
+    Returns a list of per-tick result dicts (same format as run_ticks,
+    but without per-tick DB round-trips).
+    """
+    # ── Phase 1: Load static reference data ──────────────────────────────
+    timeline = session.query(Timeline).filter_by(id=timeline_id).first()
+    if timeline is None:
+        raise ValueError(f"Timeline {timeline_id} not found")
+
+    sim_state = session.query(SimulationState).filter_by(timeline_id=timeline_id).first()
+    if sim_state is None:
+        raise ValueError(f"No SimulationState for timeline {timeline_id}")
+
+    # Load static data
+    arrays = _load_static_tick_state(session, timeline_id, timeline)
+
+    # Initialize mutable state from sim_state
+    arrays.current_sim_date = sim_state.current_sim_date
+    arrays.current_tick_count = sim_state.tick_count
+
+    # Resolve tick target date (same logic as _resolve_tick_target_date)
+    sim_date = sim_state.current_sim_date
+    if not sim_state.is_running:
+        seeded_baseline_exists = session.query(PriceHistory).filter_by(
+            timeline_id=timeline_id, sim_date=sim_date
+        ).first() is not None
+        if seeded_baseline_exists:
+            sim_date = sim_date + timedelta(days=1)
+            arrays.current_sim_date = sim_date
+
+    # Load price/IV overlays from DB
+    arrays.price_overlay = {
+        cid: float(price)
+        for cid, price in get_latest_prices(
+            session, [c.id for c in arrays.companies], timeline_id, arrays.timeline_chain
+        ).items()
+    }
+    arrays.iv_overlay = {
+        cid: float(iv)
+        for cid, iv in get_latest_intrinsic_values(
+            session, [c.id for c in arrays.companies], timeline_id, arrays.timeline_chain
+        ).items()
+    }
+
+    # Load sector shocks for initial cycle state
+    arrays.f_m = sim_state.f_m if hasattr(sim_state, 'f_m') else 0.0
+    arrays.cycle_phase = sim_state.cycle_phase if hasattr(sim_state, 'cycle_phase') else "expansion"
+
+    # Initial cycle state from DB
+    latest_cycle = session.query(EconomicCycleState).filter_by(
+        timeline_id=timeline_id
+    ).order_by(EconomicCycleState.sim_date.desc()).first()
+    if latest_cycle is not None:
+        arrays.cycle_phase = latest_cycle.cycle_phase
+        arrays.cycle_state = {
+            "market_factor_return": float(latest_cycle.market_factor_return),
+            "gdp_growth": float(latest_cycle.gdp_growth),
+            "interest_rate": float(latest_cycle.interest_rate),
+            "market_sentiment": float(latest_cycle.market_sentiment),
+        }
+        arrays.f_m = float(latest_cycle.market_factor_return)
+        rng_init = random.Random(timeline.rng_seed + arrays.current_tick_count)
+        arrays.sector_shocks = generate_sector_shocks(
+            industry_ids=arrays.industry_ids,
+            cycle_sensitivity_map={ind.id: float(ind.cycle_sensitivity)
+                                    for ind in arrays.industries.values()},
+            sector_beta_default_map={ind.id: float(ind.sector_beta_default)
+                                      for ind in arrays.industries.values()},
+            market_factor_return=arrays.f_m,
+            rng=rng_init,
+        )
+
+    # Load recent closes from DB for MA computation
+    ma_window = int(arrays.params.get("ma_window", 20))
+    if ma_window > 0:
+        window_start = sim_date - timedelta(days=ma_window)
+        price_rows = (
+            session.query(PriceHistory.company_id, PriceHistory.close)
+            .filter(
+                PriceHistory.timeline_id == timeline_id,
+                PriceHistory.sim_date >= window_start,
+                PriceHistory.sim_date < sim_date,
+            )
+            .order_by(PriceHistory.sim_date.asc())
+            .all()
+        )
+        for company_id, close in price_rows:
+            closes = arrays.recent_closes.setdefault(company_id, collections.deque(maxlen=ma_window))
+            closes.append(float(close))
+
+    # Load prev_ns from DB
+    prev_ns: dict[int, float] = {}
+    if arrays.current_tick_count > 0:
+        prev_date = sim_date - timedelta(days=1)
+        prev_scores = session.query(PriceDriverScore).filter_by(
+            timeline_id=timeline_id, sim_date=prev_date, driver_key="news_severity"
+        ).all()
+        for ps in prev_scores:
+            prev_ns[ps.company_id] = float(ps.value)
+    arrays.prev_ns = prev_ns
+
+    # Load active events (batch-loaded once)
+    market_events, industry_events, company_events, event_defs = _load_active_events(
+        session, timeline_id, sim_date,
+    )
+    arrays.market_events = market_events
+    arrays.industry_events = industry_events
+    arrays.company_events = company_events
+    arrays.event_defs = event_defs
+
+    # Override active overrides for this start date
+    override_rows = session.query(TimelineOverride).filter_by(timeline_id=timeline_id).all()
+    active_overrides = resolve_active_overrides(override_rows, sim_date)
+    arrays.params = apply_config_overrides(arrays.params, active_overrides.get("config", []))
+    arrays.driver_bias_map = driver_bias_by_company(active_overrides.get("driver_bias", []))
+    arrays.factor_score_bias_map = factor_score_bias_by_company(active_overrides.get("factor_score", []))
+    cycle_transition_override = None
+    for row in active_overrides.get("cycle_transition", []):
+        try:
+            strength = float(row.override_value)
+        except (TypeError, ValueError):
+            strength = 1.0
+        cycle_transition_override = build_cycle_transition_override(row.target_key, strength)
+    arrays.cycle_transition_override = cycle_transition_override
+
+    results: list[dict] = []
+
+    # ── Phase 2: Run N ticks in memory ──────────────────────────────────
+    for _ in range(num_ticks):
+        _t0 = time.perf_counter()
+
+        # Quarter boundary: refresh financial statement caches
+        if arrays.current_tick_count > 0 and arrays.current_tick_count % QUARTER_LENGTH == 0:
+            _bulk_refresh_fundamentals(arrays, session)
+
+        # Apply skip logic: skip events/news/concalls during bulk
+        # (handled naturally since we don't call _execute_events in the loop)
+        output = _bulk_tick_iteration(arrays)
+
+        # Accumulate deferred buffers
+        arrays.price_history_buffer.extend(output.price_history_rows)
+        arrays.driver_score_buffer.extend(output.driver_scores)
+
+        # Intermediate flush if flush_interval is set
+        if flush_interval is not None and len(arrays.price_history_buffer) >= flush_interval * 150:
+            _bulk_flush(arrays, output, session)
+            # Clear buffers after intermediate flush
+            arrays.price_history_buffer = []
+            arrays.driver_score_buffer = []
+
+        _elapsed = (time.perf_counter() - _t0) * 1000
+        _tag = f"BULK{output.tick_count}"
+        print(f"[TIMING {_tag}] total={_elapsed:.1f}ms")
+
+        results.append({
+            "status": "completed",
+            "sim_date": output.sim_date,
+            "next_date": arrays.current_sim_date,
+            "tick_count": arrays.current_tick_count,
+            "companies_updated": len(output.tick_result.outputs),
+            "cycle_phase": arrays.cycle_phase,
+            "market_factor_return": arrays.f_m,
+        })
+
+        # Skip events/news/concalls during bulk loop
+        # (events are optionally fired once post-bulk in Phase 4)
+
+    # ── Phase 3: Bulk flush ─────────────────────────────────────────────
+    # Apply SQLite bulk pragmas before flush
+    if session.bind.dialect.name == "sqlite":
+        conn = session.connection()
+        conn.execute(text("PRAGMA synchronous=OFF"))
+        conn.execute(text("PRAGMA cache_size=-2000000"))
+
+    sim_state = session.query(SimulationState).filter_by(timeline_id=timeline_id).first()
+    if sim_state is not None:
+        sim_state.current_sim_date = arrays.current_sim_date
+        sim_state.tick_count = arrays.current_tick_count
+        sim_state.is_running = True
+
+    if arrays.price_history_buffer:
+        session.execute(insert(PriceHistory), arrays.price_history_buffer)
+    if arrays.driver_score_buffer:
+        session.execute(insert(PriceDriverScore), arrays.driver_score_buffer)
+
+    for entry in arrays.cycle_state_entries:
+        session.add(EconomicCycleState(**entry))
+
+    session.flush()
+    session.commit()
+
+    # Restore SQLite pragmas after bulk flush
+    if session.bind.dialect.name == "sqlite":
+        conn = session.connection()
+        conn.execute(text("PRAGMA synchronous=NORMAL"))
+        conn.execute(text("PRAGMA cache_size=-1000000"))
+
+    # ── Phase 4: Post-bulk bookkeeping ──────────────────────────────────
+    try:
+        from apps.api.services.trade_service import check_and_fill_limit_orders
+        from apps.api.services import notification_service
+        check_and_fill_limit_orders(session, timeline_id)
+    except Exception as exc:
+        logger.warning("Post-bulk limit order check failed: %s", exc)
+
+    try:
+        notification_service.evaluate_price_alerts(session, timeline_id)
+    except Exception as exc:
+        logger.warning("Post-bulk price alert evaluation failed: %s", exc)
+
+    try:
+        notification_service.evaluate_watchlist_movers(session, timeline_id)
+    except Exception as exc:
+        logger.warning("Post-bulk watchlist mover evaluation failed: %s", exc)
+
+    return results

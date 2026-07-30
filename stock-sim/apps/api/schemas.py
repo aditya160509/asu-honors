@@ -482,12 +482,20 @@ class ConCallItem(BaseModel):
 class AdvanceRequest(BaseModel):
     timeline_id: int = 1
     days: int = 1
+    mode: str = "interactive"
 
     @field_validator("days")
     @classmethod
     def days_positive(cls, v: int) -> int:
         if v <= 0:
             raise ValueError("days must be positive")
+        return v
+
+    @field_validator("mode")
+    @classmethod
+    def mode_valid(cls, v: str) -> str:
+        if v not in ("interactive", "bulk"):
+            raise ValueError("mode must be 'interactive' or 'bulk'")
         return v
 
 

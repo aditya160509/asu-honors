@@ -1,0 +1,11 @@
+{
+  "private": true,
+  "name": "stock-sim-monorepo",
+  "workspaces": [
+    "stock-sim/apps/web"
+  ],
+  "scripts": {
+    "build:web": "npm run build --workspace stock-sim/apps/web",
+    "dev:web": "npm run dev --workspace stock-sim/apps/web"
+  }
+}

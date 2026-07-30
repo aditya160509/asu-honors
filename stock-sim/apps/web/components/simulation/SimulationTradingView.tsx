@@ -762,7 +762,6 @@ function ReplayPickPrompt({ onCancel }: { onCancel: () => void }) {
         padding: "6px 8px",
         border: "1px solid var(--mer-stroke-accent)",
         borderRadius: "var(--mer-radius-sm)",
-        boxShadow: "0 4px 24px rgba(4, 6, 10, 0.5), 0 0 0 1px var(--mer-stroke-emphasis)",
         background: "rgba(10, 14, 22, 0.94)",
         boxShadow: "var(--mer-shadow-overlay)",
         color: "var(--mer-ink-primary)",

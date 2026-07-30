@@ -317,7 +317,7 @@ def seed(session: Session) -> None:
             applied_w = pw_this_pillar / n_in_pillar if n_in_pillar else 0.0
             peer_pct = float(fq_percentiles.get(sub_key, np.array([50.0]))[0]) if sub_key in fq_percentiles else 50.0
             fq_subscores_all.append(FinancialQualitySubscore(
-                company_id=company.id, fiscal_period=FISCAL_PERIOD,
+                company_id=company.id, timeline_id=timeline.id, fiscal_period=FISCAL_PERIOD,
                 subfactor_key=sub_key,
                 raw_metric_value=_safe_finite(r["raw"].get(sub_key, 0.0)),
                 peer_percentile=peer_pct,

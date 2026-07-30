@@ -22,6 +22,11 @@ not a market growth expectation.
 
 import math
 
+try:
+    from numba import njit
+except ImportError:
+    def njit(f): return f
+
 DEFAULT_M_MIN = 0.6
 DEFAULT_M_MAX = 2.0
 DEFAULT_M_STEEPNESS = 0.11

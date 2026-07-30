@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 from typing import Generator
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from apps.api.config import settings
@@ -22,6 +22,20 @@ else:
 
 engine = create_engine(settings.database_url, connect_args=connect_args, **kwargs)
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+
+
+@event.listens_for(engine, "connect")
+def _set_sqlite_pragmas(dbapi_connection, connection_record):
+    """Apply performance-critical SQLite PRAGMAs on every new connection."""
+    if engine.dialect.name == "sqlite":
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.execute("PRAGMA mmap_size=268435456")
+        cursor.execute("PRAGMA cache_size=-64000")
+        cursor.execute("PRAGMA busy_timeout=5000")
+        cursor.execute("PRAGMA temp_store=MEMORY")
+        cursor.close()
 
 
 def get_db() -> Generator[Session, None, None]:

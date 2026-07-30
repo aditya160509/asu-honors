@@ -1,6 +1,6 @@
 from typing import Optional
 
-from sqlalchemy import BigInteger, CheckConstraint, ForeignKey, Numeric, String, UniqueConstraint
+from sqlalchemy import BigInteger, CheckConstraint, ForeignKey, Index, Numeric, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from db.models.base import Base, TimestampMixin
@@ -141,4 +141,5 @@ class ConfigParameter(Base, TimestampMixin):
     __table_args__ = (
         UniqueConstraint("key", "scope", "scope_id", name="uq_config_parameters_key_scope"),
         CheckConstraint("scope in ('global', 'industry', 'company')", name="ck_config_parameters_scope"),
+        Index("ix_config_params_scope_key", "scope", "key"),
     )

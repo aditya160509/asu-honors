@@ -65,6 +65,7 @@ class CompanyFactorScore(Base, TimestampMixin):
         # the company_id-leading UniqueConstraint above, so it degrades to a
         # sequential scan as history grows, independent of company count.
         Index("ix_company_factor_scores_timeline_id", "timeline_id"),
+        Index("ix_cfs_timeline_company_period", "timeline_id", "company_id", "fiscal_period"),
     )
 
 
