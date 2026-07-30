@@ -122,6 +122,83 @@ _STATEMENT_TEMPLATES: dict[tuple[str, str], dict[str, str]] = {
 }
 
 
+# Capex/debt/strategy commentary, keyed by tone only (not bucket) -- this
+# section is about forward capital-allocation posture, which tracks
+# management's overall confidence level more than this quarter's exact
+# beat/miss bucket. {capex_direction}/{leverage_direction} are substituted
+# from the current-vs-prior-quarter comparison in generate_concall.
+CAPEX_DEBT_TEMPLATES: dict[str, str] = {
+    "confident": (
+        "We're leaning into capex here -- spend is trending {capex_direction}, and we're comfortable "
+        "with leverage trending {leverage_direction} given the return profile we're seeing."
+    ),
+    "measured": (
+        "Capex is trending {capex_direction}, broadly in line with our plan, and we're keeping leverage "
+        "{leverage_direction} while we validate returns on recent spend."
+    ),
+    "cautious": (
+        "We're being more selective on capex, which is trending {capex_direction}, and want to keep "
+        "leverage {leverage_direction} until visibility improves."
+    ),
+    "defensive": (
+        "We're pulling back on capex -- trending {capex_direction} -- and prioritizing keeping leverage "
+        "{leverage_direction} given the current environment."
+    ),
+    "evasive": "We'd rather not commit to specifics on capex or leverage plans today; both are under review.",
+}
+
+# Order-book / demand / strategy commentary, keyed by tone only.
+ORDER_BOOK_TEMPLATES: dict[str, str] = {
+    "confident": (
+        "The order book remains healthy and demand signals are strong -- we see room to keep investing "
+        "in the strategy that's gotten us here."
+    ),
+    "measured": "Order book trends are stable, and we're continuing to execute the existing strategy without major shifts.",
+    "cautious": (
+        "We're seeing some softness build in the order book and are watching demand signals closely "
+        "before committing to new strategic initiatives."
+    ),
+    "defensive": "The order book has weakened, and we're reassessing parts of the strategy as a result.",
+    "evasive": "We're not going to get into specifics on the order book or strategy today.",
+}
+
+# Analyst Q&A: question bank keyed by topic, answer bank keyed by tone.
+# {revenue_growth_pct}/{margin_direction} are substituted the same way as in
+# the statement templates above.
+QA_TOPIC_QUESTIONS: dict[str, str] = {
+    "growth": "Growth came in at {revenue_growth_pct} this quarter -- how sustainable is that number into next quarter?",
+    "margins": "Can you unpack the margin trajectory here, and what gives you confidence {margin_direction} margins hold up from here?",
+    "guidance": "Given the guidance you've laid out, what would need to change for you to revise it?",
+    "capex": "Walk us through the capex plan and how you're prioritizing spend from here.",
+    "competition": "How are you thinking about competitive intensity in the segment right now?",
+}
+
+QA_ANSWER_TEMPLATES: dict[str, str] = {
+    "confident": "{company} management gave a direct, upbeat answer, reiterating confidence in the current trajectory.",
+    "measured": "{company} management gave a balanced answer, pointing to steady execution against the existing plan.",
+    "cautious": "{company} management answered carefully, flagging the uncertainty directly rather than offering a firm commitment.",
+    "defensive": "{company} management pushed back gently on the framing, emphasizing steps already underway to address it.",
+    "evasive": "{company} management gave a noncommittal answer, deferring specifics to a future update.",
+}
+
+# Small, fixed roster so the same handful of names/firms recur across a
+# company's calls (deterministic per-call sample via the rng already passed
+# into generate_concall) rather than fabricating a new analyst every time.
+ANALYST_ROSTER: list[tuple[str, str]] = [
+    ("Ananya Rao", "Kotak Institutional Equities"),
+    ("Rohan Mehta", "Nomura"),
+    ("Priya Nair", "Morgan Stanley"),
+    ("Karan Shah", "ICICI Securities"),
+    ("Divya Iyer", "Jefferies"),
+    ("Arjun Kapoor", "CLSA"),
+]
+
+# Segment/geography labels used to synthesize segment_guidance -- this sim
+# has no true segment-level financial model, so these are a presentational
+# split of the single aggregate guidance number, not independent data.
+SEGMENT_LABELS: list[str] = ["Core", "Emerging Markets", "Digital / New Initiatives"]
+
+
 def _performance_bucket(eps: float, consensus_eps: float) -> str:
     """EPS vs. consensus, with a small tolerance band for 'inline'."""
     if consensus_eps == 0:
@@ -192,6 +269,95 @@ def _market_context_statement(company_name: str, market_performance: float) -> s
     return f"Shares were roughly flat over the quarter ({pct}), tracking in line with our results."
 
 
+def _chain_streak(prior_streak: int, direction: int) -> int:
+    """Extend or reset a signed streak counter. `direction` is +1/-1/0 for
+    this quarter; a positive prior streak extends on +1, a negative one
+    extends on -1, and any sign flip (or a neutral 0 direction) resets to
+    `direction`. This is how trend_context reflects arbitrarily many
+    quarters of history from a single prior row: each call's trend_context
+    already encodes everything before it.
+    """
+    if direction == 0:
+        return 0
+    if prior_streak > 0 and direction > 0:
+        return prior_streak + 1
+    if prior_streak < 0 and direction < 0:
+        return prior_streak - 1
+    return direction
+
+
+def _relative_direction(current: float, prior: Optional[float], tolerance: float = 0.03) -> str:
+    """'up' | 'down' | 'flat' comparison for capex/leverage commentary,
+    using a relative (percentage) tolerance band rather than
+    _margin_direction's absolute one since capex/debt figures are absolute
+    currency amounts, not margin fractions."""
+    if prior is None or prior == 0:
+        return "flat"
+    delta_pct = (current - prior) / abs(prior)
+    if delta_pct > tolerance:
+        return "up"
+    if delta_pct < -tolerance:
+        return "down"
+    return "flat"
+
+
+def _trend_narrative_addendum(company_name: str, trend_context: dict[str, int]) -> Optional[str]:
+    """A short explicit callout once a streak becomes notable (|streak| >= 3),
+    e.g. 'third consecutive quarter of margin compression' framing -- checked
+    in priority order (beat/miss streak first, then margin streak) so at most
+    one addendum is added rather than stacking several trend callouts."""
+    bm = trend_context.get("beat_miss_streak", 0)
+    if bm >= 3:
+        return f"{company_name} has now beaten expectations for {bm} consecutive quarters."
+    if bm <= -3:
+        return f"{company_name} has now missed expectations for {abs(bm)} consecutive quarters."
+    ms = trend_context.get("margin_streak", 0)
+    if ms >= 3:
+        return f"This marks {ms} consecutive quarters of margin expansion."
+    if ms <= -3:
+        return f"This marks {abs(ms)} consecutive quarters of margin compression."
+    return None
+
+
+def _select_qa_topics(trend_context: dict[str, int], margin_direction: str, has_capex_section: bool) -> list[str]:
+    """Pick 2-4 Q&A topics based on what's actually notable this quarter,
+    so the simulated analysts sound like they're reacting to this call
+    rather than asking a fixed rotation of questions every time."""
+    topics = ["growth"]
+    if abs(trend_context.get("margin_streak", 0)) >= 2 or margin_direction != "roughly flat":
+        topics.append("margins")
+    if abs(trend_context.get("guided_vs_actual_streak", 0)) >= 2:
+        topics.append("guidance")
+    if has_capex_section:
+        topics.append("capex")
+    if len(topics) < 3:
+        topics.append("competition")
+    return topics[:4]
+
+
+def _build_qa_transcript(
+    company_name: str, topics: list[str], tone: str, replacements: dict[str, str], rng: random.Random,
+) -> list[dict[str, str]]:
+    analysts = rng.sample(ANALYST_ROSTER, k=min(len(topics), len(ANALYST_ROSTER)))
+    answer = QA_ANSWER_TEMPLATES[tone].replace("{company}", company_name)
+    transcript: list[dict[str, str]] = []
+    for (name, firm), topic in zip(analysts, topics):
+        question = QA_TOPIC_QUESTIONS[topic]
+        for key, val in replacements.items():
+            question = question.replace(key, val)
+        transcript.append({"analyst_name": name, "analyst_firm": firm, "question": question, "answer": answer})
+    return transcript
+
+
+def _synthesize_segment_guidance(aggregate_guidance: float, rng: random.Random) -> dict[str, float]:
+    """Presentational sub-split of the single aggregate guidance figure --
+    see SEGMENT_LABELS docstring/comment above; not independent data."""
+    return {
+        label: round(max(-0.30, min(0.30, aggregate_guidance + rng.gauss(0, 0.02))), 4)
+        for label in SEGMENT_LABELS
+    }
+
+
 def generate_concall(
     company: Company,
     income_stmt: IncomeStatement,
@@ -206,6 +372,9 @@ def generate_concall(
     cash_flow: Optional[CashFlowStatement] = None,
     moat_score: Optional[float] = None,
     market_performance: Optional[float] = None,
+    previous_concall: Optional[ConCall] = None,
+    prior_balance_sheet: Optional[BalanceSheet] = None,
+    prior_cash_flow: Optional[CashFlowStatement] = None,
 ) -> ConCall:
     """Build (but do not add/commit) a ConCall row for one company's quarter.
 
@@ -220,6 +389,13 @@ def generate_concall(
     one step more confident, a thin moat or a quarter the market punished
     nudges it one step more cautious. Either can be omitted (e.g. no prior
     quarter close to diff against) and the base tone matrix is used as-is.
+
+    `previous_concall` (this company's most recent prior ConCall, if any) is
+    the sole input needed for multi-quarter trend awareness -- its
+    trend_context is chained forward (see _chain_streak) rather than
+    re-querying multiple quarters of history. `prior_balance_sheet` /
+    `prior_cash_flow` (previous quarter's rows) are used only for the new
+    capex/debt commentary's up/down/flat framing.
     """
     eps = float(income_stmt.eps)
     consensus_eps = float(consensus.consensus_eps) if consensus is not None else eps
@@ -306,6 +482,66 @@ def generate_concall(
     if market_performance is not None:
         statements["market_context"] = _market_context_statement(company.name, market_performance)
 
+    prior_trend = previous_concall.trend_context if previous_concall is not None else {}
+    bucket_direction = 1 if bucket == "beat" else (-1 if bucket == "miss" else 0)
+    margin_direction_val = 1 if margin_direction == "higher" else (-1 if margin_direction == "lower" else 0)
+    price_direction_val = 0
+    if market_performance is not None:
+        if market_performance >= MARKET_PERFORMANCE_STRONG_THRESHOLD:
+            price_direction_val = 1
+        elif market_performance <= MARKET_PERFORMANCE_WEAK_THRESHOLD:
+            price_direction_val = -1
+    if previous_concall is not None:
+        guided_vs_actual_direction = 1 if revenue_growth >= float(previous_concall.guidance_revenue_growth) - 0.005 else -1
+    else:
+        guided_vs_actual_direction = 0
+
+    trend_context = {
+        "beat_miss_streak": _chain_streak(int(prior_trend.get("beat_miss_streak", 0)), bucket_direction),
+        "margin_streak": _chain_streak(int(prior_trend.get("margin_streak", 0)), margin_direction_val),
+        "price_streak": _chain_streak(int(prior_trend.get("price_streak", 0)), price_direction_val),
+        "guided_vs_actual_streak": _chain_streak(
+            int(prior_trend.get("guided_vs_actual_streak", 0)), guided_vs_actual_direction
+        ),
+    }
+
+    trend_note = _trend_narrative_addendum(company.name, trend_context)
+    if trend_note:
+        statements["trend_note"] = trend_note
+
+    current_debt = float(balance_sheet.total_debt) if balance_sheet is not None else None
+    prior_debt = float(prior_balance_sheet.total_debt) if prior_balance_sheet is not None else None
+    leverage_direction = _relative_direction(current_debt, prior_debt) if current_debt is not None else "flat"
+
+    current_capex = abs(float(cash_flow.capex)) if cash_flow is not None else None
+    prior_capex = abs(float(prior_cash_flow.capex)) if prior_cash_flow is not None else None
+    capex_direction = _relative_direction(current_capex, prior_capex) if current_capex is not None else "flat"
+
+    capex_debt_text = CAPEX_DEBT_TEMPLATES[tone]
+    capex_debt_text = capex_debt_text.replace("{capex_direction}", capex_direction).replace(
+        "{leverage_direction}", leverage_direction
+    )
+    statements["capex_debt"] = capex_debt_text
+    statements["order_book_strategy"] = ORDER_BOOK_TEMPLATES[tone]
+
+    segment_guidance = _synthesize_segment_guidance(guidance_revenue_growth, rng)
+
+    qa_topics = _select_qa_topics(trend_context, margin_direction, has_capex_section=True)
+    qa_transcript = _build_qa_transcript(company.name, qa_topics, tone, replacements, rng)
+
+    # Forward-looking bias signals for next quarter's financials generation
+    # (engine.orchestrator._load_concall_extended_signals /
+    # _generate_fake_quarterly_financials), same small-magnitude philosophy
+    # as the existing "guidance"/"earnings_surprise" keys: bounded well
+    # inside the outer GROWTH_RATE_CLAMP_MIN/MAX so no combination of
+    # signals can dominate.
+    margin_bias = max(-0.03, min(0.03, tone_score * 0.02 + (0.01 if margin_direction == "higher" else (-0.01 if margin_direction == "lower" else 0.0))))
+    capex_bias = max(-0.10, min(0.10, tone_score * 0.06))
+    debt_bias = max(-0.05, min(0.05, tone_score * 0.03))
+    driver_deltas["margin_bias"] = round(margin_bias, 4)
+    driver_deltas["capex_bias"] = round(capex_bias, 4)
+    driver_deltas["debt_bias"] = round(debt_bias, 4)
+
     return ConCall(
         company_id=company.id,
         fiscal_period=fiscal_period,
@@ -316,5 +552,8 @@ def generate_concall(
         guidance_revenue_growth=round(guidance_revenue_growth, 4),
         statements=statements,
         driver_deltas=driver_deltas,
+        trend_context=trend_context,
+        segment_guidance=segment_guidance,
+        qa_transcript=qa_transcript,
         generated_at=datetime.now(timezone.utc),
     )
