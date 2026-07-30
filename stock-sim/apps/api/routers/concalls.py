@@ -63,6 +63,10 @@ def get_concalls(
             tone_score=float(r.tone_score),
             guidance_revenue_growth=float(r.guidance_revenue_growth),
             statements=r.statements,
+            segment_guidance=r.segment_guidance or {},
+            qa_transcript=r.qa_transcript or [],
+            trend_context=r.trend_context or {},
+            applied_deltas=r.applied_deltas or {},
             actual_eps=actual_eps_by_period.get(r.fiscal_period),
             consensus_eps=consensus_eps_by_period.get(r.fiscal_period),
         )

@@ -449,6 +449,13 @@ class NewsItem(BaseModel):
 # --------------------------------------------------------------------------
 
 
+class ConCallQAExchange(BaseModel):
+    analyst_name: str
+    analyst_firm: str
+    question: str
+    answer: str
+
+
 class ConCallItem(BaseModel):
     id: int
     company_id: int
@@ -459,6 +466,10 @@ class ConCallItem(BaseModel):
     tone_score: float
     guidance_revenue_growth: float
     statements: dict[str, str]
+    segment_guidance: dict[str, float] = {}
+    qa_transcript: list[ConCallQAExchange] = []
+    trend_context: dict[str, int] = {}
+    applied_deltas: dict[str, Optional[float]] = {}
     actual_eps: Optional[float] = None
     consensus_eps: Optional[float] = None
 
