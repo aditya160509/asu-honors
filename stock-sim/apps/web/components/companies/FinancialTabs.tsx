@@ -125,7 +125,90 @@ const BUCKET_VARIANT: Record<ConCallItem["performance_bucket"], "positive" | "ne
   miss: "negative",
 };
 
-const STATEMENT_ORDER = ["opening", "revenue", "margins", "guidance", "closing"];
+const STATEMENT_ORDER = [
+  "opening", "revenue", "margins", "capex_debt", "order_book_strategy", "guidance", "closing",
+  "market_context", "trend_note",
+];
+
+const STATEMENT_LABELS: Record<string, string> = {
+  capex_debt: "Capex & Debt",
+  order_book_strategy: "Order Book & Strategy",
+  market_context: "Market Context",
+  trend_note: "Trend",
+};
+
+function SegmentGuidanceTable({ segments }: { segments: Record<string, number> }) {
+  const entries = Object.entries(segments);
+  if (entries.length === 0) return null;
+  return (
+    <div className="mt-1">
+      <span className="text-micro font-medium uppercase text-mer-ink-tertiary">
+        Segment / Geography Guidance
+      </span>
+      <table className="w-full text-small">
+        <tbody>
+          {entries.map(([segment, growth]) => (
+            <tr key={segment}>
+              <td className="py-0.5 text-mer-ink-secondary">{segment}</td>
+              <td className="num py-0.5 text-right text-mer-ink-primary">{formatPct(growth * 100)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function QATranscript({ qa }: { qa: ConCallItem["qa_transcript"] }) {
+  if (!qa || qa.length === 0) return null;
+  return (
+    <div className="mt-1 flex flex-col gap-2">
+      <span className="text-micro font-medium uppercase text-mer-ink-tertiary">Analyst Q&amp;A</span>
+      {qa.map((exchange, i) => (
+        <div key={`${exchange.analyst_name}-${i}`} className="flex flex-col gap-0.5 rounded-mer-sm bg-mer-surface-2 p-2">
+          <span className="text-micro font-medium text-mer-ink-primary">
+            {exchange.analyst_name} · {exchange.analyst_firm}
+          </span>
+          <span className="text-small text-mer-ink-secondary">Q: {exchange.question}</span>
+          <span className="text-small text-mer-ink-tertiary">A: {exchange.answer}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+const TREND_BADGE_LABELS: Record<string, (value: number) => string> = {
+  beat_miss_streak: (v) => (v >= 2 ? `${v}Q beat streak` : v <= -2 ? `${Math.abs(v)}Q miss streak` : ""),
+  margin_streak: (v) => (v >= 2 ? `${v}Q margin expansion` : v <= -2 ? `${Math.abs(v)}Q margin compression` : ""),
+  guided_vs_actual_streak: (v) => (v >= 2 ? `${v}Q guidance beat` : v <= -2 ? `${Math.abs(v)}Q guidance miss` : ""),
+};
+
+function TrendBadges({ trend }: { trend: Record<string, number> }) {
+  const labels = Object.entries(trend)
+    .map(([key, value]) => TREND_BADGE_LABELS[key]?.(value) ?? "")
+    .filter(Boolean);
+  if (labels.length === 0) return null;
+  return (
+    <>
+      {labels.map((label) => (
+        <Badge key={label} variant="default">{label}</Badge>
+      ))}
+    </>
+  );
+}
+
+function ImpactStrip({ applied }: { applied: Record<string, number | null> }) {
+  const mgmt = applied.management_quality_delta;
+  const moat = applied.moat_score_delta;
+  if (!mgmt && !moat) return null;
+  return (
+    <div className="flex items-center gap-3 rounded-mer-sm bg-mer-surface-2 px-2 py-1 text-micro text-mer-ink-tertiary">
+      <span className="font-medium uppercase">Impact</span>
+      {mgmt ? <span>Management quality {mgmt > 0 ? "+" : ""}{mgmt.toFixed(2)}</span> : null}
+      {moat ? <span>Moat score {moat > 0 ? "+" : ""}{moat.toFixed(2)}</span> : null}
+    </div>
+  );
+}
 
 function ConCallTranscript({ call, ticker }: { call: ConCallItem; ticker: string }) {
   const sections = Object.entries(call.statements).sort(
@@ -133,10 +216,11 @@ function ConCallTranscript({ call, ticker }: { call: ConCallItem; ticker: string
   );
   return (
     <div className={cn("flex flex-col gap-2 border-b py-3 last:border-b-0", MER_HAIRLINE)}>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 flex-wrap">
         <span className="text-small font-medium text-mer-ink-primary">{call.fiscal_period}</span>
         <Badge variant={BUCKET_VARIANT[call.performance_bucket]}>{call.performance_bucket}</Badge>
         <Badge variant={TONE_VARIANT[call.tone]}>{call.tone}</Badge>
+        <TrendBadges trend={call.trend_context} />
         <span className="num text-micro text-mer-ink-tertiary">{call.call_date}</span>
         {call.actual_eps != null && call.consensus_eps != null && (
           <span className="num text-micro text-mer-ink-tertiary">
@@ -155,10 +239,13 @@ function ConCallTranscript({ call, ticker }: { call: ConCallItem; ticker: string
       <div className="flex flex-col gap-1">
         {sections.map(([section, text]) => (
           <p key={section} className="text-small text-mer-ink-secondary">
+            {STATEMENT_LABELS[section] ? <strong className="text-mer-ink-primary">{STATEMENT_LABELS[section]}: </strong> : null}
             {text}
           </p>
         ))}
       </div>
+      <SegmentGuidanceTable segments={call.segment_guidance} />
+      <QATranscript qa={call.qa_transcript} />
       <div className="flex items-center gap-1.5 pt-1">
         <span className="text-micro font-medium uppercase text-mer-ink-tertiary">
           Guided Growth (management commentary)
@@ -167,6 +254,7 @@ function ConCallTranscript({ call, ticker }: { call: ConCallItem; ticker: string
           {formatPct(call.guidance_revenue_growth * 100)}
         </span>
       </div>
+      <ImpactStrip applied={call.applied_deltas} />
     </div>
   );
 }
