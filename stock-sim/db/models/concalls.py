@@ -71,11 +71,43 @@ class ConCall(Base, TimestampMixin):
     statements: Mapped[dict] = mapped_column(JSONType, nullable=False)
 
     # effect_profile-shaped dict of small deltas (DRIVER_KEYS / factor-score
-    # keys -> float), mirroring db.models.events.MarketEvent.effect_profile so
-    # any future event-style consumer (e.g. _apply_factor_effects_to_company)
-    # could apply con-call tone the same way it applies event effects, without
-    # requiring this model to know about that mechanism.
+    # keys -> float), mirroring db.models.events.MarketEvent.effect_profile.
+    # engine.orchestrator._generate_concalls_for_quarter is now a real
+    # consumer: "guidance"/"earnings_surprise" drive an immediate small
+    # factor-score nudge, and "margin_bias"/"capex_bias"/"debt_bias" (added
+    # by engine/concalls.py's comprehensive template banks) are read back by
+    # _load_concall_extended_signals as forward-looking inputs to next
+    # quarter's financials generation, the same way tone_score/
+    # guidance_revenue_growth already are.
     driver_deltas: Mapped[dict] = mapped_column(JSONType, nullable=False)
+
+    # Self-chaining multi-quarter trend summary (beat/miss streak, margin
+    # streak, price/IV streak, guided-vs-actual streak) -- see
+    # engine/concalls.py::_chain_streak. Each call reads the single most
+    # recent prior call's trend_context, extends or resets each streak, and
+    # writes its own -- so trend awareness needs only a 1-row lookback per
+    # generation despite reflecting arbitrarily many quarters of history.
+    trend_context: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
+
+    # Synthesized segment/geography guidance sub-splits of
+    # guidance_revenue_growth (segment label -> guided growth fraction).
+    # This simulation does not model true segment-level financials -- these
+    # numbers are a presentational synthesis (deterministic seeded jitter
+    # around the aggregate figure), not independent ground-truth data. See
+    # engine/concalls.py::_synthesize_segment_guidance.
+    segment_guidance: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
+
+    # Simulated analyst Q&A: list of {analyst_name, analyst_firm, question,
+    # answer} dicts. See engine/concalls.py::_build_qa_transcript.
+    qa_transcript: Mapped[list] = mapped_column(JSONType, nullable=False, default=list)
+
+    # What this call actually caused once applied by
+    # engine.orchestrator._generate_concalls_for_quarter: management_quality/
+    # moat_score point deltas and the id of the NewsFeed row it created.
+    # Written once, at generation time -- exists so a re-generated call (or
+    # future auditing/debugging) can see the causal effect without
+    # re-deriving it from driver_deltas.
+    applied_deltas: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
 
     generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
