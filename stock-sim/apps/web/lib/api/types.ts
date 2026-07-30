@@ -422,6 +422,7 @@ export interface ConCallItem {
 export interface AdvanceRequest {
   timeline_id?: number;
   days?: number;
+  mode?: "interactive" | "bulk";
 }
 
 export interface AdvanceResponse {

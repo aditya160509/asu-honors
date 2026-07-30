@@ -7,6 +7,7 @@ import { useAdvance, useSimState } from "@/lib/api/hooks/useSimulation";
 import { formatDateFull } from "@/lib/utils";
 
 const MIN_LIVE_TICK_GAP_MS = 180;
+type AdvanceMode = "interactive" | "bulk";
 
 interface ReplayControlsProps {
   replayPickMode?: boolean;
@@ -32,6 +33,7 @@ export function ReplayControls({
   const goToTick = useTimeControlStore((s) => s.goToTick);
   const replayMode = useTimeControlStore((s) => s.replayMode);
   const setReplayMode = useTimeControlStore((s) => s.setReplayMode);
+  const [advanceMode, setAdvanceMode] = React.useState<AdvanceMode>("interactive");
 
   const barRef = React.useRef<HTMLDivElement>(null);
   const timelineId = simState.data?.timeline_id;
@@ -93,7 +95,7 @@ export function ReplayControls({
     function fireNext() {
       if (cancelled || !timelineId) return;
       advanceRef.current.mutate(
-        { timeline_id: timelineId, days: 1 },
+        { timeline_id: timelineId, days: advanceMode === "bulk" ? 30 : 1, mode: advanceMode },
         {
           onSuccess: () => {
             const intervalMs = Math.max(MIN_LIVE_TICK_GAP_MS, 1200 / useTimeControlStore.getState().speed);
@@ -111,7 +113,7 @@ export function ReplayControls({
       cancelled = true;
       if (timeoutId) clearTimeout(timeoutId);
     };
-  }, [isPlaying, replayMode, timelineId]);
+  }, [advanceMode, isPlaying, replayMode, timelineId]);
 
   React.useEffect(() => {
     if (advance.isError) pause();
@@ -311,6 +313,22 @@ export function ReplayControls({
         <SpeedControl />
 
         <div style={{ width: 1, height: 18, background: "var(--mer-stroke-hairline)" }} />
+
+        <label
+          title={advanceMode === "bulk" ? "Fast-forward 30 simulation days per request" : "Advance one simulation day per request"}
+          style={{ display: "inline-flex", alignItems: "center", gap: 6, color: "var(--mer-ink-tertiary)", fontSize: "var(--fs-micro)", fontWeight: 800, letterSpacing: "0.04em", textTransform: "uppercase" }}
+        >
+          <span>Engine</span>
+          <select
+            aria-label="Simulation engine mode"
+            value={advanceMode}
+            onChange={(e) => { pause(); setAdvanceMode(e.target.value as AdvanceMode); }}
+            style={{ height: 28, padding: "0 7px", border: "1px solid var(--mer-stroke-hairline)", borderRadius: "var(--mer-radius-sm)", background: "var(--mer-surface-2)", color: "var(--mer-ink-primary)", fontSize: "var(--fs-micro)", fontWeight: 800, cursor: "pointer" }}
+          >
+            <option value="interactive">Interactive · 1D</option>
+            <option value="bulk">Bulk · 30D</option>
+          </select>
+        </label>
 
         <StatusPill active={isPlaying} busy={advance.isPending} replayMode={replayMode} blocked={liveBlocked} />
 
