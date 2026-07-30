@@ -28,7 +28,7 @@ from db.models.events import MarketEvent, NewsTemplate
 from db.models.timeseries import EconomicCycleState, PriceDriverScore
 from engine.ohlc import apply_circuit_breaker, synthesize_ohlc
 from engine.cycle import advance_cycle_phase, compute_cycle_state, generate_sector_shocks
-from engine.orchestrator import run_tick, run_ticks
+from engine.orchestrator import CONCALL_FACTOR_NUDGE_CLAMP, run_tick, run_ticks
 
 
 @pytest.fixture
@@ -1625,7 +1625,11 @@ def test_cost_ratios_do_not_ratchet_for_below_average_company(session):
 def test_quarter_refresh_preserves_prior_factor_scores(session):
     """_refresh_fundamentals must carry forward management_quality/growth_potential/
     fcf_quality from the prior CompanyFactorScore instead of re-rolling them from
-    scratch. Seed distinctive values, then confirm they survive a quarter boundary."""
+    scratch. Seed distinctive values, then confirm they survive a quarter boundary
+    (within CONCALL_FACTOR_NUDGE_CLAMP of the seeded value, since this same quarter
+    boundary also generates a con-call that applies a small bounded
+    management_quality/moat_score nudge on top of the carried-forward baseline --
+    see engine.orchestrator._generate_concalls_for_quarter)."""
     timeline_id = _seed_minimal(session)
     _setup_fq_factor_defs(session)
     cfs = session.query(CompanyFactorScore).filter_by(company_id=1).first()
@@ -1647,7 +1651,7 @@ def test_quarter_refresh_preserves_prior_factor_scores(session):
         company_id=1, fiscal_period="2026Q2"
     ).first()
     assert new_cfs is not None
-    assert math.isclose(float(new_cfs.management_quality), 83.0)
+    assert math.isclose(float(new_cfs.management_quality), 83.0, abs_tol=CONCALL_FACTOR_NUDGE_CLAMP)
     # growth_potential is now derived from trailing financials, not carried forward
     # from prior CFS; with only 1 prior IS row the median is undefined → 50.0
     assert math.isclose(float(new_cfs.fcf_quality), 91.0)

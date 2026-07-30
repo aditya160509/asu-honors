@@ -34,6 +34,7 @@ from db.models import (
     IndustryPillarWeight,
     MarketEvent,
     MoatSubscore,
+    NewsFeed,
     Portfolio,
     PriceDriverScore,
     PriceHistory,
@@ -133,6 +134,15 @@ DRIVER_KEYS = frozenset({
     "economic_outlook", "guidance", "technical_momentum",
     "institutional_buying",
 })
+# Con-call -> factor-score nudge scale/clamp (Section 6.O comprehensive
+# con-calls). driver_deltas["guidance"]/["earnings_surprise"] are already
+# clamped to roughly [-0.15, 0.15] in engine/concalls.py; multiplying by
+# CONCALL_FACTOR_NUDGE_SCALE and then clamping again to
+# +/-CONCALL_FACTOR_NUDGE_CLAMP keeps a single con-call's factor-score effect
+# tiny relative to the 0-100 CompanyFactorScore range -- deliberately
+# conservative per the approved design's "small bounded nudges" choice.
+CONCALL_FACTOR_NUDGE_SCALE = 6.0
+CONCALL_FACTOR_NUDGE_CLAMP = 1.5
 # Per-company multiplicative dispersion applied to a shared EventInstance's
 # resolved_severity before it feeds news_severity/apply_effect_to_drivers (see
 # _jitter_event_severities) -- a market- or industry-scope event otherwise
@@ -2431,6 +2441,23 @@ def _generate_concalls_for_quarter(
                 growth_potential = float(cfs.growth_potential) if cfs else 50.0
                 moat_score = float(cfs.moat_score) if cfs else None
 
+                previous_concall = (
+                    session.query(ConCall)
+                    .filter(ConCall.company_id == company.id, ConCall.fiscal_period < latest_period)
+                    .order_by(ConCall.fiscal_period.desc())
+                    .first()
+                )
+                prior_balance_sheet = session.query(BalanceSheet).filter(
+                    BalanceSheet.company_id == company.id,
+                    BalanceSheet.timeline_id == timeline_id,
+                    BalanceSheet.fiscal_period < latest_period,
+                ).order_by(BalanceSheet.fiscal_period.desc()).first()
+                prior_cash_flow = session.query(CashFlowStatement).filter(
+                    CashFlowStatement.company_id == company.id,
+                    CashFlowStatement.timeline_id == timeline_id,
+                    CashFlowStatement.fiscal_period < latest_period,
+                ).order_by(CashFlowStatement.fiscal_period.desc()).first()
+
                 concall = generate_concall(
                     company=company,
                     income_stmt=income_stmt,
@@ -2445,8 +2472,65 @@ def _generate_concalls_for_quarter(
                     cash_flow=cash_flow,
                     moat_score=moat_score,
                     market_performance=market_performance_by_company.get(company.id),
+                    previous_concall=previous_concall,
+                    prior_balance_sheet=prior_balance_sheet,
+                    prior_cash_flow=prior_cash_flow,
                 )
                 session.add(concall)
+
+                # Small bounded factor-score nudge -- only against the
+                # current-session-fresh CompanyFactorScore row for this
+                # quarter (fresh_cfs_by_company), never against
+                # stale_latest_cfs (a pre-tick snapshot that may not be
+                # attached to this session / may be stale by the time this
+                # flushes) -- see this function's docstring on stale_latest_cfs.
+                cfs_for_nudge = fresh_cfs_by_company.get(company.id)
+                mgmt_delta = 0.0
+                moat_delta = 0.0
+                if cfs_for_nudge is not None:
+                    mgmt_delta = max(
+                        -CONCALL_FACTOR_NUDGE_CLAMP,
+                        min(CONCALL_FACTOR_NUDGE_CLAMP, concall.driver_deltas.get("guidance", 0.0) * CONCALL_FACTOR_NUDGE_SCALE),
+                    )
+                    moat_delta = max(
+                        -CONCALL_FACTOR_NUDGE_CLAMP,
+                        min(CONCALL_FACTOR_NUDGE_CLAMP, concall.driver_deltas.get("earnings_surprise", 0.0) * CONCALL_FACTOR_NUDGE_SCALE),
+                    )
+                    cfs_for_nudge.management_quality = round(
+                        max(0.0, min(100.0, float(cfs_for_nudge.management_quality) + mgmt_delta)), 4,
+                    )
+                    cfs_for_nudge.moat_score = round(
+                        max(0.0, min(100.0, float(cfs_for_nudge.moat_score) + moat_delta)), 4,
+                    )
+
+                # Give the con-call a real entry in the news feed pipeline
+                # (finally a consumer for driver_deltas -- see ConCall's
+                # model docstring) via a direct NewsFeed insert rather than
+                # engine.news_manager.generate_news, since that function is
+                # hard-wired to an EventInstance+MarketEvent+NewsTemplate
+                # join and a con-call already has its own statement text, no
+                # template substitution needed.
+                headline = f"{company.name} {concall.performance_bucket.upper()} on {latest_period} earnings call"
+                news = NewsFeed(
+                    timeline_id=timeline_id,
+                    sim_date=sim_date,
+                    company_id=company.id,
+                    industry_id=None,
+                    headline=headline[:300],
+                    body=concall.statements.get("opening", headline),
+                    sentiment="positive" if concall.tone_score > 0 else ("negative" if concall.tone_score < 0 else "neutral"),
+                    severity=round(abs(concall.tone_score) * 5.0, 4),
+                    news_type="both",
+                    source_event_instance_id=None,
+                )
+                session.add(news)
+                session.flush()
+
+                concall.applied_deltas = {
+                    "management_quality_delta": mgmt_delta,
+                    "moat_score_delta": moat_delta,
+                    "news_feed_id": news.id,
+                }
 
             session.flush()
     except Exception:
