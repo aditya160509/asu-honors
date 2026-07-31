@@ -47,6 +47,15 @@ SEED_TABLES = [
 ]
 
 
+def _psycopg3_url(database_url: str) -> str:
+    """Select psycopg 3 for provider-supplied PostgreSQL connection URLs."""
+    if database_url.startswith("postgres://"):
+        return database_url.replace("postgres://", "postgresql+psycopg://", 1)
+    if database_url.startswith("postgresql://"):
+        return database_url.replace("postgresql://", "postgresql+psycopg://", 1)
+    return database_url
+
+
 def _reset(database_url: str) -> None:
     """Clear every application table while preserving Alembic schema state."""
     from sqlalchemy import create_engine, inspect, text
@@ -104,6 +113,7 @@ def main() -> None:
         "DATABASE_URL",
         "postgresql+psycopg://stocksim:stocksim@localhost:5432/stocksim",
     )
+    db_url = _psycopg3_url(db_url)
 
     if args.reset:
         _reset(db_url)
