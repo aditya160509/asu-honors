@@ -2,18 +2,7 @@
 
 import * as React from "react";
 import { useTimeControlStore } from "@/lib/stores/timeControlStore";
-
-const TIME_RANGES = [
-  { label: "1D", days: 1 },
-  { label: "5D", days: 5 },
-  { label: "10D", days: 10 },
-  { label: "1M", days: 30 },
-  { label: "3M", days: 90 },
-  { label: "6M", days: 180 },
-  { label: "YTD", days: -1 },
-  { label: "1Y", days: 365 },
-  { label: "ALL", days: null },
-] as const;
+import { TIME_WINDOWS } from "@/lib/charts/timeWindow";
 
 export function TimeRangeSelector({ compact = false }: { compact?: boolean }) {
   const timeRange = useTimeControlStore((s) => s.timeRange);
@@ -55,7 +44,7 @@ export function TimeRangeSelector({ compact = false }: { compact?: boolean }) {
           background: "rgba(255,255,255,0.025)",
         }}
       >
-        {TIME_RANGES.map((range) => {
+        {TIME_WINDOWS.map((range) => {
           const active = timeRange === range.label && !customRange;
           return (
             <button

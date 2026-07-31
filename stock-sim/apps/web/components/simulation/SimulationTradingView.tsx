@@ -31,18 +31,7 @@ import type { ChartType } from "@/lib/charts/types";
 import type { IndicatorType } from "@/lib/charts/indicators";
 import type { DrawingToolType } from "@/lib/charts/drawing/types";
 import type { VisibleRange } from "@/lib/charts/types";
-
-const TIME_RANGES = [
-  { label: "1D", days: 1 },
-  { label: "5D", days: 5 },
-  { label: "10D", days: 10 },
-  { label: "1M", days: 30 },
-  { label: "3M", days: 90 },
-  { label: "6M", days: 180 },
-  { label: "YTD", days: -1 },
-  { label: "1Y", days: 365 },
-  { label: "ALL", days: null },
-] as const;
+import { selectTimeWindow, TIME_WINDOWS } from "@/lib/charts/timeWindow";
 
 const PRICE_OVERLAY_IDS = new Set<IndicatorType>(["sma20", "sma50", "ema12", "bollinger", "vwap", "ichimoku", "superTrend"]);
 const PANE_INDICATOR_IDS = new Set<IndicatorType>([
@@ -207,37 +196,10 @@ export function SimulationTradingView() {
     if (!priceHistory || priceHistory.length === 0) return [];
 
     let data = priceHistory;
-
-    if (customRange) {
-      const startMs = new Date(customRange.start).getTime();
-      const endMs = new Date(customRange.end).getTime();
-      data = data.filter((p) => {
-        const t = new Date(p.sim_date).getTime();
-        return t >= startMs && t <= endMs;
-      });
-    } else if (timeRange !== "ALL") {
-      const range = TIME_RANGES.find((r) => r.label === timeRange);
-      if (range) {
-        if (range.days === -1) {
-          // YTD — filter to current calendar year
-          const lastDate = new Date(data[data.length - 1].sim_date);
-          const yearStart = new Date(lastDate.getFullYear(), 0, 1);
-          data = data.filter((p) => new Date(p.sim_date) >= yearStart);
-        } else if (range.days !== null) {
-          const lastDate = new Date(data[data.length - 1].sim_date);
-          const cutoff = new Date(lastDate);
-          cutoff.setDate(cutoff.getDate() - range.days);
-          data = data.filter((p) => new Date(p.sim_date) >= cutoff);
-        }
-        // days === null → ALL, no filtering
-      }
-    }
-
     if (replayMode && currentTick < priceHistory.length) {
       data = data.slice(0, currentTick + 1);
     }
-
-    return data;
+    return selectTimeWindow(data, timeRange, customRange);
   }, [priceHistory, timeRange, customRange, replayMode, currentTick]);
 
   React.useEffect(() => {
@@ -254,7 +216,7 @@ export function SimulationTradingView() {
   const lastVolume = latestPrice ? toNumber(latestPrice.volume) : null;
   const isPositive = dayChange >= 0;
 
-  const currentRange = TIME_RANGES.find((r) => r.label === timeRange) ?? null;
+  const currentRange = TIME_WINDOWS.find((r) => r.label === timeRange) ?? null;
 
   const eventMarkers = React.useMemo<EventMarker[]>(() => {
     if (!newsData || !priceHistory || priceHistory.length === 0) return [];

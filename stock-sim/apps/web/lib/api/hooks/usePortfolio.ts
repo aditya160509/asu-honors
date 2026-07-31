@@ -18,8 +18,9 @@ export function usePortfolio() {
   return useQuery({
     queryKey: ["portfolio"],
     queryFn: () => get<PortfolioResponse>("/portfolio"),
-    staleTime: 0,
-    refetchInterval: 2_000,
+    staleTime: 30_000,
+    refetchInterval: false,
+    refetchOnWindowFocus: true,
   });
 }
 
@@ -27,8 +28,9 @@ export function usePortfolioAnalytics(timelineId?: number) {
   return useQuery({
     queryKey: ["portfolio-analytics", timelineId],
     queryFn: () => get<PortfolioAnalyticsResponse>("/portfolio/analytics", { timeline_id: timelineId }),
-    staleTime: 0,
-    refetchInterval: 2_000,
+    staleTime: 30_000,
+    refetchInterval: false,
+    refetchOnWindowFocus: true,
   });
 }
 

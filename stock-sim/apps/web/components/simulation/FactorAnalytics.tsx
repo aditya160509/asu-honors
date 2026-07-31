@@ -15,6 +15,8 @@ import {
 } from "recharts";
 import { useDriverHistory } from "@/lib/api/hooks/useCompany";
 import type { DriverHistoryItem } from "@/lib/api/types";
+import { useTimeControlStore } from "@/lib/stores/timeControlStore";
+import { selectTimeWindow } from "@/lib/charts/timeWindow";
 
 const FACTORS = [
   ["value_opportunity", "Value Opportunity"],
@@ -38,29 +40,13 @@ function shortDate(value: string) {
   return value.slice(5);
 }
 
-function FactorSparkline({ rows, active }: { rows: DriverHistoryItem[]; active: boolean }) {
-  const points = rows.slice(-28).map((row, index) => ({ index, value: row.value }));
-  return (
-    <div className="h-7 w-20" aria-hidden="true">
-      <ResponsiveContainer width="100%" height="100%">
-        <AreaChart data={points} margin={{ top: 3, right: 1, bottom: 1, left: 1 }}>
-          <defs>
-            <linearGradient id={`spark-${active ? "active" : "idle"}`} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0" stopColor={active ? "#69a7ff" : "#66758c"} stopOpacity={0.35} />
-              <stop offset="1" stopColor={active ? "#69a7ff" : "#66758c"} stopOpacity={0} />
-            </linearGradient>
-          </defs>
-          <Area type="monotone" dataKey="value" stroke={active ? "#69a7ff" : "#66758c"} strokeWidth={1.5} fill={`url(#spark-${active ? "active" : "idle"})`} isAnimationActive={false} />
-        </AreaChart>
-      </ResponsiveContainer>
-    </div>
-  );
-}
-
 export function FactorAnalytics({ ticker, timelineId }: { ticker: string; timelineId?: number }) {
   const { data, isLoading, isError } = useDriverHistory(ticker, timelineId);
   const [factor, setFactor] = React.useState<FactorKey>(FACTORS[0][0]);
   const [mode, setMode] = React.useState<ChartMode>("value");
+  const [chartHeight, setChartHeight] = React.useState(500);
+  const timeRange = useTimeControlStore((state) => state.timeRange);
+  const customRange = useTimeControlStore((state) => state.customRange);
   const rows = data ?? EMPTY_ROWS;
 
   const byFactor = React.useMemo(() => {
@@ -73,7 +59,7 @@ export function FactorAnalytics({ ticker, timelineId }: { ticker: string; timeli
     return grouped;
   }, [rows]);
 
-  const selected = byFactor.get(factor) ?? [];
+  const selected = selectTimeWindow(byFactor.get(factor) ?? [], timeRange, customRange);
   const chartData = selected.map((row) => ({
     ...row,
     metric: mode === "value" ? row.value : row.contribution,
@@ -85,6 +71,25 @@ export function FactorAnalytics({ ticker, timelineId }: { ticker: string; timeli
   const metricChange = latest && first
     ? (mode === "value" ? latest.value - first.value : latest.contribution - first.contribution)
     : null;
+
+  const beginResize = React.useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    const startY = event.clientY;
+    const startHeight = chartHeight;
+    const move = (moveEvent: PointerEvent) => {
+      setChartHeight(Math.max(320, Math.min(780, startHeight + moveEvent.clientY - startY)));
+    };
+    const finish = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", finish);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    document.body.style.cursor = "ns-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", finish, { once: true });
+  }, [chartHeight]);
 
   return (
     <section aria-label="Factor analytics" className="mt-1 overflow-hidden border border-[#202a38] bg-[#070b10] shadow-[inset_0_1px_0_rgba(255,255,255,.025)]">
@@ -110,9 +115,9 @@ export function FactorAnalytics({ ticker, timelineId }: { ticker: string; timeli
           return (
             <button key={key} type="button" role="tab" aria-selected={active} onClick={() => setFactor(key)} className={`min-w-[154px] border px-2.5 py-2 text-left transition ${active ? "border-[#386bbb] bg-[#10203a]" : "border-[#1d2734] bg-[#090e14] hover:border-[#334156]"}`}>
               <div className="truncate text-[10px] font-medium text-[#9eacbf]">{name}</div>
-              <div className="mt-1 flex items-end justify-between gap-2">
+              <div className="mt-2 flex items-end justify-between gap-2">
                 <span className={`font-mono text-[12px] font-bold ${last && last.value >= 0 ? "text-[#45d19a]" : "text-[#ff737b]"}`}>{last ? fmt(last.value) : "—"}</span>
-                <FactorSparkline rows={factorRows} active={active} />
+                <span className="font-mono text-[8px] uppercase tracking-[.1em] text-[#5f6d80]">W {last ? last.weight.toFixed(2) : "—"}</span>
               </div>
             </button>
           );
@@ -136,9 +141,9 @@ export function FactorAnalytics({ ticker, timelineId }: { ticker: string; timeli
           <div className="px-2 pb-2 pt-4">
             <div className="mb-2 flex items-center justify-between px-2 font-mono text-[10px] uppercase tracking-[.08em] text-[#71809a]">
               <span>{label} · {mode === "value" ? "raw score" : "score × configured weight"}</span>
-              <span>{latest?.sim_date}</span>
+              <span>{timeRange} · {chartData.length} points · {latest?.sim_date}</span>
             </div>
-            <div className="h-[360px] w-full">
+            <div className="w-full" style={{ height: chartHeight }}>
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={chartData} margin={{ top: 8, right: 22, bottom: 6, left: 0 }}>
                   <defs>
@@ -151,7 +156,7 @@ export function FactorAnalytics({ ticker, timelineId }: { ticker: string; timeli
                   <XAxis dataKey="sim_date" tickFormatter={shortDate} minTickGap={54} tick={{ fill: "#68768b", fontSize: 10, fontFamily: "monospace" }} axisLine={{ stroke: "#202a38" }} tickLine={false} />
                   <YAxis width={58} domain={["auto", "auto"]} tickFormatter={(v: number) => v.toFixed(3)} tick={{ fill: "#68768b", fontSize: 10, fontFamily: "monospace" }} axisLine={false} tickLine={false} />
                   <ReferenceLine y={0} stroke="#58677b" strokeDasharray="3 4" />
-                  <Tooltip cursor={{ stroke: "#8290a3", strokeDasharray: "2 4" }} contentStyle={{ background: "#0b121b", border: "1px solid #2a374a", borderRadius: 0, fontFamily: "monospace", fontSize: 11 }} labelStyle={{ color: "#8190a5" }} formatter={(value) => [fmt(Number(value), 4), mode === "value" ? "Raw signal" : "Weighted impact"]} />
+                  <Tooltip cursor={{ stroke: "#90a0b7", strokeWidth: 1, strokeDasharray: "2 3" }} contentStyle={{ background: "#070c12", border: "1px solid #3a4a61", borderRadius: 0, boxShadow: "0 12px 34px rgba(0,0,0,.5)", fontFamily: "monospace", fontSize: 11 }} labelStyle={{ color: "#9cacbf", marginBottom: 5 }} formatter={(value) => [fmt(Number(value), 4), mode === "value" ? "Raw signal" : "Weighted impact"]} />
                   <Area type="monotone" dataKey="metric" stroke="#63a2ff" strokeWidth={2} fill="url(#factor-main-fill)" dot={false} activeDot={{ r: 4, fill: "#070b10", stroke: "#7eb2ff", strokeWidth: 2 }} isAnimationActive={false} />
                   <Line type="monotone" dataKey="contribution" stroke="#e6ad39" strokeWidth={1} strokeDasharray="5 4" dot={false} opacity={mode === "value" ? 0.8 : 0} isAnimationActive={false} />
                   <Brush dataKey="sim_date" height={24} travellerWidth={5} stroke="#315d9e" fill="#0a1018" tickFormatter={shortDate} />
@@ -159,6 +164,9 @@ export function FactorAnalytics({ ticker, timelineId }: { ticker: string; timeli
               </ResponsiveContainer>
             </div>
           </div>
+          <button type="button" onPointerDown={beginResize} aria-label="Resize factor chart" className="group flex h-3 w-full cursor-ns-resize items-center justify-center border-t border-[#18212d] bg-[#070b10] hover:bg-[#0d1622]">
+            <span className="h-px w-16 bg-[#34445a] transition-all group-hover:w-24 group-hover:bg-[#669cff]" />
+          </button>
           <footer className="flex flex-wrap items-center gap-x-5 gap-y-1 border-t border-[#18212d] bg-[#080d13] px-4 py-2 font-mono text-[9px] uppercase tracking-[.08em] text-[#657287]">
             <span><i className="mr-1.5 inline-block h-0.5 w-4 bg-[#63a2ff] align-middle" /> selected metric</span>
             {mode === "value" && <span><i className="mr-1.5 inline-block w-4 border-t border-dashed border-[#e6ad39] align-middle" /> weighted contribution</span>}
