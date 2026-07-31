@@ -68,6 +68,21 @@ def _reset(database_url: str) -> None:
     print("All seed tables truncated.")
 
 
+def _has_complete_seed_baseline(database_url: str) -> bool:
+    """Return true when the minimum production baseline is already present."""
+    from sqlalchemy import create_engine, text
+
+    engine = create_engine(database_url)
+    with engine.connect() as conn:
+        counts = conn.execute(text(
+            "SELECT "
+            "(SELECT COUNT(*) FROM timelines WHERE is_live = true), "
+            "(SELECT COUNT(*) FROM companies), "
+            "(SELECT COUNT(*) FROM price_history)"
+        )).one()
+    return all(int(value) > 0 for value in counts)
+
+
 def _sync_postgres_sequences(database_url: str) -> None:
     """Move every PostgreSQL identity/serial sequence past seeded primary keys.
 
@@ -106,6 +121,11 @@ def _sync_postgres_sequences(database_url: str) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run all seed scripts in dependency order.")
     parser.add_argument("--reset", action="store_true", help="Truncate all seed tables before running")
+    parser.add_argument(
+        "--if-empty",
+        action="store_true",
+        help="Skip the expensive seed pipeline when a complete baseline already exists",
+    )
     args = parser.parse_args()
 
     project_root = os.path.normpath(os.path.join(os.path.dirname(__file__), "../.."))
@@ -117,6 +137,9 @@ def main() -> None:
 
     if args.reset:
         _reset(db_url)
+    elif args.if_empty and _has_complete_seed_baseline(db_url):
+        print("Seed baseline already exists; skipping seed pipeline.")
+        return
 
     existing_pypath = os.environ.get("PYTHONPATH", "")
     env = {
