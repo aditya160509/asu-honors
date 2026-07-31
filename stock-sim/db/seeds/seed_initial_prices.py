@@ -260,6 +260,12 @@ def seed(session: Session) -> None:
     for r in rows:
         company = r["company"]
         if company.current_price is not None and company.current_price > 0:
+            # A deploy runs the seed pipeline on every start. Existing companies
+            # have already had every derived value and baseline candle persisted,
+            # so mark the row and skip it consistently in both processing passes.
+            # Previously only this pass skipped it, leaving the write pass below
+            # to read derived dictionary keys that were never populated.
+            r["already_seeded"] = True
             continue
         ind_id = company.industry_id
         fq = financial_quality_composite(
@@ -334,6 +340,8 @@ def seed(session: Session) -> None:
             session.add(x)
 
     for r in rows:
+        if r.get("already_seeded"):
+            continue
         company = r["company"]
         cfs = r["seed_cfs"]
         cfs.moat_score = round(r["moat"], 4)
