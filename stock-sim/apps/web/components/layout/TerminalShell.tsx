@@ -34,16 +34,16 @@ export function TerminalShell({
   return (
     <ProtectedRoute>
       <SidebarProvider>
-        <div className="mer-mesh-canvas flex h-screen flex-col">
+        <div className="mer-mesh-canvas flex min-h-[100dvh] flex-col overflow-hidden" data-terminal-shell>
           <div className="flex flex-1 overflow-hidden">
             <Sidebar />
-            <div className={cn("flex flex-1 flex-col", noPadding ? "overflow-hidden" : "overflow-y-auto")}>
+            <div className={cn("flex min-w-0 flex-1 flex-col", noPadding ? "overflow-hidden" : "overflow-y-auto overscroll-contain")}>
               <Header />
               <RouteFadeContent>
                 {noPadding ? (
-                  <main className="flex min-h-0 flex-1 flex-col overflow-hidden">{children}</main>
+                  <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">{children}</main>
                 ) : (
-                  <main className="mx-auto w-full max-w-[1800px] px-5 py-5">{children}</main>
+                  <main className="mx-auto w-full min-w-0 max-w-[1800px] px-5 py-5 max-sm:px-3 max-sm:py-3">{children}</main>
                 )}
               </RouteFadeContent>
             </div>

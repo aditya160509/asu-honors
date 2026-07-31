@@ -34,7 +34,7 @@ export function WorkspaceSwitcher() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        className="flex max-w-[180px] items-center gap-2 h-8 px-2.5 rounded-mer-sm text-mer-ink-secondary hover:bg-mer-surface-3 hover:text-mer-ink-primary transition-colors outline-none"
+        className="flex h-8 max-w-[180px] items-center gap-2 rounded-mer-sm px-2.5 text-mer-ink-secondary outline-none transition-colors hover:bg-mer-surface-3 hover:text-mer-ink-primary max-sm:max-w-[125px]"
         aria-label="Switch timeline"
       >
         <GitBranch size={14} className="shrink-0 text-mer-ink-tertiary" />

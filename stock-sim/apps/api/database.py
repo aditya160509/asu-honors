@@ -17,8 +17,13 @@ if settings.database_url.startswith("sqlite"):
     connect_args["check_same_thread"] = False
     kwargs["poolclass"] = None  # singleton pool, SQLite default
 else:
-    kwargs["pool_size"] = 10
-    kwargs["max_overflow"] = 20
+    # A single Render web process does not benefit from thirty possible DB
+    # connections. Keeping the pool deliberately small reduces app/DB memory
+    # and prevents a brief client burst from overwhelming the free database.
+    kwargs["pool_size"] = 3
+    kwargs["max_overflow"] = 2
+    kwargs["pool_pre_ping"] = True
+    kwargs["pool_recycle"] = 300
 
 engine = create_engine(settings.database_url, connect_args=connect_args, **kwargs)
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)

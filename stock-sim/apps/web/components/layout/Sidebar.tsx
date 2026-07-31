@@ -16,7 +16,6 @@ import {
   PanelLeftOpen,
   Search,
   ShieldCheck,
-  Sparkles,
   Beaker,
   Star,
   Trophy,
@@ -78,7 +77,6 @@ const NAV_GROUPS: NavGroup[] = [
     eyebrow: "Intelligence",
     items: [
       { href: "/news", label: "News", icon: Newspaper },
-      { href: "/ai", label: "AI Workspace", icon: Sparkles },
     ],
   },
     {
@@ -177,7 +175,7 @@ function SidebarRail({ collapsed, onToggleCollapse }: { collapsed: boolean; onTo
   return (
     <aside
       style={{ width }}
-      className="mer-surface-lit shrink-0 h-screen sticky top-0 bg-mer-surface-1 border-r border-[color:var(--mer-stroke-hairline)] flex flex-col overflow-hidden z-20"
+      className="mer-surface-lit sticky top-0 z-20 flex h-[100dvh] shrink-0 flex-col overflow-hidden border-r border-[color:var(--mer-stroke-hairline)] bg-mer-surface-1"
     >
       <SidebarBody collapsed={collapsed} onToggleCollapse={onToggleCollapse} />
     </aside>

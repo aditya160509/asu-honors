@@ -32,6 +32,7 @@ import type { IndicatorType } from "@/lib/charts/indicators";
 import type { DrawingToolType } from "@/lib/charts/drawing/types";
 import type { VisibleRange } from "@/lib/charts/types";
 import { selectTimeWindow, TIME_WINDOWS } from "@/lib/charts/timeWindow";
+import { useMediaQuery } from "@/lib/hooks/useMediaQuery";
 
 const PRICE_OVERLAY_IDS = new Set<IndicatorType>(["sma20", "sma50", "ema12", "bollinger", "vwap", "ichimoku", "superTrend"]);
 const PANE_INDICATOR_IDS = new Set<IndicatorType>([
@@ -101,12 +102,14 @@ function TerminalBtn({
 }
 
 export function SimulationTradingView() {
+  const isMobile = useMediaQuery("(max-width: 767px)");
   const { data: simState } = useSimState();
   const { data: grid } = useMarketGrid(simState?.timeline_id);
   const [selectedTicker, setSelectedTicker] = React.useState<string | null>(null);
   const [showVolumeProfile, setShowVolumeProfile] = React.useState(true);
   const chartContainerRef = React.useRef<HTMLDivElement>(null);
   const [chartHeight, setChartHeight] = React.useState(500);
+  const renderedChartHeight = isMobile ? Math.min(chartHeight, 360) : chartHeight;
   const [chartRange, setChartRange] = React.useState<VisibleRange>({ from: 0, to: 0 });
   const updateChartRange = React.useCallback((next: VisibleRange) => {
     setChartRange((current) => (sameRange(current, next) ? current : next));
@@ -322,7 +325,7 @@ export function SimulationTradingView() {
       style={{
         display: "flex",
         flexDirection: "column",
-        height: "calc(100vh - 96px)",
+        height: "calc(100dvh - 96px)",
         background: cycleData?.market_sentiment != null && cycleData.market_sentiment < 40
           ? "linear-gradient(180deg, #0b0808 0%, #06080c 100%)"
           : cycleData?.market_sentiment != null && cycleData.market_sentiment > 60
@@ -345,6 +348,7 @@ export function SimulationTradingView() {
         style={{
           display: "flex",
           alignItems: "center",
+          flexWrap: isMobile ? "wrap" : "nowrap",
           gap: 6,
           padding: "4px 10px",
           borderBottom: "1px solid var(--mer-stroke-hairline)",
@@ -384,8 +388,8 @@ export function SimulationTradingView() {
           )}
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: "auto" }}>
-          {latestPrice && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: "auto", minWidth: 0 }}>
+          {latestPrice && !isMobile && (
             <div style={{ display: "flex", gap: 6, alignItems: "baseline", marginRight: 6, paddingRight: 6, borderRight: "1px solid var(--mer-stroke-hairline)" }}>
               <OhlcBadge label="O" value={latestPrice.open} />
               <OhlcBadge label="H" value={latestPrice.high} />
@@ -418,17 +422,18 @@ export function SimulationTradingView() {
           </span>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(54px, auto))", gap: 4 }}>
+        {!isMobile && <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(54px, auto))", gap: 4 }}>
           <QuoteStat label="Range" value={customRange ? `${customRange.start.slice(5)}–${customRange.end.slice(5)}` : currentRange?.label ?? "--"} />
           <QuoteStat label="Volume" value={lastVolume == null ? "--" : formatLarge(lastVolume)} />
           <QuoteStat label="Mkt Cap" value={currentCompany?.market_cap == null ? "--" : formatLarge(currentCompany.market_cap)} />
-        </div>
+        </div>}
       </div>
 
       {/* Main Content */}
       <div
         style={{
           display: "flex",
+          flexDirection: isMobile ? "column" : "row",
           flex: 1,
           minHeight: 0,
           overflow: "hidden",
@@ -441,7 +446,7 @@ export function SimulationTradingView() {
             flexShrink: 0,
             borderRight: "1px solid var(--mer-stroke-hairline)",
             background: "var(--mer-surface-1)",
-            display: "flex",
+            display: isMobile ? "none" : "flex",
             flexDirection: "column",
             overflowY: "auto",
             overflowX: "hidden",
@@ -460,6 +465,7 @@ export function SimulationTradingView() {
             padding: "4px 6px",
             overflowY: "auto",
             overflowX: "hidden",
+            width: isMobile ? "100%" : undefined,
           }}
         >
           {/* Market Overview Bar */}
@@ -471,6 +477,7 @@ export function SimulationTradingView() {
               gap: 6,
               marginBottom: 3,
               flexWrap: "wrap",
+              overflowX: isMobile ? "auto" : undefined,
             }}
           >
             <div style={{ flexShrink: 0 }}>
@@ -499,8 +506,8 @@ export function SimulationTradingView() {
               border: "1px solid var(--mer-stroke-hairline)",
               borderRadius: "var(--mer-radius-xs)",
               overflow: "hidden",
-              minHeight: 360,
-              height: chartHeight,
+              minHeight: isMobile ? 300 : 360,
+              height: renderedChartHeight,
               boxShadow: "0 0 0 1px rgba(62, 111, 224, 0.06), var(--mer-shadow-rest)",
               transition: "box-shadow 600ms cubic-bezier(0.16, 1, 0.3, 1)",
             }}
@@ -511,7 +518,7 @@ export function SimulationTradingView() {
               error={isError}
               onRetry={() => refetch()}
               ticker={selectedTicker ?? ""}
-              height={chartHeight}
+              height={renderedChartHeight}
               indicators={priceIndicators}
               showVolumeProfile={showVolumeProfile}
               events={eventMarkers}
@@ -570,7 +577,7 @@ export function SimulationTradingView() {
         {showFundamentals && (
           <div
             style={{
-              width: 320,
+              width: isMobile ? "100%" : 320,
               flexShrink: 0,
               borderLeft: "1px solid var(--mer-stroke-hairline)",
               overflow: "auto",
@@ -628,11 +635,13 @@ export function SimulationTradingView() {
           {/* Right Sidebar */}
           <aside
             style={{
-              width: 220,
+              width: isMobile ? "100%" : 220,
               flexShrink: 0,
               display: "flex",
               flexDirection: "column",
-              borderLeft: "1px solid var(--mer-stroke-hairline)",
+              borderLeft: isMobile ? "none" : "1px solid var(--mer-stroke-hairline)",
+              borderTop: isMobile ? "1px solid var(--mer-stroke-hairline)" : "none",
+              maxHeight: isMobile ? 360 : undefined,
               overflow: "auto",
               animation: "fade-slide-down 250ms cubic-bezier(0.16, 1, 0.3, 1)",
             }}

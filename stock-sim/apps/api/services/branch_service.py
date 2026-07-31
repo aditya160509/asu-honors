@@ -33,6 +33,8 @@ from db.models import (
     Industry,
     Portfolio,
     Holding,
+    PriceHistory,
+    PriceDriverScore,
 )
 from engine.cycle import CYCLE_PHASES
 from engine.orchestrator import run_ticks
@@ -466,8 +468,12 @@ def extend_timeline(db: Session, timeline_id: int, additional_days: int, *, pers
 
 
 def archive_timeline(db: Session, timeline_id: int) -> Timeline:
-    """Soft-delete: mark a timeline archived. Respects `pinned` -- a pinned
-    timeline must be explicitly unpinned first (Section 11.8 retention)."""
+    """Archive metadata and reclaim the branch's high-volume observations.
+
+    The timeline, overrides and audit records remain available for diagnostics,
+    while the two append-only series (which dominate database size) are removed.
+    This only happens after the user explicitly deletes an unpinned branch.
+    """
     timeline = db.query(Timeline).filter_by(id=timeline_id).first()
     if timeline is None:
         raise NotFoundError(f"Timeline {timeline_id} not found")
@@ -476,6 +482,8 @@ def archive_timeline(db: Session, timeline_id: int) -> Timeline:
     if timeline.is_live:
         raise ConflictError("Cannot archive the live timeline")
 
+    db.query(PriceDriverScore).filter_by(timeline_id=timeline_id).delete(synchronize_session=False)
+    db.query(PriceHistory).filter_by(timeline_id=timeline_id).delete(synchronize_session=False)
     timeline.status = "archived"
     db.flush()
     return timeline

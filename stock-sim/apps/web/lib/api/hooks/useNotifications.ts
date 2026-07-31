@@ -18,11 +18,11 @@ export function useNotifications(limit = 30) {
   return useQuery({
     queryKey: [...NOTIFICATIONS_KEY, limit],
     queryFn: () => get<NotificationResponse[]>("/notifications", { limit }),
-    // Fallback cadence for whenever the realtime WS (useNotificationSocket)
-    // isn't connected -- same as the market grid's live-price polling.
-    // With the socket connected, a new notification invalidates this query
-    // immediately instead of waiting out the interval.
-    refetchInterval: 15_000,
+    // Realtime delivery invalidates this query. Do not also poll: that doubles
+    // backend work for every open tab and is especially wasteful on Render's
+    // free CPU. A remount still reads the cached/server state normally.
+    refetchInterval: false,
+    staleTime: 120_000,
   });
 }
 

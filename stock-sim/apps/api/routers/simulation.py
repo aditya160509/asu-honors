@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from apps.api.auth import get_current_user, require_admin
 from apps.api.config import settings
 from apps.api.database import get_db
+from apps.api.response_cache import response_cache
 from apps.api.exceptions import NotFoundError
 from apps.api.schemas import (
     AdvanceRequest,
@@ -59,6 +60,7 @@ def advance(
         db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     db.commit()
+    response_cache.invalidate_timeline(request.timeline_id)
 
     return result
 
@@ -149,7 +151,11 @@ def get_timeline_analytics(
     db: Session = Depends(get_db),
     _user: User = Depends(get_current_user),
 ) -> dict:
-    return result_service.build_timeline_analytics(db, timeline_id, compare_id)
+    return response_cache.get_or_create(
+        ("timeline-analytics", timeline_id, compare_id),
+        10.0,
+        lambda: result_service.build_timeline_analytics(db, timeline_id, compare_id),
+    )
 
 
 @router.post("/timeline-groups", response_model=EnsembleCreateResponse, status_code=status.HTTP_201_CREATED)

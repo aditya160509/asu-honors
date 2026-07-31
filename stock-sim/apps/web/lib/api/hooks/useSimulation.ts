@@ -28,7 +28,7 @@ export function useSimState(timelineId?: number) {
   return useQuery({
     queryKey: ["sim-state", timelineId],
     queryFn: () => get<SimulationStateResponse>("/sim/state", { timeline_id: timelineId }),
-    staleTime: 5000,
+    staleTime: 60_000,
   });
 }
 
@@ -59,7 +59,7 @@ export function useTimelines() {
     refetchInterval: (query) => {
       const timelines = query.state.data;
       const hasInFlight = timelines?.some((t) => t.status === "pending" || t.status === "running");
-      return hasInFlight ? 2000 : false;
+      return hasInFlight ? 5000 : false;
     },
   });
 }
@@ -116,7 +116,7 @@ export function useTimelineStatus(timelineId: number | undefined, options?: { po
     refetchInterval: (query) => {
       if (!options?.pollWhilePending) return false;
       const status = query.state.data?.status;
-      return status === "pending" || status === "running" ? 2000 : false;
+      return status === "pending" || status === "running" ? 5000 : false;
     },
   });
 }

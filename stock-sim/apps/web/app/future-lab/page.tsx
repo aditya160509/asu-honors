@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import dynamic from "next/dynamic";
 import { Activity, ArrowRight, Beaker, CheckCircle2, Clock3, GitBranch, HelpCircle, Layers3, Play, Sparkles, X, XCircle, BarChart3, Download, RefreshCw } from "lucide-react";
 import { TerminalShell } from "@/components/layout/TerminalShell";
 import { TimelineBranch } from "@/components/simulation/TimelineBranch";
@@ -10,8 +11,18 @@ import { formatDateFull } from "@/lib/utils";
 import { useMarketGrid } from "@/lib/api/hooks/useMarket";
 import { useDriverHistory, usePriceHistory } from "@/lib/api/hooks/useCompany";
 import { usePortfolioAnalytics } from "@/lib/api/hooks/usePortfolio";
-import { FactorAnalytics } from "@/components/simulation/FactorAnalytics";
 import { download } from "@/lib/api/client";
+
+const FactorAnalytics = dynamic(
+  () => import("@/components/simulation/FactorAnalytics").then((module) => module.FactorAnalytics),
+  {
+    loading: () => (
+      <div className="grid h-64 place-items-center border-t border-[var(--mer-stroke-hairline)] text-xs text-[var(--mer-ink-muted)]">
+        Loading factor laboratory…
+      </div>
+    ),
+  },
+);
 
 const statusMeta = {
   ready: { label: "Ready", icon: CheckCircle2, tone: "#5ee6a8" },

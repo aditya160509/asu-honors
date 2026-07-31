@@ -13,8 +13,14 @@ export function Providers({ children }: { children: React.ReactNode }) {
       new QueryClient({
         defaultOptions: {
           queries: {
-            retry: 3,
-            staleTime: 30_000,
+            // Render's free CPU is the scarce resource. Server state is
+            // invalidated after mutations, so passive remount/focus/network
+            // events must not create duplicate reads.
+            retry: 1,
+            staleTime: 120_000,
+            gcTime: 15 * 60_000,
+            refetchOnWindowFocus: false,
+            refetchOnReconnect: false,
           },
         },
       })

@@ -14,8 +14,8 @@ export function useMarketGrid(timelineId?: number, asOfDate?: string | null) {
     // polling so the free Render process does no work while a screen is merely
     // open; focus/reconnect still refreshes a stale live snapshot.
     refetchInterval: false,
-    staleTime: asOfDate ? Infinity : 30_000,
-    refetchOnWindowFocus: !asOfDate,
+    staleTime: asOfDate ? Infinity : 120_000,
+    refetchOnWindowFocus: false,
   });
 }
 
@@ -24,7 +24,7 @@ export function useCycleState(timelineId?: number) {
     queryKey: ["cycle", timelineId],
     queryFn: () => get<CycleStateResponse>("/market/cycle", { timeline_id: timelineId }),
     refetchInterval: false,
-    staleTime: 30_000,
-    refetchOnWindowFocus: true,
+    staleTime: 120_000,
+    refetchOnWindowFocus: false,
   });
 }

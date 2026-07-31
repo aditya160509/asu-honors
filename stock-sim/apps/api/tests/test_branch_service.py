@@ -12,6 +12,7 @@ from db.models import (
     CompanyFactorScore,
     FinancialQualitySubscore,
     MoatSubscore,
+    PriceDriverScore,
     PriceHistory,
     SimulationState,
     Timeline,
@@ -326,15 +327,26 @@ def test_archive_pinned_timeline_raises(test_db, test_timeline, test_user):
         branch_service.archive_timeline(test_db, timeline.id)
 
 
-def test_archive_unpinned_branch_succeeds(test_db, test_timeline, test_user):
+def test_archive_unpinned_branch_succeeds(test_db, test_timeline, test_user, test_company):
     timeline = branch_service.create_branch(
         test_db, user_id=test_user.id, name="Disposable Branch", parent_id=test_timeline.id,
         branch_date=date(2026, 1, 2), rng_seed=None, primitive="manual",
     )
+    test_db.add(PriceHistory(
+        timeline_id=timeline.id, company_id=test_company.id, sim_date=date(2026, 1, 2),
+        open=10, high=11, low=9, close=10.5, volume=1_000,
+        intrinsic_value=10, order_imbalance=0,
+    ))
+    test_db.add(PriceDriverScore(
+        timeline_id=timeline.id, company_id=test_company.id, sim_date=date(2026, 1, 2),
+        driver_key="guidance", value=0.1, weight=0.2, contribution=0.02,
+    ))
     test_db.commit()
 
     archived = branch_service.archive_timeline(test_db, timeline.id)
     assert archived.status == "archived"
+    assert test_db.query(PriceHistory).filter_by(timeline_id=timeline.id).count() == 0
+    assert test_db.query(PriceDriverScore).filter_by(timeline_id=timeline.id).count() == 0
 
 
 def test_extend_timeline_advances_ticks(test_db, test_timeline, test_user, test_company):

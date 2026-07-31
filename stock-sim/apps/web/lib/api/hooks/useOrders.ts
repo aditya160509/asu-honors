@@ -30,8 +30,9 @@ export function useOrders(status?: OrderStatus, timelineId?: number) {
   return useQuery({
     queryKey: ["orders", status, timelineId],
     queryFn: () => get<OrderResponse[]>("/orders", { status, timeline_id: timelineId }),
-    refetchInterval: status === "open" ? 5000 : undefined,
-    staleTime: 3000,
+    refetchInterval: status === "open" ? 15_000 : false,
+    refetchIntervalInBackground: false,
+    staleTime: 15_000,
   });
 }
 

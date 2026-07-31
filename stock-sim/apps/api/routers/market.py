@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from apps.api.config import settings
 from apps.api.database import get_db
+from apps.api.response_cache import response_cache
 from apps.api.schemas import (
     CompanyDetail,
     CompanyDividendsResponse,
@@ -36,12 +37,19 @@ def get_market(
     as_of_date: Optional[date] = Query(default=None, description="Return the grid as it stood on this sim date instead of live/latest."),
     db: Session = Depends(get_db),
 ) -> MarketGridResponse:
-    return market_service.get_market_grid(db, timeline_id, as_of_date=as_of_date)
+    ttl = 300.0 if as_of_date is not None else 3.0
+    return response_cache.get_or_create(
+        ("market", timeline_id, as_of_date),
+        ttl,
+        lambda: market_service.get_market_grid(db, timeline_id, as_of_date=as_of_date),
+    )
 
 
 @router.get("/market/cycle", response_model=CycleStateResponse)
 def get_cycle(timeline_id: int = Query(default=settings.default_timeline_id), db: Session = Depends(get_db)) -> CycleStateResponse:
-    return market_service.get_cycle_state(db, timeline_id)
+    return response_cache.get_or_create(
+        ("cycle", timeline_id), 3.0, lambda: market_service.get_cycle_state(db, timeline_id)
+    )
 
 
 @router.get("/companies/{ticker}", response_model=CompanyDetail)

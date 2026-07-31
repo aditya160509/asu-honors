@@ -6,14 +6,15 @@ from typing import AsyncIterator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 
 from apps.api.database import check_migrations_up_to_date
 from apps.api.database import engine as db_engine
+from apps.api.response_cache import response_cache
 from apps.api import background_jobs
 from apps.api.exceptions import add_exception_handlers
 
 from apps.api.routers import (
-    ai,
     audit_log,
     auth,
     concalls,
@@ -44,6 +45,7 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        response_cache.clear()
         background_jobs.stop()
         db_engine.dispose()
 
@@ -65,6 +67,10 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    # Market grids, analytics and timeline outputs are JSON-heavy. Compressing
+    # responses above 1 KiB cuts transfer work for both Render and mobile
+    # clients while leaving tiny control responses untouched.
+    application.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
 
     application.include_router(health.router)
     application.include_router(auth.router)
@@ -79,7 +85,6 @@ def create_app() -> FastAPI:
     application.include_router(leaderboard.router)
     application.include_router(notifications.router)
     application.include_router(ws.router)
-    application.include_router(ai.router)
 
     add_exception_handlers(application)
 

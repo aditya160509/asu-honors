@@ -23,7 +23,7 @@ export function Breadcrumbs() {
   return (
     <nav
       aria-label="Breadcrumb"
-      className="flex items-center gap-1.5 px-5 h-7 text-micro text-mer-ink-tertiary border-b border-[color:var(--mer-stroke-hairline)] shrink-0"
+      className="scrollbar-none flex h-7 shrink-0 items-center gap-1.5 overflow-x-auto whitespace-nowrap border-b border-[color:var(--mer-stroke-hairline)] px-5 text-micro text-mer-ink-tertiary max-sm:px-3"
     >
       <Link href="/market" className="flex items-center hover:text-mer-ink-secondary transition-colors">
         <Home size={12} />

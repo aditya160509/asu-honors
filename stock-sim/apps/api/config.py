@@ -1,4 +1,4 @@
-"""Application settings loaded from environment variables (Phase 5 plan section 1)."""
+"""Application settings loaded from environment variables."""
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -30,16 +30,6 @@ class Settings(BaseSettings):
     api_host: str = "0.0.0.0"
     api_port: int = 8000
     default_timeline_id: int = 1
-    # AI Financial Advisor (Section "AI Workspace") -- empty by default, same
-    # pattern as resend_api_key. Unlike email (which degrades to console-log
-    # when unset), ai_service must fail loudly with a clear error when this
-    # is empty rather than fabricate a response -- see ai_service.py.
-    # OpenRouter (openrouter.ai) -- OpenAI-compatible API in front of many
-    # providers/models, including free-tier models with no billing-credit
-    # requirement.
-    openrouter_api_key: str = ""
-    ai_model: str = "poolside/laguna-s-2.1:free"
-
     @field_validator("database_url", mode="before")
     @classmethod
     def use_psycopg3_driver(cls, value: str) -> str:

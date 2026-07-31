@@ -8,7 +8,6 @@ import { GlobalMarketsSection } from "@/components/dashboard/GlobalMarketsSectio
 import { MarketOverviewSection } from "@/components/dashboard/MarketOverviewSection";
 import { MarketSentimentSection } from "@/components/dashboard/MarketSentimentSection";
 import { PortfolioPerformanceSection } from "@/components/dashboard/PortfolioPerformanceSection";
-import { AiInsightSection } from "@/components/dashboard/AiInsightSection";
 import { TrendingCompaniesSection } from "@/components/dashboard/TrendingCompaniesSection";
 import { WatchlistPreviewSection } from "@/components/dashboard/WatchlistPreviewSection";
 import { SectorPerformanceSection } from "@/components/dashboard/SectorPerformanceSection";
@@ -39,8 +38,6 @@ export function DashboardGrid() {
       <MarketSentimentSection />
 
       <PortfolioPerformanceSection />
-      <AiInsightSection />
-
       <TrendingCompaniesSection />
       <WatchlistPreviewSection />
       <SectorPerformanceSection />
