@@ -1,0 +1,32 @@
+databases:
+  - name: future-lab-db
+    databaseName: future_lab
+    user: future_lab
+    plan: free
+
+services:
+  - type: web
+    name: future-lab-api
+    runtime: python
+    plan: free
+    rootDir: stock-sim
+    buildCommand: pip install -e . && alembic upgrade head
+    startCommand: alembic upgrade head && python db/seeds/run_all.py && uvicorn apps.api.main:app --host 0.0.0.0 --port $PORT --workers 1
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: future-lab-db
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: AUTHENTICATION_DISABLED
+        value: "false"
+      - key: SKIP_EMAIL_VERIFICATION
+        value: "true"
+      - key: FRONTEND_BASE_URL
+        sync: false
+      - key: BACKGROUND_WORKER_THREADS
+        value: "1"

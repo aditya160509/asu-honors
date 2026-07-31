@@ -4,7 +4,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Optional
 
-from sqlalchemy import and_, func
+from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
 from apps.api.exceptions import NotFoundError
@@ -13,6 +13,7 @@ from apps.api.schemas import (
     CompanyGridItem,
     CycleStateResponse,
     DriverBreakdown,
+    DriverHistoryItem,
     FinancialStatementResponse,
     MarketGridResponse,
     PriceHistoryItem,
@@ -388,6 +389,42 @@ def get_driver_breakdowns(
     )
     return [
         DriverBreakdown(
+            driver_key=r.driver_key,
+            value=float(r.value),
+            weight=float(r.weight),
+            contribution=float(r.contribution),
+        )
+        for r in rows
+    ]
+
+
+def get_driver_history(db: Session, ticker: str, timeline_id: int, limit: int = 252) -> list[DriverHistoryItem]:
+    """Return the most recent factor observations, ordered for charting."""
+    company = db.query(Company).filter_by(ticker=ticker.upper()).first()
+    if company is None:
+        raise NotFoundError(f"Company '{ticker}' not found")
+
+    recent_dates = (
+        db.query(PriceDriverScore.sim_date)
+        .filter_by(company_id=company.id, timeline_id=timeline_id)
+        .distinct()
+        .order_by(PriceDriverScore.sim_date.desc())
+        .limit(limit)
+        .subquery()
+    )
+    rows = (
+        db.query(PriceDriverScore)
+        .filter(
+            PriceDriverScore.company_id == company.id,
+            PriceDriverScore.timeline_id == timeline_id,
+            PriceDriverScore.sim_date.in_(select(recent_dates.c.sim_date)),
+        )
+        .order_by(PriceDriverScore.sim_date.asc(), PriceDriverScore.driver_key.asc())
+        .all()
+    )
+    return [
+        DriverHistoryItem(
+            sim_date=r.sim_date,
             driver_key=r.driver_key,
             value=float(r.value),
             weight=float(r.weight),

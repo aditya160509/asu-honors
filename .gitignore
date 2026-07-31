@@ -3,3 +3,5 @@ __pycache__/
 *.py[cod]
 .vscode/
 .superpowers/
+node_modules/
+.vercel/

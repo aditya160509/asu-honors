@@ -15,6 +15,7 @@ from apps.api.schemas import (
     CompanyDividendsResponse,
     CycleStateResponse,
     DriverBreakdown,
+    DriverHistoryItem,
     FinancialStatementResponse,
     MarketGridResponse,
     PriceHistoryItem,
@@ -67,6 +68,16 @@ def get_company_drivers(
     db: Session = Depends(get_db),
 ) -> list[DriverBreakdown]:
     return market_service.get_driver_breakdowns(db, ticker, timeline_id, sim_date)
+
+
+@router.get("/companies/{ticker}/drivers/history", response_model=list[DriverHistoryItem])
+def get_company_driver_history(
+    ticker: str,
+    limit: int = Query(default=252, ge=1, le=1000),
+    timeline_id: int = Query(default=settings.default_timeline_id),
+    db: Session = Depends(get_db),
+) -> list[DriverHistoryItem]:
+    return market_service.get_driver_history(db, ticker, timeline_id, limit)
 
 
 @router.get("/companies/{ticker}/financials", response_model=FinancialStatementResponse)

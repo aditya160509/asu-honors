@@ -133,7 +133,8 @@ export function ScreenerToolbar({
   const orderedColumns = columnOrder.map((k) => byKey.get(k)).filter((c): c is ColumnDef => Boolean(c));
 
   return (
-    <div className="flex min-h-9 shrink-0 flex-wrap items-center gap-2 border-b border-[var(--term-hairline)] bg-[var(--term-bg)] px-4 py-1.5">
+    <div className="flex min-h-11 shrink-0 flex-wrap items-center gap-2 border-b border-[var(--term-hairline)] bg-[var(--term-bg)] px-4 py-2">
+      <div className="flex items-center gap-1 border-r border-[var(--term-hairline)] pr-2">
       <ToolbarButton
         active={filtersOpen || activeFilterCount > 0}
         onClick={onToggleFilters}
@@ -150,7 +151,7 @@ export function ScreenerToolbar({
         spellCheck={false}
         autoComplete="off"
         aria-label="Quick search (ticker or name)"
-        className="h-6 w-44 shrink-0 border border-[var(--term-divider)] bg-transparent px-2 font-mono text-[11px] text-[var(--term-ink)] outline-none placeholder:text-[var(--term-ink-tertiary)] transition-shadow duration-fast focus:border-[var(--term-amber)] focus:shadow-[inset_0_0_0_1px_var(--term-amber)]"
+        className="h-7 w-52 shrink-0 border border-[var(--term-divider)] bg-[rgba(255,255,255,.02)] px-2.5 font-mono text-[11px] text-[var(--term-ink)] outline-none placeholder:text-[var(--term-ink-tertiary)] transition-shadow duration-fast focus:border-[var(--term-amber)] focus:shadow-[inset_0_0_0_1px_var(--term-amber)]"
       />
 
       <div className="relative shrink-0" ref={sortRef}>
@@ -200,6 +201,9 @@ export function ScreenerToolbar({
           </div>
         )}
       </div>
+      </div>
+
+      <div className="mx-1 hidden h-5 w-px bg-[var(--term-hairline)] lg:block" />
 
       <div className="relative shrink-0" ref={colsRef}>
         <ToolbarButton active={colsOpen} onClick={() => setColsOpen((v) => !v)} icon={<Columns3 size={12} />} label="Columns" />

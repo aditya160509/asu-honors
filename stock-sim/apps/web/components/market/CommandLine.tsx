@@ -127,13 +127,13 @@ export function CommandLine({
   }
 
   return (
-    <div className="relative flex h-9 items-center gap-3 border-b border-[var(--term-divider)] bg-[var(--term-bg)] px-4">
+    <div className="relative flex h-11 items-center gap-3 border-b border-[var(--term-divider)] bg-[var(--term-bg)] px-4">
       <span className="shrink-0 font-mono text-[13px] font-semibold text-[var(--term-amber)]">SCRN&gt;</span>
 
       <div className="relative min-w-0 flex-1 rounded-sm transition-colors duration-fast focus-within:bg-white/[0.03]">
         <div
           aria-hidden
-          className="pointer-events-none select-none whitespace-pre font-mono text-[13px] leading-[20px]"
+          className="pointer-events-none select-none whitespace-pre font-mono text-[14px] leading-[22px]"
         >
           {renderHighlighted(value, parsed.tokens) ?? (
             <span className="text-[var(--term-ink-tertiary)]">
@@ -151,7 +151,7 @@ export function CommandLine({
           spellCheck={false}
           autoComplete="off"
           aria-label="Screener command line — search, filter tokens, or >commands"
-          className="absolute inset-0 h-full w-full bg-transparent font-mono text-[13px] leading-[20px] text-transparent caret-[var(--term-ink)] outline-none"
+          className="absolute inset-0 h-full w-full bg-transparent font-mono text-[14px] leading-[22px] text-transparent caret-[var(--term-ink)] outline-none"
         />
 
         {focused && suggestions.length > 0 && (

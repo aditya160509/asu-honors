@@ -1,9 +1,15 @@
 """Simulation control — advance ticks, branch timelines, admin controls."""
 
+import csv
+import io
+import json
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+import asyncio
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from apps.api.auth import get_current_user, require_admin
@@ -21,14 +27,17 @@ from apps.api.schemas import (
     EventInstanceResponse,
     SimulationStateResponse,
     TimelineCreateRequest,
+    EnsembleCreateRequest,
+    EnsembleCreateResponse,
     TimelineDiffResponse,
     TimelineExtendRequest,
+    TimelineRenameRequest,
     TimelineGroupResponse,
     TimelineResponse,
     TimelineStatusResponse,
 )
-from apps.api.services import audit_service, branch_service, notification_service, sim_service, timeline_group_service
-from db.models import ConfigParameter, EventInstance, SimulationState, Timeline, User
+from apps.api.services import audit_service, branch_service, notification_service, result_service, sim_service, timeline_group_service
+from db.models import AuditLog, Company, ConfigParameter, EventInstance, PriceDriverScore, PriceHistory, SimulationState, Timeline, TimelineOverride, User
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +59,7 @@ def advance(
         db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     db.commit()
+
     return result
 
 
@@ -77,6 +87,7 @@ def create_timeline(
             override_value=o.override_value,
             effective_from_sim_date=o.effective_from_sim_date,
             target_scope_id=o.target_scope_id,
+            target_scope_type=o.target_scope_type,
             effective_to_sim_date=o.effective_to_sim_date,
         )
         for o in (request.overrides or [])
@@ -95,6 +106,7 @@ def create_timeline(
         db, actor_user_id=user.id, action="create_timeline", timeline_id=timeline.id,
         after_value={"parent_timeline_id": request.parent_timeline_id, "primitive": request.primitive},
     )
+    timeline.requested_ticks = request.fast_forward_days
     db.commit()
 
     # Dispatch the fast-forward job AFTER commit -- the worker opens its own
@@ -102,45 +114,80 @@ def create_timeline(
     # SimulationState/TimelineOverride rows, which only become visible to
     # other connections once this transaction commits.
     #
-    # A prior incident: this dispatch was previously fire-and-forget with no
-    # worker-liveness check. If no Celery worker was listening at dispatch
-    # time (stale API process started before the worker existed, worker
-    # crashed, Redis flushed), the task vanished silently and the branch was
-    # left at status='pending' forever with no signal to the user that
-    # anything was wrong. A cheap liveness ping before dispatch closes most
-    # of that gap: if no worker responds within 1s, mark the branch 'failed'
-    # immediately (a real, already-supported status -- see
-    # ck_timelines_status) instead of leaving it indistinguishable from
-    # "about to start."
+    # Guard the executor so a partially-started API process cannot leave a
+    # branch pending forever when no execution path exists.
     if request.fast_forward_days > 0:
-        from apps.api.celery_app import celery_app
+        from apps.api import background_jobs
         from apps.api.tasks import run_fast_forward_job
 
-        worker_alive = False
-        try:
-            worker_alive = bool(celery_app.control.ping(timeout=1.0))
-        except Exception:
-            logger.exception("Celery worker liveness ping failed for timeline %s", timeline.id)
-
-        if worker_alive:
-            run_fast_forward_job.delay(timeline.id, request.fast_forward_days)
+        if background_jobs.available():
+            background_jobs.submit(f"timeline-{timeline.id}", run_fast_forward_job,
+                                   timeline.id, request.fast_forward_days)
         else:
             logger.error(
-                "No Celery worker responded to liveness ping -- timeline %s fast-forward "
+                "The in-process worker is unavailable -- timeline %s fast-forward "
                 "was never dispatched; marking status=failed instead of leaving it stuck pending.",
                 timeline.id,
             )
             timeline.status = "failed"
             notification_service.notify_branch_failed(
-                db, timeline, error="no Celery worker available at dispatch time",
+                db, timeline, error="background worker unavailable at dispatch time",
             )
             audit_service.record(
                 db, actor_user_id=user.id, action="create_timeline", timeline_id=timeline.id,
-                after_value={"status": "failed", "reason": "no Celery worker available at dispatch time"},
+                after_value={"status": "failed", "reason": "background worker unavailable at dispatch time"},
             )
             db.commit()
 
     return timeline
+
+
+@router.get("/timelines/{timeline_id}/analytics")
+def get_timeline_analytics(
+    timeline_id: int,
+    compare_id: Optional[int] = Query(default=None),
+    db: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
+) -> dict:
+    return result_service.build_timeline_analytics(db, timeline_id, compare_id)
+
+
+@router.post("/timeline-groups", response_model=EnsembleCreateResponse, status_code=status.HTTP_201_CREATED)
+def create_timeline_group(
+    request: EnsembleCreateRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> EnsembleCreateResponse:
+    """Create and dispatch a real sensitivity/Monte Carlo ensemble.
+
+    Members are committed before background dispatch so jobs can see every
+    cloned state row. If no worker is available, the whole request fails
+    before dispatch rather than leaving a group permanently pending.
+    """
+    from apps.api import background_jobs
+    from apps.api.tasks import run_ensemble_member_job
+
+    if not background_jobs.available():
+        raise HTTPException(status_code=503, detail="The background worker is unavailable")
+    try:
+        group, members = branch_service.create_ensemble(db, user.id, request)
+        for member in members:
+            member.requested_ticks = request.fast_forward_days
+        audit_service.record(db, actor_user_id=user.id, action="create_timeline_group", timeline_id=None,
+                             after_value={"group_id": group.id, "primitive": group.primitive, "members": len(members)})
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    for member in members:
+        background_jobs.submit(f"timeline-{member.id}", run_ensemble_member_job,
+                               member.id, request.fast_forward_days)
+    return EnsembleCreateResponse(
+        group=TimelineGroupResponse(id=group.id, primitive=group.primitive, label=group.label,
+                                    owner_user_id=group.owner_user_id, created_at=group.created_at,
+                                    member_timeline_ids=[m.id for m in members]),
+        timelines=members,
+    )
 
 
 @router.get("/timelines", response_model=list[TimelineResponse])
@@ -161,6 +208,28 @@ def get_timeline_status(
 ) -> TimelineStatusResponse:
     result = branch_service.get_timeline_status(db, timeline_id)
     return TimelineStatusResponse(**result)
+
+
+@router.get("/timelines/{timeline_id}/progress")
+async def stream_timeline_progress(
+    timeline_id: int,
+    db: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
+) -> StreamingResponse:
+    """Stream persisted run progress until the branch reaches a terminal state."""
+    async def events():
+        while True:
+            db.expire_all()
+            payload = branch_service.get_timeline_status(db, timeline_id)
+            yield f"event: progress\ndata: {json.dumps(payload, default=str)}\n\n"
+            if payload["status"] in {"ready", "failed", "archived"}:
+                break
+            await asyncio.sleep(1)
+
+    return StreamingResponse(events(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache, no-transform",
+        "X-Accel-Buffering": "no",
+    })
 
 
 @router.get("/timelines/{timeline_id}/diff", response_model=TimelineDiffResponse)
@@ -211,6 +280,98 @@ def extend_timeline(
     return timeline
 
 
+@router.patch("/timelines/{timeline_id}", response_model=TimelineResponse)
+def rename_timeline(
+    timeline_id: int,
+    request: TimelineRenameRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Timeline:
+    timeline = db.query(Timeline).filter_by(id=timeline_id).first()
+    if timeline is None:
+        raise NotFoundError(f"Timeline {timeline_id} not found")
+    if timeline.is_live:
+        raise HTTPException(status_code=409, detail="The live timeline cannot be renamed")
+    timeline.name = request.name
+    audit_service.record(db, actor_user_id=user.id, action="rename_timeline", timeline_id=timeline.id,
+                         after_value={"name": timeline.name})
+    db.commit()
+    return timeline
+
+
+@router.post("/timelines/{timeline_id}/duplicate", response_model=TimelineResponse, status_code=status.HTTP_201_CREATED)
+def duplicate_timeline(
+    timeline_id: int,
+    request: TimelineRenameRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Timeline:
+    source = db.query(Timeline).filter_by(id=timeline_id).first()
+    if source is None:
+        raise NotFoundError(f"Timeline {timeline_id} not found")
+    source_state = db.query(SimulationState).filter_by(timeline_id=timeline_id).first()
+    if source_state is None:
+        raise NotFoundError(f"No simulation state for timeline {timeline_id}")
+    overrides = [branch_service.OverrideSpec(
+        target_type=o.target_type, target_key=o.target_key, override_value=o.override_value,
+        effective_from_sim_date=o.effective_from_sim_date, target_scope_id=o.target_scope_id,
+        effective_to_sim_date=o.effective_to_sim_date,
+        target_scope_type=o.target_scope_type,
+    ) for o in db.query(TimelineOverride).filter_by(timeline_id=timeline_id).all()]
+    try:
+        duplicate = branch_service.create_branch(
+            db, user_id=user.id, name=request.name, parent_id=source.id,
+            branch_date=source_state.current_sim_date,
+            rng_seed=source.rng_seed, primitive=source.primitive or "manual", overrides=overrides,
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return duplicate
+
+
+@router.get("/timelines/{timeline_id}/export")
+def export_timeline(
+    timeline_id: int,
+    format: str = Query(default="json", pattern="^(json|csv|pdf)$"),
+    db: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
+) -> Response:
+    """Export persisted experiment observations; never recomputes results."""
+    timeline = db.query(Timeline).filter_by(id=timeline_id).first()
+    if timeline is None:
+        raise NotFoundError(f"Timeline {timeline_id} not found")
+    state = db.query(SimulationState).filter_by(timeline_id=timeline_id).first()
+    companies = {c.id: c.ticker for c in db.query(Company).order_by(Company.id).all()}
+    prices = db.query(PriceHistory).filter_by(timeline_id=timeline_id).order_by(PriceHistory.sim_date, PriceHistory.company_id).all()
+    rows = [{"ticker": companies.get(row.company_id, str(row.company_id)), "sim_date": str(row.sim_date), "open": float(row.open), "high": float(row.high), "low": float(row.low), "close": float(row.close), "volume": int(row.volume), "intrinsic_value": float(row.intrinsic_value), "order_imbalance": float(row.order_imbalance)} for row in prices]
+    driver_rows = [{"ticker": companies.get(row.company_id, str(row.company_id)), "sim_date": str(row.sim_date), "driver_key": row.driver_key, "value": float(row.value), "weight": float(row.weight), "contribution": float(row.contribution)} for row in db.query(PriceDriverScore).filter_by(timeline_id=timeline_id).order_by(PriceDriverScore.sim_date, PriceDriverScore.company_id, PriceDriverScore.driver_key).all()]
+    override_rows = [{"target_type": row.target_type, "target_key": row.target_key, "target_scope_type": row.target_scope_type, "target_scope_id": row.target_scope_id, "override_value": row.override_value, "effective_from": str(row.effective_from_sim_date), "effective_to": str(row.effective_to_sim_date) if row.effective_to_sim_date else None} for row in db.query(TimelineOverride).filter_by(timeline_id=timeline_id).order_by(TimelineOverride.id).all()]
+    audit_rows = [{"action": row.action, "before": row.before_value, "after": row.after_value, "created_at": str(row.created_at)} for row in db.query(AuditLog).filter_by(timeline_id=timeline_id).order_by(AuditLog.id).all()]
+    payload = {"timeline": {"id": timeline.id, "name": timeline.name, "primitive": timeline.primitive, "status": timeline.status}, "state": {"current_sim_date": str(state.current_sim_date) if state else None, "tick_count": state.tick_count if state else None}, "price_history": rows, "factor_history": driver_rows, "overrides": override_rows, "audit_trail": audit_rows}
+    if format == "json":
+        return Response(content=json.dumps(payload), media_type="application/json", headers={"Content-Disposition": f'attachment; filename="future-lab-{timeline_id}.json"'})
+    if format == "csv":
+        output = io.StringIO()
+        writer = csv.DictWriter(output, fieldnames=["ticker", "sim_date", "open", "high", "low", "close", "volume", "intrinsic_value", "order_imbalance"])
+        writer.writeheader(); writer.writerows(rows)
+        return Response(content=output.getvalue(), media_type="text/csv", headers={"Content-Disposition": f'attachment; filename="future-lab-{timeline_id}.csv"'})
+    try:
+        from reportlab.lib.pagesizes import LETTER
+        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+        from reportlab.lib import colors
+        buf = io.BytesIO(); doc = SimpleDocTemplate(buf, pagesize=LETTER); styles = getSampleStyleSheet()
+        story = [Paragraph(f"Future Lab — {timeline.name}", styles["Title"]), Paragraph(f"Timeline {timeline.id} · {timeline.status} · {timeline.primitive or 'manual'}", styles["Normal"]), Spacer(1, 12)]
+        story.append(Paragraph(f"Companies: {len(companies)} · Simulated date: {state.current_sim_date if state else '—'} · Ticks: {state.tick_count if state else '—'} · Overrides: {len(override_rows)}", styles["Normal"])); story.append(Spacer(1, 12))
+        table_rows = [["Ticker", "Date", "Open", "High", "Low", "Close", "Volume", "Intrinsic"]] + [[r["ticker"], r["sim_date"], f'{r["open"]:.2f}', f'{r["high"]:.2f}', f'{r["low"]:.2f}', f'{r["close"]:.2f}', f'{r["volume"]:,}', f'{r["intrinsic_value"]:.2f}'] for r in rows[-100:]]
+        table = Table(table_rows, repeatRows=1); table.setStyle(TableStyle([("BACKGROUND", (0,0), (-1,0), colors.HexColor("#1a1f2e")), ("TEXTCOLOR", (0,0), (-1,0), colors.white), ("FONTSIZE", (0,0), (-1,-1), 7), ("GRID", (0,0), (-1,-1), .25, colors.lightgrey)])); story.append(table); doc.build(story)
+        return Response(content=buf.getvalue(), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="future-lab-{timeline_id}.pdf"'})
+    except ImportError as exc:
+        raise HTTPException(status_code=503, detail="PDF export dependency is unavailable") from exc
+
+
 @router.delete("/timelines/{timeline_id}", response_model=TimelineResponse)
 def delete_timeline(
     timeline_id: int,
@@ -244,7 +405,7 @@ def get_timeline_group(
 @router.get("/timeline-groups/{group_id}/distribution", response_model=DistributionResponse)
 def get_timeline_group_distribution(
     group_id: int,
-    metric: str = Query(default="portfolio_return"),
+    metric: str = Query(default="portfolio_value"),
     db: Session = Depends(get_db),
     _user: User = Depends(get_current_user),
 ) -> DistributionResponse:

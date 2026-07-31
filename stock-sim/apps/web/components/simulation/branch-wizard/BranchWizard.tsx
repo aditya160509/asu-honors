@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "@/components/
 import { cn } from "@/lib/utils";
 import {
   useCreateTimeline,
+  useCreateEnsemble,
   useScenarioLibrary,
   useSimState,
   useTimelineStatus,
@@ -24,7 +25,7 @@ import { ConfirmStep } from "./ConfirmStep";
 import { compareMarketGrids } from "./marketComparison";
 import { buildBranchOutcomeSummary } from "./outcomeSummary";
 
-const STEPS = ["Branch point", "Primitive", "Configure", "Fast-forward", "Confirm"] as const;
+const STEPS = ["Set the experiment", "Shape the scenario", "Choose the run", "Review & launch"] as const;
 
 export interface BranchWizardState {
   name: string;
@@ -34,6 +35,7 @@ export interface BranchWizardState {
   scenarioTemplateId: number | null;
   overrides: TimelineOverrideSpec[];
   fastForwardDays: number;
+  rngSeed: number | null;
 }
 
 const INITIAL_STATE: BranchWizardState = {
@@ -43,13 +45,15 @@ const INITIAL_STATE: BranchWizardState = {
   primitive: "manual",
   scenarioTemplateId: null,
   overrides: [],
-  fastForwardDays: 0,
+  fastForwardDays: 30,
+  rngSeed: null,
 };
 
 export function BranchWizard() {
   const { data: timelines } = useTimelines();
   const { data: scenarioLibrary } = useScenarioLibrary();
   const createTimeline = useCreateTimeline();
+  const createEnsemble = useCreateEnsemble();
 
   const [open, setOpen] = React.useState(false);
   const [stepIndex, setStepIndex] = React.useState(0);
@@ -105,22 +109,20 @@ export function BranchWizard() {
         const isPastMax = Boolean(maxDate && state.branchPointSimDate > maxDate);
         return Boolean(state.name.trim() && state.parentTimelineId && state.branchPointSimDate) && !isPastMax;
       }
-      case 1:
-        return Boolean(state.primitive);
-      case 2: {
-        // ConfigureStep blocks sensitivity_sweep/monte_carlo with a "not yet
-        // available" message since the API only supports single-branch
-        // creation today -- Next must not let the user click past that dead
-        // end and submit a request the backend can't fulfill.
-        if (state.primitive === "sensitivity_sweep" || state.primitive === "monte_carlo") return false;
+      case 1: {
         // Every override needs a non-empty key and value, and numeric
         // target_types (driver_bias/config/factor_score/cycle_transition)
         // need a value the engine can actually parse -- otherwise the
         // branch gets created but the override silently never applies
         // (engine/overrides.py swallows unparseable override_value).
-        return state.overrides.every(
+        const validOverrides = state.overrides.every(
           (o) => o.target_key.trim() !== "" && o.override_value.trim() !== "" && overrideValueError(o) === null
         );
+        if (state.primitive === "sensitivity_sweep") {
+          const sweep = state.overrides.find((o) => o.target_type === "driver_bias" || o.target_type === "factor_score");
+          return Boolean(sweep) && validOverrides;
+        }
+        return validOverrides;
       }
       default:
         return true;
@@ -138,6 +140,24 @@ export function BranchWizard() {
   function handleSubmit() {
     if (!state.parentTimelineId) return;
     createTimeline.reset();
+    createEnsemble.reset();
+    if (state.primitive === "sensitivity_sweep" || state.primitive === "monte_carlo") {
+      const driver = state.overrides.find((o) => o.target_type === "driver_bias") ?? state.overrides[0];
+      const values = state.primitive === "sensitivity_sweep"
+        ? (driver?.target_type === "factor_score" ? [-100, -50, 0, 50, 100] : [-1, -0.5, 0, 0.5, 1])
+        : undefined;
+      createEnsemble.mutate({
+        name: state.name.trim(), parent_timeline_id: state.parentTimelineId,
+        branch_point_sim_date: state.branchPointSimDate, primitive: state.primitive,
+        overrides: state.overrides.length > 0 ? state.overrides : undefined,
+        fast_forward_days: state.fastForwardDays, member_count: 20,
+        rng_seed: state.rngSeed,
+        sweep_target_type: state.primitive === "sensitivity_sweep" ? driver?.target_type : undefined,
+        sweep_target_key: state.primitive === "sensitivity_sweep" ? driver?.target_key : undefined,
+        sweep_values: values,
+      }, { onSuccess: (result) => setCreatedTimelineId(result.timelines[0]?.id) });
+      return;
+    }
     createTimeline.mutate(
       {
         name: state.name.trim(),
@@ -146,6 +166,7 @@ export function BranchWizard() {
         primitive: state.primitive,
         overrides: state.overrides.length > 0 ? state.overrides : undefined,
         fast_forward_days: state.fastForwardDays,
+        rng_seed: state.rngSeed,
       },
       {
         onSuccess: (timeline) => setCreatedTimelineId(timeline.id),
@@ -159,14 +180,15 @@ export function BranchWizard() {
   // no indication anything had gone wrong, indistinguishable from "hasn't
   // been clicked yet." Surfacing the actual message lets the user retry
   // (fix the input) instead of re-submitting blind or assuming it's broken.
-  const submitErrorMessage = createTimeline.isError
-    ? createTimeline.error instanceof ApiError
-      ? createTimeline.error.message
+  const activeCreateError = createTimeline.isError ? createTimeline.error : createEnsemble.isError ? createEnsemble.error : null;
+  const submitErrorMessage = activeCreateError
+    ? activeCreateError instanceof ApiError
+      ? activeCreateError.message
       : "Failed to create branch. Please try again."
     : null;
 
   const isLastStep = stepIndex === STEPS.length - 1;
-  const isSubmitting = createTimeline.isPending;
+  const isSubmitting = createTimeline.isPending || createEnsemble.isPending;
   const hasCreated = createdTimelineId !== undefined;
 
   const outcomeSummary =
@@ -198,8 +220,8 @@ export function BranchWizard() {
           Branch (Future Lab)
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-w-[640px]">
-        <DialogTitle>Create Branch Timeline</DialogTitle>
+      <DialogContent className="max-w-[920px] border-[#273244] bg-[#080c12] shadow-[0_32px_90px_rgba(0,0,0,.72)]">
+        <DialogTitle className="font-mono text-base uppercase tracking-[.12em] text-[#f4b740]">Launch scenario research</DialogTitle>
 
         <div className="flex items-center gap-1 mb-4">
           {STEPS.map((label, i) => (
@@ -222,15 +244,12 @@ export function BranchWizard() {
 
         {!hasCreated && (
           <>
-            {stepIndex === 0 && (
-              <BranchPointStep state={state} timelines={timelines} onChange={updateState} />
-            )}
-            {stepIndex === 1 && <PrimitiveStep state={state} onChange={updateState} />}
-            {stepIndex === 2 && (
+            {stepIndex === 0 && <div className="grid gap-5 lg:grid-cols-[.9fr_1.1fr]"><BranchPointStep state={state} timelines={timelines} onChange={updateState} /><PrimitiveStep state={state} onChange={updateState} /></div>}
+            {stepIndex === 1 && (
               <ConfigureStep state={state} scenarioLibrary={scenarioLibrary} onChange={updateState} />
             )}
-            {stepIndex === 3 && <FastForwardStep state={state} onChange={updateState} />}
-            {stepIndex === 4 && <ConfirmStep state={state} />}
+            {stepIndex === 2 && <FastForwardStep state={state} onChange={updateState} />}
+            {stepIndex === 3 && <ConfirmStep state={state} />}
 
             {submitErrorMessage && (
               <p className="text-small text-negative mt-3" role="alert">

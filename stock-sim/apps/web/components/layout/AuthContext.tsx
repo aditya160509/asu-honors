@@ -2,17 +2,13 @@
 
 import * as React from "react";
 import { useMe } from "@/lib/api/hooks/useAuth";
-import { ApiError, post } from "@/lib/api/client";
-import { logActivity } from "@/lib/activity/useActivityLog";
-import type { TokenResponse, UserResponse } from "@/lib/api/types";
+import { post } from "@/lib/api/client";
+import type { UserResponse } from "@/lib/api/types";
 
 interface AuthContextValue {
   user: UserResponse | undefined;
   isLoading: boolean;
   isAuthenticated: boolean;
-  /** True only once we're sure there's no session — empty token store, or a
-   * genuine 401 from /auth/me. A transient error (429, network blip) must
-   * never flip this, or ProtectedRoute bounces a real session to /login. */
   isDefinitivelyUnauthenticated: boolean;
   logout: () => void;
   setHasToken: (hasToken: boolean) => void;
@@ -22,72 +18,28 @@ const AuthContext = React.createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [hasToken, setHasToken] = React.useState(false);
-  // Distinguishes "haven't checked localStorage yet" from "checked, no token" —
-  // without it, ProtectedRoute's redirect effect fires on the render tick before
-  // this check runs (hasToken still false), sending a genuinely logged-in user
-  // to /login, which middleware.ts then bounces to /dashboard.
   const [tokenChecked, setTokenChecked] = React.useState(false);
-
   React.useEffect(() => {
-    const existing = localStorage.getItem("token");
-    if (existing) {
-      setHasToken(true);
-      setTokenChecked(true);
-    } else if (process.env.NODE_ENV === "development") {
-      post<TokenResponse>("/auth/login", {
-        email: "alice@example.com",
-        password: "demo",
-      }).then((data) => {
-        localStorage.setItem("token", data.access_token);
-        setHasToken(true);
-        setTokenChecked(true);
-      }).catch(() => {
-        setTokenChecked(true);
-      });
-    } else {
-      setTokenChecked(true);
-    }
+    setHasToken(Boolean(localStorage.getItem("token")));
+    setTokenChecked(true);
   }, []);
-
-  const { data: user, isLoading: isMeLoading, error: meError } = useMe(hasToken);
-  const isLoading = !tokenChecked || (hasToken && isMeLoading);
-
-  const isDefinitivelyUnauthenticated =
-    tokenChecked && (!hasToken || (meError instanceof ApiError && meError.status === 401));
-
-  const prevUserRef = React.useRef<UserResponse | undefined>(undefined);
-  React.useEffect(() => {
-    if (!prevUserRef.current && user) {
-      logActivity({ kind: "auth", label: `Signed in as ${user.display_name}` });
-    }
-    prevUserRef.current = user;
-  }, [user]);
-
+  const { data: user, isLoading: meLoading } = useMe(hasToken);
   const logout = React.useCallback(() => {
-    logActivity({ kind: "auth", label: "Signed out" });
-    // Revoke the server-side session and clear the refresh/indicator cookies,
-    // then drop local state regardless of the API call's outcome.
-    void post("/auth/logout")
-      .catch(() => undefined)
-      .finally(() => {
-        localStorage.removeItem("token");
-        setHasToken(false);
-        window.location.href = "/login";
-      });
+    void post("/auth/logout").catch(() => undefined).finally(() => {
+      localStorage.removeItem("token");
+      document.cookie = "mv_session=; path=/; max-age=0";
+      setHasToken(false);
+      window.location.href = "/login";
+    });
   }, []);
-
-  const value = React.useMemo(
-    () => ({
-      user,
-      isLoading,
-      isAuthenticated: Boolean(user),
-      isDefinitivelyUnauthenticated,
-      logout,
-      setHasToken,
-    }),
-    [user, isLoading, isDefinitivelyUnauthenticated, logout]
-  );
-
+  const value = React.useMemo(() => ({
+    user,
+    isLoading: !tokenChecked || (hasToken && meLoading),
+    isAuthenticated: Boolean(user),
+    isDefinitivelyUnauthenticated: tokenChecked && (!hasToken || (!meLoading && !user)),
+    logout,
+    setHasToken,
+  }), [user, tokenChecked, hasToken, meLoading, logout]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

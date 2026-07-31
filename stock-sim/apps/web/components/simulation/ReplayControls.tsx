@@ -6,7 +6,7 @@ import { SpeedControl } from "./SpeedControl";
 import { useAdvance, useSimState } from "@/lib/api/hooks/useSimulation";
 import { formatDateFull } from "@/lib/utils";
 
-const MIN_LIVE_TICK_GAP_MS = 180;
+const MIN_LIVE_TICK_GAP_MS = 40;
 type AdvanceMode = "interactive" | "bulk";
 
 interface ReplayControlsProps {
@@ -33,6 +33,7 @@ export function ReplayControls({
   const goToTick = useTimeControlStore((s) => s.goToTick);
   const replayMode = useTimeControlStore((s) => s.replayMode);
   const setReplayMode = useTimeControlStore((s) => s.setReplayMode);
+  const setReplayAndPlay = React.useCallback(() => { setReplayMode(true); play(); }, [play, setReplayMode]);
   const [advanceMode, setAdvanceMode] = React.useState<AdvanceMode>("interactive");
 
   const barRef = React.useRef<HTMLDivElement>(null);
@@ -98,7 +99,8 @@ export function ReplayControls({
         { timeline_id: timelineId, days: advanceMode === "bulk" ? 30 : 1, mode: advanceMode },
         {
           onSuccess: () => {
-            const intervalMs = Math.max(MIN_LIVE_TICK_GAP_MS, 1200 / useTimeControlStore.getState().speed);
+            if (advanceMode === "bulk") setReplayAndPlay();
+            const intervalMs = Math.max(MIN_LIVE_TICK_GAP_MS, 450 / useTimeControlStore.getState().speed);
             if (!cancelled) timeoutId = setTimeout(fireNext, intervalMs);
           },
           onError: () => {
@@ -113,7 +115,7 @@ export function ReplayControls({
       cancelled = true;
       if (timeoutId) clearTimeout(timeoutId);
     };
-  }, [advanceMode, isPlaying, replayMode, timelineId]);
+  }, [advanceMode, isPlaying, replayMode, setReplayAndPlay, timelineId]);
 
   React.useEffect(() => {
     if (advance.isError) pause();
@@ -249,20 +251,20 @@ export function ReplayControls({
           type="button"
           onClick={handleTogglePlay}
           disabled={(!timelineId && !replayMode) || (!replayMode && advance.isPending)}
-          title={replayMode ? (isPlaying ? "Pause replay" : "Play replay") : isPlaying ? "Stop simulation" : "Start simulation"}
+          title={replayMode ? (isPlaying ? "Pause replay" : "Play replay") : isPlaying ? "Pause simulation" : "Start simulation"}
           style={{
             ...transportBtnStyle,
             width: 30,
             height: 30,
             borderRadius: "50%",
             border: "1px solid var(--mer-stroke-accent)",
-            background: isPlaying ? "rgba(239, 68, 68, 0.16)" : "rgba(62, 111, 224, 0.18)",
-            color: isPlaying ? "var(--negative)" : "var(--mer-accent-300)",
+            background: isPlaying ? "rgba(230, 173, 57, 0.14)" : "rgba(62, 111, 224, 0.18)",
+            color: isPlaying ? "#e6ad39" : "var(--mer-accent-300)",
             cursor: (!timelineId && !replayMode) || (!replayMode && advance.isPending) ? "not-allowed" : "pointer",
             opacity: (!timelineId && !replayMode) || (!replayMode && advance.isPending) ? 0.55 : 1,
           }}
         >
-          {isPlaying ? <StopIcon /> : <PlayIcon />}
+          {isPlaying ? <PauseIcon /> : <PlayIcon />}
         </button>
 
         <button
@@ -322,7 +324,12 @@ export function ReplayControls({
           <select
             aria-label="Simulation engine mode"
             value={advanceMode}
-            onChange={(e) => { pause(); setAdvanceMode(e.target.value as AdvanceMode); }}
+            onChange={(e) => {
+              pause();
+              setReplayMode(false);
+              goToTick(totalTicks);
+              setAdvanceMode(e.target.value as AdvanceMode);
+            }}
             style={{ height: 28, padding: "0 7px", border: "1px solid var(--mer-stroke-hairline)", borderRadius: "var(--mer-radius-sm)", background: "var(--mer-surface-2)", color: "var(--mer-ink-primary)", fontSize: "var(--fs-micro)", fontWeight: 800, cursor: "pointer" }}
           >
             <option value="interactive">Interactive · 1D</option>
@@ -444,14 +451,6 @@ function PauseIcon() {
     <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
       <rect x="3" y="2.5" width="3" height="9" fill="currentColor" />
       <rect x="8" y="2.5" width="3" height="9" fill="currentColor" />
-    </svg>
-  );
-}
-
-function StopIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-      <rect x="3.25" y="3.25" width="7.5" height="7.5" rx="1" fill="currentColor" />
     </svg>
   );
 }

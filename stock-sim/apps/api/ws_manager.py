@@ -1,58 +1,38 @@
-"""Best-effort live push over Redis pub/sub for the notifications WebSocket
-(apps/api/routers/ws.py). Notifications are still fully usable via polling
-(RecentActivity's useNotifications, 15s interval) if Redis or this publish
-step is unavailable -- this is a latency optimization (near-instant instead
-of up-to-15s-stale), not the source of truth, so failures here are swallowed
-rather than raised into the caller (notification_service.create_notification
-must never fail because a push happened to be undeliverable).
-"""
+"""Best-effort, zero-infrastructure realtime notification fan-out."""
+
+from __future__ import annotations
 
 import json
-import logging
-import time
-from typing import Any, Optional
+from queue import Queue
+from threading import Lock
+from typing import Any
 
-import redis
-
-from apps.api.config import settings
-
-logger = logging.getLogger(__name__)
-
-_CONNECT_TIMEOUT_SECONDS = 0.2
-# After a failed publish, skip further attempts for this long rather than
-# re-paying a connection timeout on every single notification when Redis is
-# simply not running (local dev without a broker, or the test suite, which
-# deliberately never stands one up -- see conftest.py's celery_eager fixture
-# stubbing out the Celery worker ping for the same reason).
-_COOLDOWN_SECONDS = 30.0
-
-_client: Optional["redis.Redis"] = None
-_unavailable_until: float = 0.0
+_subscribers: dict[int, set[Queue[str]]] = {}
+_lock = Lock()
 
 
-def _get_client() -> "redis.Redis":
-    global _client
-    if _client is None:
-        _client = redis.Redis.from_url(
-            settings.redis_url,
-            socket_connect_timeout=_CONNECT_TIMEOUT_SECONDS,
-            socket_timeout=_CONNECT_TIMEOUT_SECONDS,
-        )
-    return _client
+def subscribe(user_id: int) -> Queue[str]:
+    channel: Queue[str] = Queue(maxsize=100)
+    with _lock:
+        _subscribers.setdefault(user_id, set()).add(channel)
+    return channel
 
 
-def user_channel(user_id: int) -> str:
-    return f"user-events:{user_id}"
+def unsubscribe(user_id: int, channel: Queue[str]) -> None:
+    with _lock:
+        channels = _subscribers.get(user_id)
+        if channels is not None:
+            channels.discard(channel)
+            if not channels:
+                _subscribers.pop(user_id, None)
 
 
 def publish_user_event(user_id: int, event_type: str, data: dict[str, Any]) -> None:
-    global _unavailable_until
-    now = time.monotonic()
-    if now < _unavailable_until:
-        return
-    try:
-        client = _get_client()
-        client.publish(user_channel(user_id), json.dumps({"type": event_type, "data": data}))
-    except Exception:
-        logger.debug("Realtime push unavailable -- falling back to polling only", exc_info=True)
-        _unavailable_until = time.monotonic() + _COOLDOWN_SECONDS
+    message = json.dumps({"type": event_type, "data": data})
+    with _lock:
+        channels = tuple(_subscribers.get(user_id, ()))
+    for channel in channels:
+        try:
+            channel.put_nowait(message)
+        except Exception:
+            pass

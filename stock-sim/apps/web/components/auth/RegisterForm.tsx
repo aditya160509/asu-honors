@@ -13,7 +13,6 @@ import { ApiError } from "@/lib/api/client";
 
 const registerSchema = z
   .object({
-    displayName: z.string().trim().min(1, "Display name is required"),
     email: z.string().trim().min(1, "Email is required").email("Enter a valid email address"),
     password: z.string().min(8, "At least 8 characters"),
     confirmPassword: z.string().min(1, "Confirm your password"),
@@ -38,7 +37,7 @@ export function RegisterForm() {
   } = useForm<RegisterValues>({
     resolver: zodResolver(registerSchema),
     mode: "onTouched",
-    defaultValues: { displayName: "", email: "", password: "", confirmPassword: "" },
+    defaultValues: { email: "", password: "", confirmPassword: "" },
   });
 
   const passwordValue = watch("password");
@@ -48,11 +47,10 @@ export function RegisterForm() {
     setServerError(null);
     return new Promise<void>((resolve) => {
       registerMutation.mutate(
-        { email: values.email, password: values.password, display_name: values.displayName },
+        { email: values.email, password: values.password },
         {
           onSuccess: () => {
-            // Email verification is mandatory: the API already sent the first code.
-            router.push(`/verify-email?email=${encodeURIComponent(values.email)}`);
+            router.push("/login?registered=1");
             resolve();
           },
           onError: (error) => {
@@ -73,18 +71,11 @@ export function RegisterForm() {
   return (
     <form onSubmit={handleSubmit(submit)} noValidate className="flex flex-col gap-4 w-full max-w-sm">
       <AuthInput
-        label="Display name"
-        placeholder="Display Name"
-        autoComplete="name"
-        autoFocus
-        error={errors.displayName?.message}
-        {...register("displayName")}
-      />
-      <AuthInput
         type="email"
         label="Email"
         placeholder="you@example.com"
         autoComplete="username"
+        autoFocus
         error={errors.email?.message}
         {...register("email")}
       />

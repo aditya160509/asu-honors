@@ -6,6 +6,7 @@ import type {
   CompanyDetail,
   CompanyDividendsResponse,
   DriverBreakdown,
+  DriverHistoryItem,
   FinancialStatementResponse,
   PriceHistoryItem,
   ValuationResponse,
@@ -54,6 +55,15 @@ export function useDrivers(ticker: string, timelineId?: number, simDate?: string
   return useQuery({
     queryKey: ["drivers", ticker, timelineId, simDate],
     queryFn: () => get<DriverBreakdown[]>(`/companies/${ticker}/drivers`, { timeline_id: timelineId, sim_date: simDate }),
+    staleTime: 30_000,
+    enabled: Boolean(ticker),
+  });
+}
+
+export function useDriverHistory(ticker: string, timelineId?: number, limit = 252) {
+  return useQuery({
+    queryKey: ["driver-history", ticker, timelineId, limit],
+    queryFn: () => get<DriverHistoryItem[]>(`/companies/${ticker}/drivers/history`, { timeline_id: timelineId, limit }),
     staleTime: 30_000,
     enabled: Boolean(ticker),
   });

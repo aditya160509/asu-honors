@@ -45,6 +45,7 @@ class TimelineOverride(Base, TimestampMixin):
     target_type: Mapped[str] = mapped_column(String(20), nullable=False)
     target_key: Mapped[str] = mapped_column(String(80), nullable=False)
     target_scope_id: Mapped[Optional[int]] = mapped_column(Integer)
+    target_scope_type: Mapped[Optional[str]] = mapped_column(String(20))
     override_value: Mapped[str] = mapped_column(String, nullable=False)
     effective_from_sim_date: Mapped[date] = mapped_column(Date, nullable=False)
     effective_to_sim_date: Mapped[Optional[date]] = mapped_column(Date)
@@ -54,6 +55,7 @@ class TimelineOverride(Base, TimestampMixin):
             "target_type in ('factor_score', 'config', 'event', 'cycle_transition', 'driver_bias')",
             name="ck_timeline_overrides_target_type",
         ),
+        CheckConstraint("target_scope_type is null or target_scope_type in ('company', 'industry')", name="ck_timeline_overrides_scope_type"),
         # Guards against a retried/double-submitted create_branch or
         # apply_scenario_template call inserting the same override twice --
         # engine/overrides.py treats override_value as an additive delta for
@@ -101,7 +103,8 @@ class AuditLog(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "action in ('promote_config', 'promote_baseline', 'fork_league', 'delete_timeline', 'create_timeline')",
+            "action in ('promote_config', 'promote_baseline', 'fork_league', 'delete_timeline', "
+            "'create_timeline', 'rename_timeline', 'create_timeline_group')",
             name="ck_audit_log_action",
         ),
     )

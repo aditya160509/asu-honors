@@ -13,7 +13,7 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from apps.api.exceptions import NotFoundError
-from db.models import Portfolio, Timeline, TimelineGroup
+from db.models import Holding, Portfolio, PriceHistory, Timeline, TimelineGroup
 
 
 def get_group(db: Session, group_id: int) -> TimelineGroup:
@@ -56,21 +56,32 @@ def reduce_to_histogram(values: list[float], bins: int = 20) -> tuple[list[float
 
 
 def compute_distribution(db: Session, group_id: int, metric: str) -> dict:
-    """metric='portfolio_return' is the only metric implemented for v1
-    (reads each member timeline's live Portfolio.total_value, if any exist
-    for that timeline) -- other metrics (single-stock price, drawdown, etc.)
-    are a frontend/Phase 7 concern layered on top of this same reduction.
-    """
+    """Reduce actual persisted scenario portfolio values into a distribution."""
     get_group(db, group_id)  # 404s if missing
     members = get_member_timelines(db, group_id)
 
+    if metric not in {"portfolio_value", "portfolio_return"}:
+        raise ValueError("metric must be 'portfolio_value'")
     values: list[float] = []
-    if metric == "portfolio_return":
+    samples: list[dict] = []
+    if metric in {"portfolio_value", "portfolio_return"}:
         for member in members:
             portfolios = db.query(Portfolio).filter_by(timeline_id=member.id).all()
             for pf in portfolios:
-                if pf.total_value is not None:
-                    values.append(float(pf.total_value))
+                value = float(pf.cash_balance)
+                for holding in db.query(Holding).filter_by(portfolio_id=pf.id).all():
+                    price = db.query(PriceHistory.close).filter_by(
+                        timeline_id=member.id, company_id=holding.company_id,
+                    ).order_by(PriceHistory.sim_date.desc()).first()
+                    if price is not None:
+                        value += float(holding.quantity) * float(price[0])
+                values.append(value)
+                samples.append({
+                    "timeline_id": member.id,
+                    "sweep_value": member.sweep_value,
+                    "value": value,
+                    "status": member.status,
+                })
 
     count = len(values)
     mean = sum(values) / count if count else None
@@ -86,4 +97,5 @@ def compute_distribution(db: Session, group_id: int, metric: str) -> dict:
         "percentiles": percentiles,
         "histogram_bins": bins,
         "histogram_counts": counts,
+        "samples": samples,
     }

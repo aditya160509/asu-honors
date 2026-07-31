@@ -176,3 +176,36 @@ export function patch<T>(path: string, body?: unknown): Promise<T> {
 export function del<T>(path: string): Promise<T> {
   return request<T>(path, { method: "DELETE" });
 }
+
+export async function streamJsonEvents<T>(path: string, onData: (value: T) => void, signal: AbortSignal): Promise<void> {
+  const token = getToken();
+  const response = await fetch(`${BASE}${path}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    signal,
+  });
+  if (!response.ok || !response.body) throw new ApiError(`Stream failed (HTTP ${response.status})`, response.status);
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const events = buffer.split("\n\n");
+    buffer = events.pop() ?? "";
+    for (const event of events) {
+      const line = event.split("\n").find((item) => item.startsWith("data: "));
+      if (line) onData(JSON.parse(line.slice(6)) as T);
+    }
+  }
+}
+
+export async function download(path: string, params?: Record<string, unknown>): Promise<{ blob: Blob; filename?: string }> {
+  const res = await fetch(`${BASE}${path}${buildQuery(params)}`, {
+    headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : undefined,
+  });
+  if (!res.ok) throw new ApiError(`Download failed (HTTP ${res.status})`, res.status);
+  const disposition = res.headers.get("content-disposition") ?? "";
+  const filename = disposition.match(/filename="([^"]+)"/)?.[1];
+  return { blob: await res.blob(), filename };
+}

@@ -1,13 +1,16 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { del, get, post } from "@/lib/api/client";
+import * as React from "react";
+import { del, get, patch, post, streamJsonEvents } from "@/lib/api/client";
 import type {
   AdvanceRequest,
   AdvanceResponse,
   AuditLogEntryResponse,
   BranchCostEstimateResponse,
   DistributionResponse,
+  EnsembleCreateRequest,
+  EnsembleCreateResponse,
   ScenarioTemplateCreateRequest,
   ScenarioTemplateResponse,
   SimulationStateResponse,
@@ -16,7 +19,9 @@ import type {
   TimelineExtendRequest,
   TimelineGroupResponse,
   TimelineResponse,
+  TimelineRenameRequest,
   TimelineStatusResponse,
+  TimelineAnalyticsResponse,
 } from "@/lib/api/types";
 
 export function useSimState(timelineId?: number) {
@@ -27,12 +32,21 @@ export function useSimState(timelineId?: number) {
   });
 }
 
+export function useTimelineAnalytics(timelineId: number | undefined, compareId?: number) {
+  return useQuery({
+    queryKey: ["timeline-analytics", timelineId, compareId],
+    queryFn: () => get<TimelineAnalyticsResponse>(`/sim/timelines/${timelineId}/analytics`, { compare_id: compareId }),
+    enabled: timelineId !== undefined,
+    refetchInterval: (query) => query.state.data ? false : 2000,
+  });
+}
+
 export function useTimelines() {
   return useQuery({
     queryKey: ["timelines"],
     queryFn: () => get<TimelineResponse[]>("/sim/timelines"),
     staleTime: 30_000,
-    // A branch's fast-forward job runs async (Celery) -- without this, the
+    // A branch's fast-forward job runs asynchronously -- without this, the
     // only place that ever refreshed a branch's status was the wizard's own
     // useTimelineStatus poll while its dialog stayed open. Closing the
     // dialog (or never opening it, e.g. after a page reload) froze every
@@ -70,6 +84,14 @@ export function useCreateTimeline() {
   });
 }
 
+export function useCreateEnsemble() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: EnsembleCreateRequest) => post<EnsembleCreateResponse>("/sim/timeline-groups", body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["timelines"] }),
+  });
+}
+
 export function useBranchCostEstimate(parentTimelineId: number | null, fastForwardDays: number) {
   return useQuery({
     queryKey: ["branch-cost-estimate", parentTimelineId, fastForwardDays],
@@ -87,7 +109,7 @@ export function useTimelineStatus(timelineId: number | undefined, options?: { po
     queryKey: ["timeline-status", timelineId],
     queryFn: () => get<TimelineStatusResponse>(`/sim/timelines/${timelineId}/status`),
     enabled: timelineId !== undefined,
-    // Branch fast-forward jobs run async (Celery) -- poll every 2s while a
+    // Branch fast-forward jobs run asynchronously -- poll every 2s while a
     // status query result is still pending/running so the wizard's confirm
     // step can show live progress without the caller having to wire up
     // its own interval.
@@ -97,6 +119,19 @@ export function useTimelineStatus(timelineId: number | undefined, options?: { po
       return status === "pending" || status === "running" ? 2000 : false;
     },
   });
+}
+
+export function useTimelineProgress(timelineId: number | undefined) {
+  const [streamed, setStreamed] = React.useState<TimelineStatusResponse>();
+  const fallback = useTimelineStatus(timelineId, { pollWhilePending: true });
+  React.useEffect(() => {
+    if (timelineId === undefined) return;
+    const controller = new AbortController();
+    void streamJsonEvents<TimelineStatusResponse>(`/sim/timelines/${timelineId}/progress`, setStreamed, controller.signal)
+      .catch(() => { /* polling fallback remains active */ });
+    return () => controller.abort();
+  }, [timelineId]);
+  return { ...fallback, data: streamed ?? fallback.data };
 }
 
 export function useTimelineDiff(timelineId: number | undefined, vsTimelineId: number | undefined) {
@@ -119,6 +154,24 @@ export function useExtendTimeline() {
   });
 }
 
+export function useRenameTimeline() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ timelineId, name }: { timelineId: number; name: string }) =>
+      patch<TimelineResponse>(`/sim/timelines/${timelineId}`, { name } satisfies TimelineRenameRequest),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["timelines"] }),
+  });
+}
+
+export function useDuplicateTimeline() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ timelineId, name }: { timelineId: number; name: string }) =>
+      post<TimelineResponse>(`/sim/timelines/${timelineId}/duplicate`, { name } satisfies TimelineRenameRequest),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["timelines"] }),
+  });
+}
+
 export function useDeleteTimeline() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -137,7 +190,7 @@ export function useTimelineGroup(groupId: number | undefined) {
   });
 }
 
-export function useTimelineGroupDistribution(groupId: number | undefined, metric: string = "portfolio_return") {
+export function useTimelineGroupDistribution(groupId: number | undefined, metric: string = "portfolio_value") {
   return useQuery({
     queryKey: ["timeline-group-distribution", groupId, metric],
     queryFn: () => get<DistributionResponse>(`/sim/timeline-groups/${groupId}/distribution`, { metric }),

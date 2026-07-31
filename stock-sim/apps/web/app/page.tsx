@@ -1,99 +1,58 @@
 "use client";
 
+import * as React from "react";
 import Link from "next/link";
-import dynamic from "next/dynamic";
-import { Button } from "@/components/ui/button";
-import { PriceTickerTape } from "@/components/marketing/PriceTickerTape";
-import { LayoutEngine } from "@/components/marketing/LayoutEngine";
-import { AiHero } from "@/components/marketing/AiHero";
-import { ScrollProgressBar } from "@/components/marketing/ScrollProgressBar";
-import { usePublicMarketSnapshot } from "@/lib/api/hooks/usePublicMarket";
+import { ArrowUpRight } from "lucide-react";
+import Hls from "hls.js";
 
-// Both are client-only (WebGL / ScrollTrigger) and below- or at-the-fold-adjacent — code-splitting
-// them out of the main chunk means the hero's headline/CTA can paint before the Three.js and GSAP
-// ScrollTrigger bundles finish downloading, instead of blocking on them.
-const OrderFlowTape = dynamic(
-  () => import("@/components/marketing/OrderFlowTape").then((m) => m.OrderFlowTape),
-  { ssr: false, loading: () => <div className="pointer-events-none fixed inset-0 -z-10 bg-mkt-bg-void" /> }
-);
-const DashboardMockSection = dynamic(
-  () => import("@/components/marketing/DashboardMockSection").then((m) => m.DashboardMockSection),
-  { ssr: false }
-);
+const HERO_VIDEO = "https://cdn.sceneai.art/Hero%20Section%20Video/50b4f304-cdca-4e12-8735-580d225834be.mp4";
+
+function Logo() { return <Link href="/" className="flex items-center gap-2 text-white"><span className="grid h-8 w-8 place-items-center rounded-lg border border-white/20 bg-white/[.06]"><svg viewBox="0 0 20 20" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M4 4.5h7.5a4.5 4.5 0 1 1 0 9H8.5" /><path d="M8.5 8h7" /></svg></span><span className="text-sm font-semibold tracking-tight">Stock Sim</span></Link>; }
+
+function FadeInUp({ children, className = "", delay = 0 }: { children: React.ReactNode; className?: string; delay?: number }) { return <div className={`animate-[landing-up_1s_cubic-bezier(.16,1,.3,1)_both] ${className}`} style={{ animationDelay: `${delay}ms` }}>{children}</div>; }
+
+const faqs = [
+  ["Is Stock Sim real-money trading?", "No. Stock Sim is a research and learning environment. Every position, price, and outcome is simulated."],
+  ["How does the market engine work?", "The engine combines fundamentals, intrinsic value, seven price drivers, economic cycle state, news, and seeded randomness into each tick."],
+  ["Can I test my own scenario?", "Yes. Future Lab lets you branch a timeline, apply factor or driver overrides, fast-forward the engine, and compare the resulting market."],
+  ["What does bulk mode do?", "Bulk mode calculates many simulation days efficiently, then the UI can replay the resulting candles one by one for inspection."],
+  ["Is my workspace private?", "Your portfolios, branches, and saved research views are scoped to your account and timeline permissions."],
+];
+
+function Mockup({ type }: { type: "chat" | "transcript" }) { return <div className="relative min-h-[360px] overflow-hidden rounded-3xl border border-white/10 bg-[#0b0b0d] p-5 shadow-2xl shadow-black/40"><video autoPlay muted loop playsInline className="absolute inset-0 h-full w-full object-cover opacity-35" src={HERO_VIDEO} /><div className="absolute inset-0 bg-black/50" /><div className="relative mx-auto mt-8 max-w-md rounded-2xl border border-white/10 bg-[#17171a]/90 p-4 shadow-2xl backdrop-blur-xl">{type === "chat" ? <><div className="mb-5 flex gap-2"><span className="rounded-full bg-white/10 px-3 py-1 text-[10px] text-white">Market brief</span><span className="rounded-full bg-white/5 px-3 py-1 text-[10px] text-gray-400">Factor view</span></div><div className="space-y-3 text-sm"><div className="max-w-[85%] rounded-xl bg-white/[.06] p-3 text-gray-300">What is moving the market today?</div><div className="ml-auto max-w-[85%] rounded-xl bg-white p-3 text-black">Momentum is broadening while the value gap is narrowing across the selected universe.</div></div><div className="mt-8 flex items-center justify-between rounded-xl border border-white/10 px-3 py-2 text-xs text-gray-500"><span>Ask the market anything…</span><span className="text-white">↗</span></div></> : <><div className="flex items-center gap-3"><span className="grid h-10 w-10 place-items-center rounded-full bg-emerald-400/20 text-emerald-300">▶</span><div><div className="text-sm text-white">Simulation replay</div><div className="text-xs text-gray-500">30 candles · factor event log</div></div></div><div className="my-7 flex items-end gap-1">{Array.from({ length: 36 }, (_, i) => <span key={i} className="flex-1 rounded-full bg-emerald-300/70" style={{ height: `${18 + ((i * 17) % 46)}px` }} />)}</div><p className="text-sm leading-6 text-gray-400">The value opportunity widened as earnings momentum softened. Replay each candle, inspect the factor contribution, then branch the timeline.</p></>}</div></div>; }
+
+function FAQ() { const [open, setOpen] = React.useState<number | null>(null); return <div className="overflow-hidden rounded-xl border border-white/10">{faqs.map(([q, a], i) => <div key={q} className={i < faqs.length - 1 ? "border-b border-white/10" : ""}><button type="button" onClick={() => setOpen(open === i ? null : i)} className="flex w-full items-center justify-between px-6 py-6 text-left text-base font-medium text-white"><span>{q}</span><span className={`text-2xl font-light text-gray-500 transition-transform duration-300 ${open === i ? "rotate-45" : ""}`}>+</span></button><div className={`grid transition-[grid-template-rows] duration-300 ${open === i ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}><div className="min-h-0 overflow-hidden"><p className="px-6 pb-6 text-sm leading-6 text-gray-400">{a}</p></div></div></div>)}</div>; }
+
+function CtaFooter({ jump }: { jump: (id: string) => void }) {
+  const videoRef = React.useRef<HTMLVideoElement>(null);
+  React.useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    const src = "https://stream.mux.com/8wrHPCX2dC3msyYU9ObwqNdm00u3ViXvOSHUMRYSEe5Q.m3u8";
+    if (Hls.isSupported()) {
+      const hls = new Hls({ enableWorker: true });
+      hls.loadSource(src);
+      hls.attachMedia(video);
+      return () => hls.destroy();
+    }
+    if (video.canPlayType("application/vnd.apple.mpegurl")) video.src = src;
+  }, []);
+  return <footer id="contact" className="relative overflow-hidden border-t border-white/5 px-6 pb-10 pt-32 text-center md:px-16 lg:px-24"><video ref={videoRef} autoPlay loop muted playsInline className="absolute inset-0 z-0 h-full w-full object-cover" /><div className="pointer-events-none absolute inset-x-0 top-0 z-[1] h-52 bg-gradient-to-b from-black to-transparent" /><div className="pointer-events-none absolute inset-x-0 bottom-0 z-[1] h-52 bg-gradient-to-t from-black to-transparent" /><div className="relative z-10 mx-auto max-w-7xl"><FadeInUp><h2 className="mx-auto mb-4 max-w-3xl text-5xl font-serif italic leading-[.9] tracking-tight text-white md:text-6xl lg:text-7xl">Your next market insight starts here.</h2><p className="mx-auto mb-8 max-w-xl text-sm font-light text-white/65 md:text-base">Explore the market, test a scenario, and see what the engine reveals before you make a decision.</p><div className="flex items-center justify-center gap-4"><Link href="/future-lab" className="liquid-glass-strong flex items-center gap-2 rounded-full px-6 py-3 text-sm font-medium text-white transition-all hover:bg-white/10">Open Future Lab <ArrowUpRight className="h-5 w-5" /></Link><Link href="/market" className="flex items-center gap-2 rounded-full bg-white px-6 py-3 text-sm font-medium text-black transition-colors hover:bg-white/90">View market <ArrowUpRight className="h-4 w-4" /></Link></div></FadeInUp><div className="mt-32 flex flex-col items-center justify-between gap-4 border-t border-white/10 pt-8 text-xs text-white/45 md:flex-row"><p>© 2026 Stock Sim. All rights reserved.</p><div className="flex items-center gap-6"><button onClick={() => jump("faq")} className="hover:text-white/75">FAQ</button><Link href="/login" className="hover:text-white/75">Sign in</Link><Link href="/register" className="hover:text-white/75">Create account</Link></div></div></div></footer>;
+}
 
 export default function LandingPage() {
-  const { data } = usePublicMarketSnapshot();
-  const companies = data?.companies ?? [];
+  const [scrolled, setScrolled] = React.useState(false);
+  const [menu, setMenu] = React.useState(false);
+  React.useEffect(() => { const fn = () => setScrolled(window.scrollY > 20); window.addEventListener("scroll", fn, { passive: true }); return () => window.removeEventListener("scroll", fn); }, []);
+  const jump = (id: string) => { setMenu(false); document.getElementById(id)?.scrollIntoView({ behavior: "smooth" }); };
+  return <main className="min-h-screen bg-black text-white selection:bg-white selection:text-black">
+    <style jsx global>{`html{scroll-behavior:smooth} @keyframes landing-up{from{opacity:0;transform:translateY(40px)}to{opacity:1;transform:translateY(0)}} @keyframes landing-marquee{to{transform:translateX(-33.333%)}} .liquid-glass-strong{background:rgba(255,255,255,.04);backdrop-filter:blur(50px);-webkit-backdrop-filter:blur(50px);box-shadow:inset 0 1px 1px rgba(255,255,255,.18),4px 4px 18px rgba(0,0,0,.2);position:relative;overflow:hidden}.liquid-glass-strong:before{content:'';position:absolute;inset:0;border-radius:inherit;padding:1px;background:linear-gradient(180deg,rgba(255,255,255,.5),rgba(255,255,255,0) 40%,rgba(255,255,255,.3));-webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none}`}</style>
+    <nav className={`fixed inset-x-0 top-0 z-50 transition-all duration-300 ${scrolled ? "border-b border-white/10 bg-black/80 backdrop-blur-md" : "bg-black/25 backdrop-blur-[2px]"}`}><div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4"><Logo /><div className="hidden items-center gap-7 md:flex"><Link href="/market" className="text-sm text-gray-300 hover:text-white">Market</Link><Link href="/future-lab" className="text-sm text-gray-300 hover:text-white">Future Lab</Link><Link href="/simulation" className="text-sm text-gray-300 hover:text-white">Simulation</Link><Link href="/ai" className="text-sm text-gray-300 hover:text-white">AI Workspace</Link><Link href="/portfolio" className="text-sm text-gray-300 hover:text-white">Portfolio</Link></div><div className="hidden md:block"><Link href="/register" className="rounded-full border border-white/10 bg-[#1f1f22] px-5 py-2.5 text-sm font-medium hover:bg-[#2a2a2d]">Get started</Link></div><button className="md:hidden" onClick={() => setMenu(!menu)} aria-label="Toggle menu"><span className="text-xl">{menu ? "×" : "☰"}</span></button></div>{menu && <div className="border-t border-white/10 bg-black/95 px-6 py-4 md:hidden"><div className="flex flex-col gap-4"><Link href="/market" onClick={() => setMenu(false)} className="text-sm text-gray-300">Market</Link><Link href="/future-lab" onClick={() => setMenu(false)} className="text-sm text-gray-300">Future Lab</Link><Link href="/simulation" onClick={() => setMenu(false)} className="text-sm text-gray-300">Simulation</Link><Link href="/ai" onClick={() => setMenu(false)} className="text-sm text-gray-300">AI Workspace</Link><Link href="/portfolio" onClick={() => setMenu(false)} className="text-sm text-gray-300">Portfolio</Link><Link href="/register" className="rounded-full bg-white px-4 py-2 text-center text-sm font-medium text-black">Get started</Link></div></div>}</nav>
 
-  return (
-    <>
-      <ScrollProgressBar />
+    <section id="about" className="relative isolate flex min-h-screen flex-col items-center justify-center overflow-hidden px-6 pb-20 pt-32"><video autoPlay muted loop playsInline preload="auto" className="absolute inset-0 z-0 h-full w-full object-cover opacity-90" src={HERO_VIDEO} /><div className="absolute inset-0 z-0 bg-gradient-to-b from-black/35 via-black/20 to-black" /><div className="relative z-10 flex w-full flex-col items-center"><FadeInUp><span className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-gray-300 backdrop-blur-sm">✦ Simulation engine 2.0</span></FadeInUp><FadeInUp delay={100}><h1 className="mt-8 max-w-4xl text-center text-5xl font-medium tracking-tight md:text-7xl">See the market <span className="font-serif font-normal italic">clearly.</span></h1></FadeInUp><FadeInUp delay={180}><p className="mt-6 max-w-2xl text-center text-[16px] leading-7 text-gray-200">A living market simulation for understanding price, value, factors, and decisions before they become expensive.</p></FadeInUp><FadeInUp delay={260}><div className="mt-8 flex flex-wrap justify-center gap-3"><Link href="/register" className="rounded-full bg-white px-6 py-3 text-sm font-medium text-black hover:bg-gray-200">Start exploring</Link><Link href="/market" className="rounded-full border border-white/10 bg-[#1f1f22]/90 px-6 py-3 text-sm font-medium text-white hover:bg-[#2a2a2d]">View the market</Link></div></FadeInUp><FadeInUp delay={360}><div className="mt-24 w-full overflow-hidden [mask-image:linear-gradient(to_right,transparent,black_12%,black_88%,transparent)]"><div aria-label="Intrinsic value, factor analytics, Future Lab, candle replay, scenario engine" className="flex w-max animate-[landing-marquee_30s_linear_infinite]">{["Intrinsic value", "Factor analytics", "Future Lab", "Candle replay", "Scenario engine"].concat(["Intrinsic value", "Factor analytics", "Future Lab", "Candle replay", "Scenario engine"], ["Intrinsic value", "Factor analytics", "Future Lab", "Candle replay", "Scenario engine"]).map((x, i) => <span key={`${x}-${i}`} className="shrink-0 px-8 text-sm font-medium text-gray-200">{x}</span>)}</div></div></FadeInUp></div></section>
 
-      {/* Persistent full-screen WebGL background — mounted once, outside LayoutEngine, so it can sit
-          at negative z-index behind every section without being painted over (see LayoutEngine.tsx). */}
-      <OrderFlowTape />
+    <section id="features" className="mx-auto grid max-w-7xl gap-16 px-6 py-24 lg:grid-cols-2"><FadeInUp className="flex flex-col justify-center"><span className="text-sm text-yellow-300">✦ Market intelligence</span><h2 className="mt-5 text-4xl font-semibold tracking-tight md:text-5xl">Where speed meets <span className="font-serif italic">understanding.</span></h2><p className="mt-6 max-w-lg text-gray-400">Ask questions about the market, trace the factors behind a move, and turn a noisy tape into a clear research path.</p><Link href="/ai" className="mt-8 w-fit rounded-full bg-white px-5 py-2.5 text-sm font-medium text-black">Open AI Workspace</Link></FadeInUp><FadeInUp delay={120}><Mockup type="chat" /></FadeInUp><FadeInUp delay={180}><Mockup type="transcript" /></FadeInUp><FadeInUp delay={240} className="flex flex-col justify-center"><span className="text-sm text-emerald-300">✦ Timeline replay</span><h2 className="mt-5 text-4xl font-semibold tracking-tight md:text-5xl">Turn simulation into <span className="font-serif italic">evidence.</span></h2><p className="mt-6 max-w-lg text-gray-400">Replay candles one by one, inspect factor contribution, and branch the timeline to test what could happen next.</p><Link href="/future-lab" className="mt-8 w-fit rounded-full bg-white px-5 py-2.5 text-sm font-medium text-black">Enter Future Lab</Link></FadeInUp></section>
 
-      <LayoutEngine>
-        <PriceTickerTape companies={companies} />
-
-        <AiHero />
-
-        <DashboardMockSection />
-
-        <section className="px-8 md:px-16 py-20 border-t border-white/10" style={{ contentVisibility: "auto" }}>
-          <div className="max-w-5xl flex flex-col">
-            {[
-              {
-                n: "01",
-                title: "Intrinsic value engine",
-                body: "Every company has a real fundamentals chain — financial statements, factor scores, and a PEG-based fair value that drifts with growth expectations and economic sentiment.",
-              },
-              {
-                n: "02",
-                title: "Seven price drivers",
-                body: "Price moves on value gap, earnings surprises, news sentiment, economic outlook, guidance, technical momentum, and institutional buying pressure — mean-reverting toward intrinsic value.",
-              },
-              {
-                n: "03",
-                title: "Branch the timeline",
-                body: "Fork the simulation at any point to test a different scenario, with its own seeded randomness and event overrides.",
-              },
-            ].map((item, i) => (
-              <div
-                key={item.n}
-                className={`grid grid-cols-[64px_1fr] md:grid-cols-[96px_280px_1fr] gap-x-6 gap-y-2 py-8 ${
-                  i > 0 ? "border-t border-white/10" : ""
-                }`}
-              >
-                <span className="num text-mkt-signature-dim text-h1 font-semibold leading-none">{item.n}</span>
-                <h3 className="text-mkt-text-hero text-h2 font-semibold col-span-1">{item.title}</h3>
-                <p className="text-mkt-text-muted text-body max-w-lg md:col-start-3">{item.body}</p>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="flex flex-col items-center gap-grid-4 border-t border-white/10 px-8 py-20 text-center">
-          <h2 className="mkt-headline text-h1 text-mkt-text-hero">Ready to see it live?</h2>
-          <p className="max-w-md text-body text-mkt-text-muted">
-            No real money, no real risk — a fully simulated market with real mechanics underneath.
-          </p>
-          <div className="mt-grid-2 flex items-center gap-grid-4">
-            <Link href="/register" className="mkt-action-button">
-              Request Institutional Access
-            </Link>
-            <Link href="/login">
-              <Button variant="ghost" className="text-mkt-text-hero h-12 px-2">
-                Sign in
-              </Button>
-            </Link>
-          </div>
-        </section>
-
-        <footer className="px-8 md:px-16 py-8 border-t border-white/10 text-mkt-text-muted text-small">
-          © Stock Sim
-        </footer>
-      </LayoutEngine>
-    </>
-  );
+    <section id="faq" className="mx-auto max-w-3xl px-6 py-32"><FadeInUp><h2 className="mb-12 text-center text-4xl font-semibold md:text-5xl">We’ve got answers</h2><FAQ /></FadeInUp></section>
+  </main>;
 }

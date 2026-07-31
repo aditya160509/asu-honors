@@ -76,7 +76,7 @@ SCENARIO_TEMPLATES = [
         "default_duration_days": 90,
         "effect_profile": {
             "overrides": [
-                {"target_type": "config", "target_key": "sector_boom_bias", "override_value": "0.3", "target_scope_id": None},
+                {"target_type": "driver_bias", "target_key": "economic_outlook", "override_value": "0.3", "target_scope_id": None, "target_scope_type": "industry"},
             ],
         },
         "editable_params": {"industry_id": {"type": "int", "required": True}},
@@ -92,7 +92,7 @@ SCENARIO_TEMPLATES = [
         "default_duration_days": 60,
         "effect_profile": {
             "overrides": [
-                {"target_type": "config", "target_key": "rate_shock_direction", "override_value": "hike"},
+                {"target_type": "driver_bias", "target_key": "economic_outlook", "override_value": "-0.35"},
             ],
         },
         "editable_params": {"duration_days": {"type": "int", "default": 60, "min": 15, "max": 180}},
@@ -104,7 +104,7 @@ SCENARIO_TEMPLATES = [
         "default_duration_days": 60,
         "effect_profile": {
             "overrides": [
-                {"target_type": "config", "target_key": "rate_shock_direction", "override_value": "cut"},
+                {"target_type": "driver_bias", "target_key": "economic_outlook", "override_value": "0.25"},
             ],
         },
         "editable_params": {"duration_days": {"type": "int", "default": 60, "min": 15, "max": 180}},
@@ -121,7 +121,7 @@ SCENARIO_TEMPLATES = [
         "default_duration_days": 60,
         "effect_profile": {
             "overrides": [
-                {"target_type": "config", "target_key": "sector_boom_bias", "override_value": "0.4", "target_scope_id": None},
+                {"target_type": "driver_bias", "target_key": "economic_outlook", "override_value": "0.4", "target_scope_id": None, "target_scope_type": "industry"},
             ],
             "source_industries": ["Energy (Oil & Gas)", "Metals & Mining", "Chemicals"],
         },
@@ -138,7 +138,7 @@ SCENARIO_TEMPLATES = [
         "default_duration_days": 15,
         "effect_profile": {
             "overrides": [
-                {"target_type": "event", "target_key": "Guidance Raised", "override_value": "cut"},
+                {"target_type": "driver_bias", "target_key": "guidance", "override_value": "0.45", "target_scope_id": None, "target_scope_type": "company"},
                 {"target_type": "factor_score", "target_key": "management_quality", "override_value": "-10"},
             ],
         },
@@ -181,6 +181,11 @@ def seed(session: Session) -> None:
         existing = session.query(ScenarioTemplate).filter_by(name=tmpl["name"]).first()
         if existing is None:
             session.add(ScenarioTemplate(**tmpl))
+        else:
+            # Seeded templates are product defaults, not user-authored rows;
+            # keep their engine-backed definitions current across upgrades.
+            for key, value in tmpl.items():
+                setattr(existing, key, value)
 
 
 def main() -> None:

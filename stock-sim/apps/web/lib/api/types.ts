@@ -51,7 +51,7 @@ export interface OtpVerifyResponse {
 export interface UserCreateRequest {
   email: string;
   password: string;
-  display_name: string;
+  display_name?: string;
 }
 
 export interface UserResponse {
@@ -104,6 +104,10 @@ export interface DriverBreakdown {
   value: number;
   weight: number;
   contribution: number;
+}
+
+export interface DriverHistoryItem extends DriverBreakdown {
+  sim_date: string;
 }
 
 export interface CompanyDetail {
@@ -453,6 +457,7 @@ export interface TimelineOverrideSpec {
   override_value: string;
   effective_from_sim_date: string;
   target_scope_id?: number | null;
+  target_scope_type?: "company" | "industry" | null;
   effective_to_sim_date?: string | null;
 }
 
@@ -464,6 +469,15 @@ export interface TimelineCreateRequest {
   primitive?: TimelinePrimitive;
   overrides?: TimelineOverrideSpec[] | null;
   fast_forward_days?: number;
+}
+
+export interface EnsembleCreateRequest extends TimelineCreateRequest {
+  primitive: "sensitivity_sweep" | "monte_carlo";
+  label?: string | null;
+  sweep_target_type?: TimelineOverrideTargetType | null;
+  sweep_target_key?: string | null;
+  sweep_values?: number[] | null;
+  member_count?: number;
 }
 
 export interface TimelineResponse {
@@ -491,12 +505,33 @@ export interface TimelineStatusResponse {
   current_sim_date: string | null;
   tick_count: number | null;
   last_touched_at: string | null;
+  requested_ticks: number;
+  completed_ticks: number;
+  progress_pct: number;
+  failure_error: string | null;
+  recovery_action: string | null;
+}
+
+export interface TimelineAnalyticsResponse {
+  timeline_id: number;
+  market_path: Array<{ sim_date: string; price: number; intrinsic_value: number; volume: number; order_imbalance: number }>;
+  breadth: { advancers: number; decliners: number; unchanged: number };
+  sector_performance: Array<{ sector: string; return_pct: number; company_count: number }>;
+  best_companies: Array<{ company_id: number; ticker: string; name: string; sector: string; return_pct: number; final_close: number; final_intrinsic_value: number }>;
+  worst_companies: Array<{ company_id: number; ticker: string; name: string; sector: string; return_pct: number; final_close: number; final_intrinsic_value: number }>;
+  annualized_volatility_pct: number | null;
+  max_drawdown_pct: number | null;
+  volume_change_pct: number | null;
+  liquidity_change: number | null;
+  risk_decomposition: Array<{ driver_key: string; contribution: number; share_pct: number }>;
+  comparison: { timeline_id: number; mean_price_delta_pct: number | null; companies_compared: number } | null;
 }
 
 export interface TimelineDiffEntry {
   target_type: TimelineOverrideTargetType;
   target_key: string;
   target_scope_id: number | null;
+  target_scope_type: "company" | "industry" | null;
   left_value: string | null;
   right_value: string | null;
 }
@@ -511,6 +546,10 @@ export interface TimelineExtendRequest {
   days: number;
 }
 
+export interface TimelineRenameRequest {
+  name: string;
+}
+
 export interface TimelineGroupResponse {
   id: number;
   primitive: "sensitivity_sweep" | "monte_carlo";
@@ -518,6 +557,11 @@ export interface TimelineGroupResponse {
   owner_user_id: number | null;
   created_at: string;
   member_timeline_ids: number[];
+}
+
+export interface EnsembleCreateResponse {
+  group: TimelineGroupResponse;
+  timelines: TimelineResponse[];
 }
 
 export interface DistributionResponse {
@@ -528,6 +572,7 @@ export interface DistributionResponse {
   percentiles: Record<string, number>;
   histogram_bins: number[];
   histogram_counts: number[];
+  samples: Array<{ timeline_id: number; sweep_value: string | null; value: number; status: string }>;
 }
 
 export type ScenarioTemplateCategory = "macro" | "sector" | "company" | "liquidity";

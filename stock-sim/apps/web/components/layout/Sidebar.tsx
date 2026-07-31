@@ -4,7 +4,6 @@ import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  ArrowLeftRight,
   BarChart3,
   ChevronDown,
   Home,
@@ -18,6 +17,7 @@ import {
   Search,
   ShieldCheck,
   Sparkles,
+  Beaker,
   Star,
   Trophy,
   Wallet,
@@ -65,7 +65,6 @@ const NAV_GROUPS: NavGroup[] = [
     eyebrow: "Markets",
     items: [
       { href: "/market", label: "Market", icon: BarChart3 },
-      { href: "/trading", label: "Trading Desk", icon: ArrowLeftRight },
     ],
   },
   {
@@ -82,10 +81,11 @@ const NAV_GROUPS: NavGroup[] = [
       { href: "/ai", label: "AI Workspace", icon: Sparkles },
     ],
   },
-  {
-    eyebrow: "Simulation",
-    items: [
-      { href: "/simulation", label: "Simulation", icon: LineChart },
+    {
+      eyebrow: "Simulation",
+      items: [
+        { href: "/simulation", label: "Simulation", icon: LineChart },
+        { href: "/future-lab", label: "Future Lab", icon: Beaker },
       { href: "/admin", label: "Admin", icon: LayoutDashboard, adminOnly: true },
     ],
   },

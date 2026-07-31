@@ -86,10 +86,9 @@ export const useTimeControlStore = create<TimeControlStore>((set, get) => ({
   setCustomRange: (range) => set({ customRange: range, timeRange: "CUSTOM" }),
 
   setReplayMode: (enabled) =>
-    set((s) => ({
+    set(() => ({
       replayMode: enabled,
       isPlaying: false,
-      currentTick: enabled && !s.replayMode ? 0 : s.currentTick,
     })),
 
   addBookmark: (label, timestamp) => {

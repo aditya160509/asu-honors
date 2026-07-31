@@ -16,15 +16,15 @@ export function FastForwardStep({ state, onChange }: Props) {
       <Input
         id="fast-forward-days"
         type="number"
-        min={0}
+        min={1}
+        max={730}
         step={1}
         value={state.fastForwardDays}
-        onChange={(e) => onChange({ fastForwardDays: Math.max(0, Number(e.target.value) || 0) })}
+        onChange={(e) => onChange({ fastForwardDays: Math.min(730, Math.max(1, Number(e.target.value) || 1)) })}
       />
       <p className="text-micro text-text-tertiary">
-        0 creates the branch frozen at the branch point — you can fast-forward it later. A
-        non-zero value dispatches an async job that ticks the branch forward in the background;
-        the confirm step polls its status once created.
+        Choose 1–730 days. The run executes in the API&apos;s bounded background worker and streams
+        committed progress to the result workspace.
       </p>
     </div>
   );

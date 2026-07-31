@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from apps.api.database import check_migrations_up_to_date
 from apps.api.database import engine as db_engine
+from apps.api import background_jobs
 from apps.api.exceptions import add_exception_handlers
 
 from apps.api.routers import (
@@ -38,8 +39,13 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     # that's behind on migrations -- see check_migrations_up_to_date's
     # docstring for the production incident this prevents from recurring.
     check_migrations_up_to_date()
-    yield
-    db_engine.dispose()
+    background_jobs.start()
+    background_jobs.recover_timelines()
+    try:
+        yield
+    finally:
+        background_jobs.stop()
+        db_engine.dispose()
 
 
 def create_app() -> FastAPI:

@@ -124,7 +124,10 @@ def driver_bias_by_company(
             continue
         if row.target_key not in DRIVER_KEYS:
             continue
-        result.setdefault(row.target_scope_id, {})[row.target_key] = delta
+        scope_id = row.target_scope_id
+        if scope_id is not None and getattr(row, "target_scope_type", "company") == "industry":
+            scope_id = -scope_id
+        result.setdefault(scope_id, {})[row.target_key] = delta
     return result
 
 
@@ -173,5 +176,8 @@ def factor_score_bias_by_company(
             continue
         if row.target_key not in FACTOR_SCORE_KEYS:
             continue
-        result.setdefault(row.target_scope_id, {})[row.target_key] = delta
+        scope_id = row.target_scope_id
+        if scope_id is not None and getattr(row, "target_scope_type", "company") == "industry":
+            scope_id = -scope_id
+        result.setdefault(scope_id, {})[row.target_key] = delta
     return result

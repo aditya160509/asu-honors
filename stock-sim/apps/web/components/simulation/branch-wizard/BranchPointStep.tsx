@@ -37,6 +37,11 @@ export function BranchPointStep({ state, timelines, onChange }: Props) {
           onChange={(e) => onChange({ name: e.target.value })}
         />
       </div>
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="rng-seed">Random seed (optional)</Label>
+        <Input id="rng-seed" type="number" min={0} max={2147483647} placeholder="Automatic deterministic seed" value={state.rngSeed ?? ""} onChange={(e) => onChange({ rngSeed: e.target.value === "" ? null : Number(e.target.value) })} />
+        <p className="text-micro text-text-tertiary">Leave empty for an automatic deterministic seed; set one to reproduce a run exactly.</p>
+      </div>
 
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="parent-timeline">Parent timeline</Label>

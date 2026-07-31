@@ -16,6 +16,7 @@ from sqlalchemy.pool import StaticPool
 SQLiteTypeCompiler.visit_JSONB = SQLiteTypeCompiler.visit_JSON
 
 os.environ["DATABASE_URL"] = "sqlite://"
+os.environ["AUTHENTICATION_DISABLED"] = "false"
 
 from apps.api.auth import create_access_token, hash_password
 from apps.api.database import get_db
@@ -62,37 +63,20 @@ def client(test_db, engine):
     app.user_middleware = [m for m in app.user_middleware if m.cls.__name__ != "InMemoryRateLimiter"]
     app.middleware_stack = app.build_middleware_stack()
 
-    # Run Celery tasks (apps/api/tasks.py) synchronously/inline instead of
-    # dispatching to a real broker/worker -- and point their DB session
-    # factory at THIS test's in-memory engine (not the module-level
-    # apps.api.database.SessionLocal, which is bound to a different engine
-    # and would see an empty database from inside a task).
-    from apps.api.celery_app import celery_app
-    from apps.api import tasks as tasks_module
+    # Execute in-process background jobs inline and bind job DB sessions to
+    # this test's in-memory engine.
+    from apps.api import background_jobs, tasks as tasks_module
     from sqlalchemy.orm import sessionmaker as _sessionmaker
 
-    celery_app.conf.task_always_eager = True
-    celery_app.conf.task_eager_propagates = True
+    background_jobs._eager = True
     original_factory = tasks_module._session_factory
     tasks_module._session_factory = _sessionmaker(bind=engine, autocommit=False, autoflush=False)
-
-    # apps.api.routers.simulation.create_timeline pings for a live worker
-    # (celery_app.control.ping) before dispatching a fast-forward job, to
-    # avoid silently losing the job if no worker is listening (see that
-    # router's docstring). In eager mode there IS no real worker/broker
-    # round-trip to make -- tasks execute inline -- so stub the ping to
-    # report one alive worker rather than let it hit whatever Redis happens
-    # to be reachable from the test machine (flaky: passes/fails depending
-    # on incidental local infra state, not the code under test).
-    original_ping = celery_app.control.ping
-    celery_app.control.ping = lambda *a, **kw: [{"test-worker": {"ok": "pong"}}]
 
     with TestClient(app) as c:
         yield c
     app.dependency_overrides.clear()
     tasks_module._session_factory = original_factory
-    celery_app.conf.task_always_eager = False
-    celery_app.control.ping = original_ping
+    background_jobs._eager = False
 
 
 @pytest.fixture()

@@ -349,12 +349,15 @@ def seed(session: Session) -> None:
         ).first()
         if existing_ph is None:
             prev_price = round(r["price"] * rng.uniform(0.97, 1.03), 4)
+            prev_open = round(prev_price * rng.uniform(0.995, 1.005), 4)
+            prev_high = round(max(prev_open, prev_price) * rng.uniform(1.001, 1.015), 4)
+            prev_low = round(min(prev_open, prev_price) * rng.uniform(0.985, 0.999), 4)
             session.add(PriceHistory(
                 timeline_id=timeline.id, company_id=company.id,
                 sim_date=PREV_SIM_DATE,
-                open=round(prev_price * rng.uniform(0.995, 1.005), 4),
-                high=round(prev_price * rng.uniform(1.00, 1.015), 4),
-                low=round(prev_price * rng.uniform(0.985, 1.00), 4),
+                open=prev_open,
+                high=prev_high,
+                low=prev_low,
                 close=prev_price,
                 volume=max(1000, int(r["market_cap"] * 0.001 * rng.uniform(0.5, 1.5))),
                 intrinsic_value=round(r["intrinsic_value"], 4),

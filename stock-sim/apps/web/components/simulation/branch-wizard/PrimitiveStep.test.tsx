@@ -20,12 +20,12 @@ function baseState(overrides: Partial<BranchWizardState> = {}): BranchWizardStat
 describe("PrimitiveStep", () => {
   it("renders all six scenario primitives", () => {
     render(<PrimitiveStep state={baseState()} onChange={vi.fn()} />);
-    expect(screen.getByText("Manual / freeform")).toBeInTheDocument();
-    expect(screen.getByText("Structural override")).toBeInTheDocument();
-    expect(screen.getByText("Macro shock")).toBeInTheDocument();
-    expect(screen.getByText("Sensitivity sweep")).toBeInTheDocument();
-    expect(screen.getByText("Monte Carlo ensemble")).toBeInTheDocument();
-    expect(screen.getByText("Liquidity scenario")).toBeInTheDocument();
+    expect(screen.getByText("Clean baseline")).toBeInTheDocument();
+    expect(screen.getByText("Company fundamentals")).toBeInTheDocument();
+    expect(screen.getByText("Economy shock")).toBeInTheDocument();
+    expect(screen.getByText("What-if range")).toBeInTheDocument();
+    expect(screen.getByText("Probability range")).toBeInTheDocument();
+    expect(screen.getByText("Liquidity stress")).toBeInTheDocument();
   });
 
   it("calls onChange with the selected primitive when a card is clicked", async () => {
@@ -33,7 +33,7 @@ describe("PrimitiveStep", () => {
     const onChange = vi.fn();
     render(<PrimitiveStep state={baseState()} onChange={onChange} />);
 
-    await user.click(screen.getByText("Macro shock"));
+    await user.click(screen.getByText("Economy shock"));
 
     expect(onChange).toHaveBeenCalledWith({
       primitive: "macro_shock",
@@ -66,7 +66,7 @@ describe("PrimitiveStep", () => {
       />
     );
 
-    await user.click(screen.getByText("Manual / freeform"));
+    await user.click(screen.getByText("Clean baseline"));
 
     expect(onChange).toHaveBeenCalledWith({
       primitive: "manual",
@@ -80,17 +80,17 @@ describe("PrimitiveStep", () => {
     const onChange = vi.fn();
     render(<PrimitiveStep state={baseState({ primitive: "macro_shock" })} onChange={onChange} />);
 
-    await user.click(screen.getByText("Macro shock"));
+    await user.click(screen.getByText("Economy shock"));
 
     expect(onChange).not.toHaveBeenCalled();
   });
 
   it("visually marks the currently-selected primitive as active", () => {
     render(<PrimitiveStep state={baseState({ primitive: "liquidity_scenario" })} onChange={vi.fn()} />);
-    const activeLabel = screen.getByText("Liquidity scenario");
+    const activeLabel = screen.getByText("Liquidity stress");
     expect(activeLabel.className).toContain("text-accent");
 
-    const inactiveLabel = screen.getByText("Manual / freeform");
+    const inactiveLabel = screen.getByText("Clean baseline");
     expect(inactiveLabel.className).not.toContain("text-accent");
   });
 });

@@ -1057,9 +1057,10 @@ def _compute_drivers(
     # (target_scope_id = None), matching how event scoping already layers.
     if state.driver_bias_map:
         market_bias = state.driver_bias_map.get(None, {})
+        industry_bias = state.driver_bias_map.get(-company.industry_id, {})
         company_bias = state.driver_bias_map.get(company.id, {})
         combined_bias = {**market_bias}
-        for key, delta in company_bias.items():
+        for key, delta in [*industry_bias.items(), *company_bias.items()]:
             combined_bias[key] = combined_bias.get(key, 0.0) + delta
         if combined_bias:
             driver_values = apply_driver_bias(driver_values, combined_bias)
@@ -1433,7 +1434,9 @@ def _apply_timeline_factor_score_overrides(
     """
     company_map = {c.id: c for c in companies}
     market_bias = factor_score_bias_map.get(None, {})
-    affected_ids = set(factor_score_bias_map.keys()) - {None}
+    direct_ids = {key for key in factor_score_bias_map if key is not None and key > 0}
+    industry_ids = {-key for key in factor_score_bias_map if key is not None and key < 0}
+    affected_ids = direct_ids | {c.id for c in companies if c.industry_id in industry_ids}
     if market_bias:
         affected_ids |= set(company_map.keys())
 
@@ -1448,7 +1451,10 @@ def _apply_timeline_factor_score_overrides(
         if cfs is None or company is None:
             continue
 
-        bias = {**market_bias, **factor_score_bias_map.get(cid, {})}
+        bias = {**market_bias}
+        for source in (factor_score_bias_map.get(-company.industry_id, {}), factor_score_bias_map.get(cid, {})):
+            for key, delta in source.items():
+                bias[key] = bias.get(key, 0.0) + delta
 
         moat_rows = batch.moat_rows_by_company.get(cid, [])
         moat_weights = batch.moat_weights
@@ -3678,9 +3684,10 @@ def _bulk_compute_drivers(
 
     if arrays.driver_bias_map:
         market_bias = arrays.driver_bias_map.get(None, {})
+        industry_bias = arrays.driver_bias_map.get(-company.industry_id, {})
         company_bias = arrays.driver_bias_map.get(company.id, {})
         combined_bias = {**market_bias}
-        for key, delta in company_bias.items():
+        for key, delta in [*industry_bias.items(), *company_bias.items()]:
             combined_bias[key] = combined_bias.get(key, 0.0) + delta
         if combined_bias:
             driver_values = apply_driver_bias(driver_values, combined_bias)

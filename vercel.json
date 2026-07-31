@@ -1,5 +1,6 @@
 {
   "buildCommand": "npm run build:web",
   "installCommand": "npm install",
-  "framework": null
+  "framework": "nextjs",
+  "outputDirectory": "stock-sim/apps/web/.next"
 }

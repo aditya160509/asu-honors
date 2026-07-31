@@ -229,8 +229,16 @@ function ConCallTranscript({ call, ticker }: { call: ConCallItem; ticker: string
         )}
         <button
           type="button"
+          onClick={() => window.open(`/api/v1/companies/${ticker}/concalls/${call.id}/pdf`, "_blank", "noopener,noreferrer")}
+          className="ml-auto rounded-mer-sm px-2 py-1 text-micro text-mer-ink-tertiary transition-colors hover:bg-mer-surface-2 hover:text-mer-ink-primary"
+          title="Open PDF transcript in a new tab"
+        >
+          View PDF
+        </button>
+        <button
+          type="button"
           onClick={() => downloadPdf(`/api/v1/companies/${ticker}/concalls/${call.id}/pdf`, `${ticker}_${call.fiscal_period}_concall.pdf`)}
-          className="ml-auto flex items-center gap-1 rounded-mer-sm px-2 py-1 text-micro text-mer-ink-tertiary transition-colors hover:bg-mer-surface-2 hover:text-mer-ink-primary"
+          className="flex items-center gap-1 rounded-mer-sm px-2 py-1 text-micro text-mer-ink-tertiary transition-colors hover:bg-mer-surface-2 hover:text-mer-ink-primary"
           title="Download PDF transcript"
         >
           <Download size={12} /> PDF

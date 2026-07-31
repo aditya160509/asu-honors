@@ -10,6 +10,7 @@ from db.models import AuditLog
 
 VALID_ACTIONS = frozenset({
     "promote_config", "promote_baseline", "fork_league", "delete_timeline", "create_timeline",
+    "rename_timeline", "create_timeline_group",
 })
 
 

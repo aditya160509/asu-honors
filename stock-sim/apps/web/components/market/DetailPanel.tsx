@@ -129,6 +129,9 @@ export function DetailPanel({ ticker, watched, onToggleWatch, onClose, gridRow }
             {company.data?.name ?? "…"}
           </span>
         </div>
+        <Link href={`/companies/${ticker}`} className="ml-auto mr-3 inline-flex items-center gap-1 text-[10px] uppercase tracking-[0.08em] text-[var(--term-accent)] hover:text-white">
+          Full ticker view <ExternalLink size={11} />
+        </Link>
         <button type="button" onClick={onClose} aria-label="Close detail panel (Esc)" className="text-[11px] uppercase tracking-[0.06em] text-[var(--term-ink-tertiary)] hover:text-[var(--term-ink)]">
           Esc ×
         </button>

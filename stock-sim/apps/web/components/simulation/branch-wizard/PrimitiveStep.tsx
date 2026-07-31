@@ -12,39 +12,39 @@ interface Props {
 const PRIMITIVES: { value: TimelinePrimitive; label: string; description: string }[] = [
   {
     value: "manual",
-    label: "Manual / freeform",
-    description: "No canned scenario — just fork and fast-forward, or add your own overrides later.",
+    label: "Clean baseline",
+    description: "Copy the market exactly, then let it evolve along a new path.",
   },
   {
     value: "structural_override",
-    label: "Structural override",
-    description: "Force factor scores or config parameters from the branch point forward.",
+    label: "Company fundamentals",
+    description: "Change quality, growth, moat, valuation behavior, or another structural input.",
   },
   {
     value: "macro_shock",
-    label: "Macro shock",
-    description: "Force the economic cycle into a phase (e.g. recession) for N sim-days.",
+    label: "Economy shock",
+    description: "Move the economy toward expansion, peak, recession, or recovery.",
   },
   {
     value: "sensitivity_sweep",
-    label: "Sensitivity sweep",
-    description: "Run N branches varying one config parameter, same seed, same events.",
+    label: "What-if range",
+    description: "Run five levels of one assumption and reveal the response curve.",
   },
   {
     value: "monte_carlo",
-    label: "Monte Carlo ensemble",
-    description: "Run the same scenario N times with random seeds — a distribution, not one path.",
+    label: "Probability range",
+    description: "Measure percentiles, confidence bands, and tail outcomes across independent paths.",
   },
   {
     value: "liquidity_scenario",
-    label: "Liquidity scenario",
-    description: "Widen market impact / spread — tests behavior when exits get expensive.",
+    label: "Liquidity stress",
+    description: "Test thinner volume, wider spreads, and more expensive exits.",
   },
 ];
 
 export function PrimitiveStep({ state, onChange }: Props) {
   return (
-    <div className="flex flex-col gap-2">
+    <div className="grid grid-cols-2 gap-2">
       {PRIMITIVES.map((p) => {
         const active = state.primitive === p.value;
         return (
@@ -61,8 +61,8 @@ export function PrimitiveStep({ state, onChange }: Props) {
               onChange({ primitive: p.value, scenarioTemplateId: null, overrides: [] });
             }}
             className={cn(
-              "text-left rounded-sm border px-3 py-2.5 transition-colors",
-              active ? "border-accent bg-bg-tertiary" : "border-border hover:bg-bg-hover"
+              "min-h-24 text-left border px-3 py-3 transition-all",
+              active ? "border-[#f4b740] bg-[#f4b740]/[.08] shadow-[inset_3px_0_0_#f4b740]" : "border-[#202a38] bg-[#0b1119] hover:border-[#47566d]"
             )}
           >
             <p className={cn("text-body font-medium", active ? "text-accent" : "text-text-primary")}>

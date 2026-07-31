@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { CommandLine } from "@/components/market/CommandLine";
 import { StatusLine } from "@/components/market/StatusLine";
 import { ScreenerToolbar } from "@/components/market/ScreenerToolbar";
@@ -352,6 +353,10 @@ export function MarketExplorer({ companies, loading, error, onRetry, historicalD
         onViewModeChange={setViewMode}
         inputRef={searchInputRef}
       />
+      <div className="flex shrink-0 items-center justify-between border-b border-[var(--term-hairline)] bg-[linear-gradient(90deg,var(--term-bg),rgba(30,41,59,.22),var(--term-bg))] px-4 py-2 text-[11px] text-[var(--term-muted)]">
+        <div className="flex items-center gap-4"><span className="font-semibold uppercase tracking-[0.16em] text-[var(--term-text)]">Equity screener</span><span className="font-mono tabular-nums text-[var(--term-amber)]">{sorted.length.toLocaleString()} matches</span><span>{activeFilterGroupCount(activeFilters, bounds)} filter groups active</span></div>
+        <Link href="/future-lab" className="hidden items-center gap-1.5 text-[var(--term-accent)] transition-colors hover:text-white sm:flex">Open Future Lab <span aria-hidden>↗</span></Link>
+      </div>
       <ScreenerToolbar
         query={toolbarQuery}
         onQueryChange={setToolbarQuery}

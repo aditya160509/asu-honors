@@ -64,7 +64,7 @@ class MessageResponse(BaseModel):
 class UserCreateRequest(BaseModel):
     email: str
     password: str
-    display_name: str
+    display_name: Optional[str] = None
 
     @field_validator("password")
     @classmethod
@@ -125,6 +125,14 @@ class PriceHistoryItem(BaseModel):
 
 
 class DriverBreakdown(BaseModel):
+    driver_key: str
+    value: float
+    weight: float
+    contribution: float
+
+
+class DriverHistoryItem(BaseModel):
+    sim_date: date
     driver_key: str
     value: float
     weight: float
@@ -523,6 +531,7 @@ class TimelineOverrideSpec(BaseModel):
     override_value: str
     effective_from_sim_date: date
     target_scope_id: Optional[int] = None
+    target_scope_type: Optional[str] = None
     effective_to_sim_date: Optional[date] = None
 
     @field_validator("target_type")
@@ -531,6 +540,13 @@ class TimelineOverrideSpec(BaseModel):
         allowed = {"factor_score", "config", "event", "cycle_transition", "driver_bias"}
         if v not in allowed:
             raise ValueError(f"target_type must be one of {sorted(allowed)}")
+        return v
+
+    @field_validator("target_scope_type")
+    @classmethod
+    def _validate_scope_type(cls, v):
+        if v not in (None, "company", "industry"):
+            raise ValueError("target_scope_type must be company or industry")
         return v
 
 
@@ -558,6 +574,45 @@ class TimelineCreateRequest(BaseModel):
         if v > 730:
             raise ValueError("fast_forward_days must be <= 730")
         return v
+
+
+class EnsembleCreateRequest(TimelineCreateRequest):
+    """Create a persisted sensitivity sweep or Monte Carlo ensemble.
+
+    Every member is a normal Timeline and is executed by the same tick engine;
+    the group is only an aggregation/indexing record, never a shortcut around
+    simulation. Sensitivity values are applied to one validated override key.
+    """
+
+    primitive: str
+    label: Optional[str] = None
+    sweep_target_type: Optional[str] = None
+    sweep_target_key: Optional[str] = None
+    sweep_values: Optional[list[float]] = None
+    member_count: int = 20
+
+    @field_validator("primitive")
+    @classmethod
+    def _validate_ensemble_primitive(cls, v: str) -> str:
+        if v not in {"sensitivity_sweep", "monte_carlo"}:
+            raise ValueError("primitive must be sensitivity_sweep or monte_carlo")
+        return v
+
+    @field_validator("member_count")
+    @classmethod
+    def _validate_member_count(cls, v: int) -> int:
+        if not 2 <= v <= 200:
+            raise ValueError("member_count must be between 2 and 200")
+        return v
+
+    @model_validator(mode="after")
+    def _validate_ensemble_shape(self):
+        if self.primitive == "sensitivity_sweep":
+            if not self.sweep_target_type or not self.sweep_target_key:
+                raise ValueError("sensitivity sweep requires sweep_target_type and sweep_target_key")
+            if not self.sweep_values or len(self.sweep_values) < 2 or len(self.sweep_values) > 200:
+                raise ValueError("sweep_values must contain 2 to 200 values")
+        return self
 
     @field_validator("primitive")
     @classmethod
@@ -589,12 +644,18 @@ class TimelineStatusResponse(BaseModel):
     current_sim_date: Optional[date] = None
     tick_count: Optional[int] = None
     last_touched_at: Optional[datetime] = None
+    requested_ticks: int = 0
+    completed_ticks: int = 0
+    progress_pct: float = 0.0
+    failure_error: Optional[str] = None
+    recovery_action: Optional[str] = None
 
 
 class TimelineDiffEntry(BaseModel):
     target_type: str
     target_key: str
     target_scope_id: Optional[int] = None
+    target_scope_type: Optional[str] = None
     left_value: Optional[str] = None
     right_value: Optional[str] = None
 
@@ -616,6 +677,18 @@ class TimelineExtendRequest(BaseModel):
         return v
 
 
+class TimelineRenameRequest(BaseModel):
+    name: str
+
+    @field_validator("name")
+    @classmethod
+    def _validate_name(cls, v: str) -> str:
+        value = v.strip()
+        if not value or len(value) > 200:
+            raise ValueError("name must contain 1 to 200 characters")
+        return value
+
+
 class TimelineGroupResponse(BaseModel):
     id: int
     primitive: str
@@ -627,6 +700,11 @@ class TimelineGroupResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class EnsembleCreateResponse(BaseModel):
+    group: TimelineGroupResponse
+    timelines: list[TimelineResponse]
+
+
 class DistributionResponse(BaseModel):
     metric: str
     count: int
@@ -635,6 +713,7 @@ class DistributionResponse(BaseModel):
     percentiles: dict[str, float] = {}
     histogram_bins: list[float] = []
     histogram_counts: list[int] = []
+    samples: list[dict] = []
 
 
 class ScenarioTemplateCreateRequest(BaseModel):

@@ -2,6 +2,7 @@
 
 import logging
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Optional
 
 import bcrypt
@@ -12,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from apps.api.config import settings
 from apps.api.database import get_db
-from db.models import User
+from db.models import Portfolio, Timeline, User
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +59,26 @@ def get_current_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
     db: Session = Depends(get_db),
 ) -> User:
-    """Decode the bearer token and return the corresponding User, or 401."""
+    """Return the shared fresh-sandbox user when no bearer token is supplied."""
+    if settings.authentication_disabled:
+        user = db.query(User).filter(User.email == "sandbox@futurelab.local").first()
+        created = user is None
+        if user is None:
+            user = User(email="sandbox@futurelab.local", hashed_password="authentication-disabled",
+                        display_name="Sandbox Investor", role="admin", starting_cash=Decimal("100000"),
+                        email_verified_at=datetime.now(timezone.utc))
+            db.add(user)
+            db.flush()
+        live = db.query(Timeline).filter(Timeline.is_live.is_(True)).first()
+        if live is not None and db.query(Portfolio).filter_by(user_id=user.id, timeline_id=live.id).first() is None:
+            db.add(Portfolio(user_id=user.id, timeline_id=live.id, cash_balance=user.starting_cash,
+                             total_value=user.starting_cash))
+            db.flush()
+            created = True
+        if created:
+            db.commit()
+            db.refresh(user)
+        return user
     if credentials is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     payload = _decode_token(credentials.credentials)
@@ -80,6 +100,8 @@ def get_current_user_optional(
     db: Session = Depends(get_db),
 ) -> Optional[User]:
     """Same as get_current_user but returns None instead of raising when unauthenticated."""
+    if settings.authentication_disabled:
+        return get_current_user(credentials=None, db=db)
     if credentials is None:
         return None
     try:

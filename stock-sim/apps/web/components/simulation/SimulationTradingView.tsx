@@ -10,6 +10,7 @@ import { TimeRangeSelector } from "@/components/simulation/TimeRangeSelector";
 import { SentimentGauge } from "@/components/dashboard/SentimentGauge";
 import { SentimentHistory } from "@/components/dashboard/SentimentHistory";
 import { FundamentalsPanel } from "@/components/dashboard/FundamentalsPanel";
+import { FactorAnalytics } from "@/components/simulation/FactorAnalytics";
 import { DrawingToolbar } from "@/components/ui/DrawingToolbar";
 import { IndicatorPicker } from "@/components/ui/IndicatorPicker";
 import { ChartTypePicker } from "@/components/ui/ChartTypePicker";
@@ -142,6 +143,9 @@ export function SimulationTradingView() {
 
   const [showFundamentals, setShowFundamentals] = React.useState(false);
   const [showSentiment, setShowSentiment] = React.useState(true);
+  // Keep the factor workspace visible by default so the main chart and its
+  // driver context are available together; users can still collapse it.
+  const [showFactors, setShowFactors] = React.useState(true);
   const [chartType, setChartType] = React.useState<ChartType>("candlestick");
   const [activeOverlays, setActiveOverlays] = React.useState<IndicatorType[]>(["sma20"]);
   const [drawingManager] = React.useState(() => new DrawingManager());
@@ -477,7 +481,8 @@ export function SimulationTradingView() {
             background: "var(--mer-surface-1)",
             display: "flex",
             flexDirection: "column",
-            overflow: "hidden",
+            overflowY: "auto",
+            overflowX: "hidden",
           }}
         >
           <DrawingToolbar manager={drawingManager} />
@@ -491,7 +496,8 @@ export function SimulationTradingView() {
             flexDirection: "column",
             minWidth: 0,
             padding: "4px 6px",
-            overflow: "hidden",
+            overflowY: "auto",
+            overflowX: "hidden",
           }}
         >
           {/* Market Overview Bar */}
@@ -516,6 +522,7 @@ export function SimulationTradingView() {
             <div style={{ flex: 1 }} />
             <TerminalBtn active={showSentiment} onClick={() => setShowSentiment((v) => !v)}>Sentiment</TerminalBtn>
             <TerminalBtn active={showFundamentals} onClick={() => setShowFundamentals((v) => !v)}>Fundamentals</TerminalBtn>
+            <TerminalBtn active={showFactors} onClick={() => setShowFactors((v) => !v)} title="Plot each pricing factor over time">Factors</TerminalBtn>
           </div>
 
 
@@ -525,12 +532,13 @@ export function SimulationTradingView() {
             ref={chartContainerRef}
             className="chart-surface"
             style={{
-              flex: 1,
+              flex: "0 0 auto",
               background: "radial-gradient(circle at 50% 0%, rgba(51, 102, 204, 0.08), transparent 36%), #0b0f14",
               border: "1px solid var(--mer-stroke-hairline)",
               borderRadius: "var(--mer-radius-xs)",
               overflow: "hidden",
-              minHeight: 0,
+              minHeight: 360,
+              height: chartHeight,
               boxShadow: "0 0 0 1px rgba(62, 111, 224, 0.06), var(--mer-shadow-rest)",
               transition: "box-shadow 600ms cubic-bezier(0.16, 1, 0.3, 1)",
             }}
@@ -548,7 +556,12 @@ export function SimulationTradingView() {
               chartType={chartType}
               drawingManager={drawingManager}
               activeDrawingTool={activeDrawingTool}
-              externalRange={chartRange.to > chartRange.from ? chartRange : undefined}
+              // During candle-by-candle replay, the data array is intentionally
+              // shorter than the cached history. Clamp the viewport to the
+              // rendered candles so the x-axis never leaves a blank future span.
+              externalRange={replayMode
+                ? { from: 0, to: Math.max(1, filteredData.length) }
+                : chartRange.to > chartRange.from ? chartRange : undefined}
               onRangeChange={updateChartRange}
               replayPickMode={replayPickMode}
               onReplayPointSelect={handleReplayPointSelect}
@@ -557,6 +570,7 @@ export function SimulationTradingView() {
               <ReplayPickPrompt onCancel={() => setReplayPickMode(false)} />
             )}
           </div>
+          {showFactors && selectedTicker && <FactorAnalytics ticker={selectedTicker} timelineId={timelineId} />}
           {paneIndicators.length > 0 && (
             <div
               style={{

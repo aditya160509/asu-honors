@@ -24,6 +24,7 @@ class _FakeOverrideRow:
     effective_from_sim_date: date
     effective_to_sim_date: Optional[date] = None
     target_scope_id: Optional[int] = None
+    target_scope_type: Optional[str] = None
 
 
 # ── apply_driver_bias ───────────────────────────────────────────────────
@@ -194,3 +195,16 @@ def test_factor_score_bias_by_company_ignores_invalid_key():
 def test_factor_score_bias_by_company_ignores_non_numeric_value():
     rows = [_FakeOverrideRow("factor_score", "moat_score", "not_a_number", date(2026, 1, 1))]
     assert factor_score_bias_by_company(rows) == {}
+
+
+def test_industry_scopes_are_distinct_from_company_scopes():
+    driver_rows = [_FakeOverrideRow(
+        "driver_bias", "economic_outlook", "0.3", date(2026, 1, 1),
+        target_scope_id=7, target_scope_type="industry",
+    )]
+    factor_rows = [_FakeOverrideRow(
+        "factor_score", "financial_quality", "-15", date(2026, 1, 1),
+        target_scope_id=4, target_scope_type="industry",
+    )]
+    assert driver_bias_by_company(driver_rows) == {-7: {"economic_outlook": 0.3}}
+    assert factor_score_bias_by_company(factor_rows) == {-4: {"financial_quality": -15.0}}

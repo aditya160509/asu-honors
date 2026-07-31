@@ -136,7 +136,7 @@ def notify_branch_ready(db: Session, timeline: Timeline) -> Optional[Notificatio
 def notify_branch_failed(db: Session, timeline: Timeline, error: str) -> Optional[Notification]:
     """Called by every path that flips a timeline to status='failed' -- the
     sync /extend router's except-block, tasks.run_fast_forward_job's except-
-    block, and create_timeline's no-Celery-worker-available branch."""
+    block, and create_timeline's unavailable-worker branch."""
     if timeline.owner_user_id is None:
         return None
     return create_notification(

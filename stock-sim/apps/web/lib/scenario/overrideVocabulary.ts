@@ -13,10 +13,7 @@ export const OVERRIDE_TARGET_TYPES: TimelineOverrideTargetType[] = [
   "driver_bias",
 ];
 
-// "event" has no fixed key list -- it's not wired into the tick loop yet
-// (target_key would be a MarketEvent name if/when it is), so it stays free
-// text with a warning label rather than a dropdown of options that don't do
-// anything.
+// Event target_key is a persisted MarketEvent ID; its value is severity.
 export const CYCLE_PHASE_OPTIONS = [
   { value: "expansion", label: "Expansion" },
   { value: "peak", label: "Peak" },
@@ -56,11 +53,20 @@ export const CONFIG_KEY_SUGGESTIONS = [
   "growth_rate_max",
 ];
 
+export const CONFIG_LABELS: Record<string, string> = {
+  theta_default: "Price pull toward fair value",
+  kyle_lambda_scale: "Liquidity impact sensitivity",
+  r_cap: "Maximum daily price move",
+  growth_rate_min: "Minimum long-term growth",
+  growth_rate_max: "Maximum long-term growth",
+};
+
 export function keyOptionsFor(targetType: TimelineOverrideTargetType): { value: string; label: string }[] | null {
   if (targetType === "cycle_transition") return CYCLE_PHASE_OPTIONS;
   if (targetType === "driver_bias") return DRIVER_BIAS_OPTIONS;
   if (targetType === "factor_score") return FACTOR_SCORE_OPTIONS;
-  return null; // config (datalist suggestions) / event (free text)
+  if (targetType === "config") return CONFIG_KEY_SUGGESTIONS.map((value) => ({ value, label: CONFIG_LABELS[value] ?? value }));
+  return null;
 }
 
 // Target types whose override_value the engine parses as a float
@@ -70,7 +76,7 @@ export function keyOptionsFor(targetType: TimelineOverrideTargetType): { value: 
 // got no error anywhere, just a scenario that silently did nothing). "event"
 // is free text since it isn't wired into the tick loop yet. Ranges mirror
 // apps/api/services/branch_service.py's _validate_overrides.
-const NUMERIC_TARGET_TYPES: TimelineOverrideTargetType[] = ["driver_bias", "config", "factor_score", "cycle_transition"];
+const NUMERIC_TARGET_TYPES: TimelineOverrideTargetType[] = ["driver_bias", "config", "factor_score", "cycle_transition", "event"];
 
 /** Client-side mirror of branch_service._validate_overrides's numeric checks,
  * surfaced inline in the wizard so a bad value is caught before submission
@@ -85,6 +91,7 @@ export function overrideValueError(override: TimelineOverrideSpec): string | nul
   if (override.target_type === "cycle_transition" && (value < 0 || value > 1)) return "Must be between 0.0 and 1.0";
   if (override.target_type === "driver_bias" && (value < -1 || value > 1)) return "Must be between -1.0 and 1.0";
   if (override.target_type === "factor_score" && (value < -100 || value > 100)) return "Must be between -100 and 100";
+  if (override.target_type === "event" && (value < 0 || value > 1)) return "Severity must be between 0.0 and 1.0";
   return null;
 }
 
@@ -99,7 +106,7 @@ export function valueHelpFor(targetType: TimelineOverrideTargetType): string {
     case "config":
       return "The new value itself (replaces the current setting), e.g. 0.08";
     case "event":
-      return "Not wired into the simulation yet — saved but currently has no effect";
+      return "Use a persisted MarketEvent ID as the key and severity 0.0–1.0 as the value";
     default:
       return "";
   }

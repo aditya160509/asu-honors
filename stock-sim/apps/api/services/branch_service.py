@@ -12,7 +12,7 @@ which was designed for exactly this and has no such constraint conflict.
 import hashlib
 import time
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 from sqlalchemy.orm import Session
@@ -22,11 +22,17 @@ from apps.api.services import notification_service
 from db.models import (
     Company,
     CompanyFactorScore,
+    EventInstance,
     FinancialQualitySubscore,
     MoatSubscore,
     SimulationState,
     Timeline,
     TimelineOverride,
+    TimelineGroup,
+    MarketEvent,
+    Industry,
+    Portfolio,
+    Holding,
 )
 from engine.cycle import CYCLE_PHASES
 from engine.orchestrator import run_ticks
@@ -38,7 +44,7 @@ VALID_PRIMITIVES = frozenset({
 })
 # Maximum sim-days a single fast-forward can request. With no ceiling, a
 # large fast_forward_days both dispatches an effectively unbounded synchronous
-# per-tick Celery job (cost/DoS risk) and produces a compute estimate with no
+# per-tick background job (cost/DoS risk) and produces a compute estimate with no
 # practical meaning. 730 (~2 years) comfortably covers any real Future Lab
 # use case while keeping worst-case job size bounded.
 MAX_FAST_FORWARD_DAYS = 730
@@ -48,8 +54,7 @@ MAX_FAST_FORWARD_DAYS = 730
 # scenario-template admin form or direct API use -- see engine/overrides.py's
 # DRIVER_KEYS/FACTOR_SCORE_KEYS and engine/cycle.py's CYCLE_PHASES, the same
 # sets the tick loop itself validates target_key against before applying).
-# "config" and "event" are intentionally excluded: config keys are open-ended
-# ConfigParameter names, and "event" isn't wired into the tick loop yet.
+# Config keys and event IDs are open-ended and validated against persisted rows.
 TARGET_KEY_VOCABULARIES: dict[str, frozenset] = {
     "cycle_transition": frozenset(CYCLE_PHASES),
     "driver_bias": frozenset(DRIVER_KEYS),
@@ -75,6 +80,7 @@ class OverrideSpec:
     override_value: str
     effective_from_sim_date: date
     target_scope_id: Optional[int] = None
+    target_scope_type: Optional[str] = None
     effective_to_sim_date: Optional[date] = None
 
 
@@ -98,7 +104,7 @@ def _validate_overrides(db: Session, overrides: list["OverrideSpec"]) -> None:
                 f"'{spec.target_type}' (expected one of {sorted(vocab)})"
             )
 
-        if spec.target_type in ("driver_bias", "config", "factor_score", "cycle_transition"):
+        if spec.target_type in ("driver_bias", "config", "factor_score", "cycle_transition", "event"):
             try:
                 value = float(spec.override_value)
             except (TypeError, ValueError) as exc:
@@ -118,15 +124,34 @@ def _validate_overrides(db: Session, overrides: list["OverrideSpec"]) -> None:
                 raise ConflictError(
                     f"factor_score override_value must be between -100 and 100, got {value}"
                 )
+            if spec.target_type == "event" and not (0.0 <= value <= 1.0):
+                raise ConflictError(f"event severity must be between 0.0 and 1.0, got {value}")
+
+        if spec.target_type == "event":
+            try:
+                event_id = int(spec.target_key)
+            except (TypeError, ValueError) as exc:
+                raise ConflictError("event target_key must be a MarketEvent ID") from exc
+            event = db.query(MarketEvent).filter_by(id=event_id).first()
+            if event is None:
+                raise ConflictError(f"MarketEvent {event_id} does not exist")
+            if event.scope != "market" and spec.target_scope_id is None:
+                raise ConflictError(f"event {event_id} requires a {event.scope} target_scope_id")
+            if event.scope == "company" and db.query(Company.id).filter_by(id=spec.target_scope_id).first() is None:
+                raise ConflictError(f"target_scope_id {spec.target_scope_id} does not match any company")
+            if event.scope == "industry" and db.query(Industry.id).filter_by(id=spec.target_scope_id).first() is None:
+                raise ConflictError(f"target_scope_id {spec.target_scope_id} does not match any industry")
 
         if spec.target_scope_id is not None:
-            if spec.target_type not in ("driver_bias", "factor_score"):
+            if spec.target_type not in ("driver_bias", "factor_score", "event"):
                 raise ConflictError(
                     f"target_scope_id is not applicable to target_type '{spec.target_type}'"
                 )
-            company_exists = db.query(Company.id).filter_by(id=spec.target_scope_id).first()
-            if company_exists is None:
-                raise ConflictError(f"target_scope_id {spec.target_scope_id} does not match any company")
+            if spec.target_type != "event":
+                scope_type = spec.target_scope_type or "company"
+                model = Company if scope_type == "company" else Industry
+                if db.query(model.id).filter_by(id=spec.target_scope_id).first() is None:
+                    raise ConflictError(f"target_scope_id {spec.target_scope_id} does not match any {scope_type}")
 
 
 def create_branch(
@@ -204,6 +229,27 @@ def create_branch(
     )
     db.add(new_state)
 
+    # Freeze the owner's portfolio composition at the branch point so every
+    # scenario reports a genuine portfolio impact using scenario prices.
+    if user_id is not None:
+        parent_portfolio = db.query(Portfolio).filter_by(user_id=user_id, timeline_id=parent_id).first()
+        if parent_portfolio is not None:
+            branch_portfolio = Portfolio(
+                user_id=user_id,
+                timeline_id=timeline.id,
+                cash_balance=parent_portfolio.cash_balance,
+                total_value=parent_portfolio.total_value,
+            )
+            db.add(branch_portfolio)
+            db.flush()
+            for holding in db.query(Holding).filter_by(portfolio_id=parent_portfolio.id).all():
+                db.add(Holding(
+                    portfolio_id=branch_portfolio.id,
+                    company_id=holding.company_id,
+                    quantity=holding.quantity,
+                    avg_cost_basis=holding.avg_cost_basis,
+                ))
+
     # MoatSubscore/FinancialQualitySubscore are timeline-scoped tables that
     # only ever get rows via db/seeds/seed_companies.py (live timeline) or
     # event write-back (engine/orchestrator.py's _apply_factor_effects_to_
@@ -271,13 +317,88 @@ def create_branch(
             target_type=spec.target_type,
             target_key=spec.target_key,
             target_scope_id=spec.target_scope_id,
+            target_scope_type=spec.target_scope_type,
             override_value=spec.override_value,
             effective_from_sim_date=spec.effective_from_sim_date,
             effective_to_sim_date=spec.effective_to_sim_date,
         ))
+        if spec.target_type == "event":
+            event = db.query(MarketEvent).filter_by(id=int(spec.target_key)).one()
+            expires_on = spec.effective_to_sim_date or (
+                spec.effective_from_sim_date + timedelta(days=event.duration_days)
+            )
+            db.add(EventInstance(
+                event_id=event.id,
+                timeline_id=timeline.id,
+                scope_ref=spec.target_scope_id or 0,
+                scope_type=event.scope,
+                sim_date=spec.effective_from_sim_date,
+                resolved_severity=float(spec.override_value),
+                applied_effects=event.effect_profile,
+                expires_on=expires_on,
+            ))
 
     db.flush()
     return timeline
+
+
+def create_ensemble(
+    db: Session,
+    user_id: Optional[int],
+    request,
+) -> tuple[TimelineGroup, list[Timeline]]:
+    """Persist an ensemble group and fully independent child branches.
+
+    Sensitivity members vary one validated override. Monte Carlo members keep
+    the same inputs and receive deterministic, distinct seeds derived from the
+    requested base seed. No result is inferred here: each child is later run
+    through ``run_ensemble_member_job`` and aggregates read persisted rows.
+    """
+    from apps.api.schemas import TimelineOverrideSpec
+
+    primitive = request.primitive
+    group = TimelineGroup(owner_user_id=user_id, primitive=primitive, label=request.label or request.name)
+    db.add(group)
+    db.flush()
+    if primitive == "sensitivity_sweep":
+        values = list(request.sweep_values or [])
+    else:
+        values = list(range(request.member_count))
+    children: list[Timeline] = []
+    base_seed = request.rng_seed
+    for index, sweep_value in enumerate(values):
+        seed = (base_seed + index) if base_seed is not None else None
+        overrides = list(request.overrides or [])
+        if primitive == "sensitivity_sweep":
+            # The wizard supplies the swept override as its configuration;
+            # replace it per member instead of inserting a duplicate row.
+            template_override = next((o for o in overrides if o.target_type == request.sweep_target_type and o.target_key == request.sweep_target_key), None)
+            overrides = [o for o in overrides if not (o.target_type == request.sweep_target_type and o.target_key == request.sweep_target_key)]
+            overrides.append(TimelineOverrideSpec(
+                target_type=request.sweep_target_type,
+                target_key=request.sweep_target_key,
+                override_value=str(sweep_value),
+                effective_from_sim_date=request.branch_point_sim_date,
+                effective_to_sim_date=template_override.effective_to_sim_date if template_override else None,
+                target_scope_id=template_override.target_scope_id if template_override else None,
+                target_scope_type=template_override.target_scope_type if template_override else None,
+            ))
+        child = create_branch(
+            db, user_id=user_id, name=f"{request.name} · {index + 1:03d}",
+            parent_id=request.parent_timeline_id, branch_date=request.branch_point_sim_date,
+            rng_seed=seed, primitive=primitive, overrides=[OverrideSpec(
+                target_type=o.target_type, target_key=o.target_key,
+                override_value=o.override_value, effective_from_sim_date=o.effective_from_sim_date,
+                target_scope_id=o.target_scope_id, effective_to_sim_date=o.effective_to_sim_date,
+                target_scope_type=o.target_scope_type,
+            ) for o in overrides],
+        )
+        child.timeline_group_id = group.id
+        child.sweep_param = request.sweep_target_key if primitive == "sensitivity_sweep" else "rng_seed"
+        child.sweep_value = str(sweep_value if primitive == "sensitivity_sweep" else child.rng_seed)
+        children.append(child)
+    db.flush()
+    return group, children
 
 
 def estimate_branch_cost(db: Session, parent_id: int, fast_forward_days: int) -> dict:
@@ -298,10 +419,10 @@ def estimate_branch_cost(db: Session, parent_id: int, fast_forward_days: int) ->
     }
 
 
-def extend_timeline(db: Session, timeline_id: int, additional_days: int) -> Timeline:
+def extend_timeline(db: Session, timeline_id: int, additional_days: int, *, persist_progress: bool = False) -> Timeline:
     """Fast-forward an existing (already-created) branch by `additional_days`
     more ticks. Runs synchronously in this v1 -- see Phase 4 for the
-    Celery-backed async wrapper that calls this from a worker task."""
+    asynchronous wrapper that calls this from the bounded worker pool."""
     timeline = db.query(Timeline).filter_by(id=timeline_id).first()
     if timeline is None:
         raise NotFoundError(f"Timeline {timeline_id} not found")
@@ -309,13 +430,32 @@ def extend_timeline(db: Session, timeline_id: int, additional_days: int) -> Time
         raise ConflictError("additional_days must be > 0")
 
     timeline.status = "running"
+    timeline.requested_ticks = additional_days
+    timeline.completed_ticks = 0
+    timeline.failure_error = None
+    timeline.recovery_action = None
     db.flush()
     try:
-        run_ticks(db, timeline_id, num_ticks=additional_days)
+        if persist_progress:
+            # Small committed chunks make progress visible to SSE clients and
+            # bound the work lost if the single API process is restarted.
+            remaining = additional_days
+            while remaining:
+                chunk = min(5, remaining)
+                run_ticks(db, timeline_id, num_ticks=chunk)
+                timeline.completed_ticks += chunk
+                timeline.last_touched_at = datetime.now(timezone.utc)
+                db.commit()
+                remaining -= chunk
+        else:
+            run_ticks(db, timeline_id, num_ticks=additional_days)
+            timeline.completed_ticks = additional_days
         notification_service.evaluate_price_alerts(db, timeline_id)
         notification_service.evaluate_watchlist_movers(db, timeline_id)
-    except Exception:
+    except Exception as exc:
         timeline.status = "failed"
+        timeline.failure_error = str(exc)[:2000]
+        timeline.recovery_action = "Review the failed tick inputs, correct the scenario, then duplicate or rerun the branch."
         db.flush()
         raise
     timeline.status = "ready"
@@ -352,6 +492,11 @@ def get_timeline_status(db: Session, timeline_id: int) -> dict:
         "current_sim_date": state.current_sim_date if state else None,
         "tick_count": state.tick_count if state else None,
         "last_touched_at": timeline.last_touched_at,
+        "requested_ticks": timeline.requested_ticks,
+        "completed_ticks": timeline.completed_ticks,
+        "progress_pct": (100.0 * timeline.completed_ticks / timeline.requested_ticks) if timeline.requested_ticks else (100.0 if timeline.status == "ready" else 0.0),
+        "failure_error": timeline.failure_error,
+        "recovery_action": timeline.recovery_action,
     }
 
 
@@ -372,11 +517,11 @@ def diff_timelines(db: Session, left_id: int, right_id: int) -> list[dict]:
         raise NotFoundError(f"Timeline {right_id} not found")
 
     left_rows = {
-        (o.target_type, o.target_key, o.target_scope_id): o.override_value
+        (o.target_type, o.target_key, o.target_scope_type, o.target_scope_id): o.override_value
         for o in db.query(TimelineOverride).filter_by(timeline_id=left_id).all()
     }
     right_rows = {
-        (o.target_type, o.target_key, o.target_scope_id): o.override_value
+        (o.target_type, o.target_key, o.target_scope_type, o.target_scope_id): o.override_value
         for o in db.query(TimelineOverride).filter_by(timeline_id=right_id).all()
     }
 
@@ -386,11 +531,12 @@ def diff_timelines(db: Session, left_id: int, right_id: int) -> list[dict]:
         rv = right_rows.get(key)
         if lv == rv:
             continue
-        target_type, target_key, target_scope_id = key
+        target_type, target_key, target_scope_type, target_scope_id = key
         entries.append({
             "target_type": target_type,
             "target_key": target_key,
             "target_scope_id": target_scope_id,
+            "target_scope_type": target_scope_type,
             "left_value": lv,
             "right_value": rv,
         })

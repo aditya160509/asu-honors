@@ -197,6 +197,44 @@ def test_delete_live_timeline_conflict(client, test_db, test_timeline, auth_head
 # ── /sim/timeline-groups/{id} ────────────────────────────────────────────
 
 
+def test_create_sensitivity_group_records_supported_audit_action(
+    client, test_db, test_timeline, auth_headers, monkeypatch,
+):
+    """Regression: the group route used an audit action omitted from the
+    service allow-list, rolling the complete ensemble transaction back as a
+    500 after all child timelines had been cloned successfully."""
+    from apps.api import background_jobs
+    from db.models import AuditLog
+
+    monkeypatch.setattr(background_jobs, "available", lambda: True)
+    monkeypatch.setattr(background_jobs, "submit", lambda *args, **kwargs: None)
+    response = client.post(
+        "/api/v1/sim/timeline-groups",
+        headers=auth_headers,
+        json={
+            "name": "Sensitivity QA",
+            "parent_timeline_id": test_timeline.id,
+            "branch_point_sim_date": "2026-01-02",
+            "primitive": "sensitivity_sweep",
+            "fast_forward_days": 0,
+            "rng_seed": 42,
+            "sweep_target_type": "driver_bias",
+            "sweep_target_key": "technical_momentum",
+            "sweep_values": [-0.5, 0.5],
+            "overrides": [{
+                "target_type": "driver_bias",
+                "target_key": "technical_momentum",
+                "override_value": "0",
+                "effective_from_sim_date": "2026-01-02",
+            }],
+        },
+    )
+    assert response.status_code == 201
+    assert len(response.json()["timelines"]) == 2
+    audit = test_db.query(AuditLog).filter_by(action="create_timeline_group").one()
+    assert audit.after_value["members"] == 2
+
+
 def test_get_timeline_group(client, test_db, test_timeline, auth_headers, test_user):
     group = TimelineGroup(owner_user_id=test_user.id, primitive="monte_carlo", label="Test Ensemble")
     test_db.add(group)
@@ -338,14 +376,14 @@ def test_audit_log_requires_admin(client, test_db, auth_headers):
     assert resp.status_code == 403
 
 
-# ── async fast-forward dispatch (Phase 4 — Celery) ───────────────────────
+# ── in-process background fast-forward dispatch ──────────────────────────
 
 
 def test_create_timeline_with_fast_forward_dispatches_and_completes(
     client, test_db, test_timeline, test_company, auth_headers, base_config,
 ):
     """POST /sim/timelines with fast_forward_days > 0 dispatches
-    apps.api.tasks.run_fast_forward_job. In tests Celery runs eager/inline
+    apps.api.tasks.run_fast_forward_job. In tests the worker runs eager/inline
     (see conftest.py's client fixture), so by the time this request returns
     the branch has already been fast-forwarded -- confirms the task
     actually ran against the same DB the test asserts against, not a
@@ -406,15 +444,17 @@ def test_create_timeline_negative_fast_forward_days_rejected(client, test_db, te
 def test_create_timeline_marks_failed_when_no_worker_is_listening(
     client, test_db, test_timeline, auth_headers,
 ):
-    """Regression test for the production incident: if no Celery worker
+    """If the in-process executor is unavailable, the branch must not stick.
     responds to the pre-dispatch liveness ping, the branch must NOT be left
     stuck at status='pending' forever with no signal anything went wrong --
     it should be marked 'failed' immediately (see
     apps.api.routers.simulation.create_timeline's docstring)."""
-    from apps.api.celery_app import celery_app
+    from apps.api import background_jobs
 
-    original_ping = celery_app.control.ping
-    celery_app.control.ping = lambda *a, **kw: []  # simulates no worker responding
+    original_eager = background_jobs._eager
+    original_executor = background_jobs._executor
+    background_jobs._eager = False
+    background_jobs._executor = None
     try:
         resp = client.post(
             "/api/v1/sim/timelines",
@@ -427,7 +467,8 @@ def test_create_timeline_marks_failed_when_no_worker_is_listening(
             headers=auth_headers,
         )
     finally:
-        celery_app.control.ping = original_ping
+        background_jobs._eager = original_eager
+        background_jobs._executor = original_executor
 
     assert resp.status_code == 201
     body = resp.json()

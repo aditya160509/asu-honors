@@ -1,5 +1,6 @@
 """Application settings loaded from environment variables (Phase 5 plan section 1)."""
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -9,7 +10,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     database_url: str = "postgresql+psycopg://stocksim:stocksim@localhost:5432/stocksim"
-    redis_url: str = "redis://localhost:6379/0"
+    background_worker_threads: int = 1
+    authentication_disabled: bool = False
     secret_key: str
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 15
@@ -37,6 +39,16 @@ class Settings(BaseSettings):
     # requirement.
     openrouter_api_key: str = ""
     ai_model: str = "poolside/laguna-s-2.1:free"
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def use_psycopg3_driver(cls, value: str) -> str:
+        """Normalize managed-host PostgreSQL URLs for SQLAlchemy/Psycopg 3."""
+        if value.startswith("postgres://"):
+            return value.replace("postgres://", "postgresql+psycopg://", 1)
+        if value.startswith("postgresql://"):
+            return value.replace("postgresql://", "postgresql+psycopg://", 1)
+        return value
 
 
 settings = Settings()

@@ -52,6 +52,10 @@ class Timeline(Base, TimestampMixin):
     status: Mapped[str] = mapped_column(String(20), default="ready", nullable=False)
     pinned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     last_touched_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    requested_ticks: Mapped[int] = mapped_column(default=0, server_default="0", nullable=False)
+    completed_ticks: Mapped[int] = mapped_column(default=0, server_default="0", nullable=False)
+    failure_error: Mapped[Optional[str]] = mapped_column(String(2000))
+    recovery_action: Mapped[Optional[str]] = mapped_column(String(500))
     expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
     __table_args__ = (
