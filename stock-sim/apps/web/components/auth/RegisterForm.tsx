@@ -8,8 +8,9 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { CheckCircle2 } from "lucide-react";
 import { AuthInput } from "@/components/auth/AuthInput";
 import { AuthBanner } from "@/components/auth/AuthBanner";
-import { useRegister } from "@/lib/api/hooks/useAuth";
+import { useLogin, useRegister } from "@/lib/api/hooks/useAuth";
 import { ApiError } from "@/lib/api/client";
+import { useAuth } from "@/components/layout/AuthContext";
 
 const registerSchema = z
   .object({
@@ -27,6 +28,8 @@ type RegisterValues = z.infer<typeof registerSchema>;
 export function RegisterForm() {
   const router = useRouter();
   const registerMutation = useRegister();
+  const loginMutation = useLogin();
+  const { setHasToken } = useAuth();
   const [serverError, setServerError] = React.useState<string | null>(null);
 
   const {
@@ -43,30 +46,35 @@ export function RegisterForm() {
   const passwordValue = watch("password");
   const passwordSatisfied = passwordValue.length >= 8;
 
-  function submit(values: RegisterValues) {
+  async function submit(values: RegisterValues) {
     setServerError(null);
-    return new Promise<void>((resolve) => {
-      registerMutation.mutate(
-        { email: values.email, password: values.password },
-        {
-          onSuccess: () => {
-            router.push("/login?registered=1");
-            resolve();
-          },
-          onError: (error) => {
-            if (error instanceof ApiError && error.status === 409) {
-              setServerError("An account with this email already exists. Try signing in instead.");
-            } else {
-              setServerError("Something went wrong on our end. Please try again.");
-            }
-            resolve();
-          },
-        }
-      );
-    });
+    let accountCreated = false;
+    try {
+      await registerMutation.mutateAsync({ email: values.email, password: values.password });
+      accountCreated = true;
+      await loginMutation.mutateAsync({
+        email: values.email,
+        password: values.password,
+        remember: true,
+      });
+      setHasToken(true);
+      router.replace("/market");
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 409) {
+        setServerError("An account with this email already exists. Try signing in instead.");
+      } else if (error instanceof ApiError && error.status === 403 && error.message === "email_unverified") {
+        router.replace(`/verify-email?email=${encodeURIComponent(values.email)}`);
+      } else {
+        setServerError(
+          accountCreated
+            ? "Your account was created, but automatic sign-in failed. Please try again."
+            : "Something went wrong on our end. Please try again."
+        );
+      }
+    }
   }
 
-  const isWorking = isSubmitting || registerMutation.isPending;
+  const isWorking = isSubmitting || registerMutation.isPending || loginMutation.isPending;
 
   return (
     <form onSubmit={handleSubmit(submit)} noValidate className="flex flex-col gap-4 w-full max-w-sm">
