@@ -478,6 +478,32 @@ def test_get_orders_status_filter(client, test_db, test_company, test_portfolio,
     assert len(all_resp.json()) == 2
 
 
+def test_realism_profile_uses_depth_partial_fills_and_slippage(
+    client, test_db, test_company, test_portfolio, test_admin, auth_headers, admin_auth_headers
+):
+    """Opting in to a realism profile makes execution consume finite depth."""
+    test_portfolio.cash_balance = 10_000_000
+    test_db.commit()
+    profile = client.put(
+        "/api/v1/sim/admin/realism-profile",
+        json={"timeline_id": 1, "preset": "institutional"},
+        headers=admin_auth_headers,
+    )
+    assert profile.status_code == 200
+    assert profile.json()["parameters"]["legacy_pricing"] is False
+
+    response = client.post(
+        "/api/v1/orders",
+        json={"ticker": "TST", "side": "buy", "quantity": 10_000},
+        headers=auth_headers,
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["status"] == "partially_filled"
+    assert 0 < body["filled_quantity"] < body["quantity"]
+    assert float(body["price"]) > 100.0
+
+
 def test_check_and_fill_limit_orders_fills_when_price_crosses(test_db, test_company, test_portfolio, test_user):
     """Unit-level test of the fill-on-advance hook, independent of the full
     simulation engine: place a non-crossing limit order, move current_price

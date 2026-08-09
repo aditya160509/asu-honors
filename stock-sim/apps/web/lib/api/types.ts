@@ -172,13 +172,92 @@ export interface CycleStateResponse {
   market_sentiment: number;
 }
 
+export type MarketSessionPhase = "closed" | "pre_market" | "open_auction" | "open" | "close_auction" | "after_hours";
+export type MarketSessionStatus = "scheduled" | "open" | "halted" | "closed";
+
+export interface MarketSessionResponse {
+  id: number;
+  timeline_id: number;
+  sim_date: string;
+  phase: MarketSessionPhase;
+  status: MarketSessionStatus;
+  session_start: string;
+  session_end: string;
+  current_tick: number;
+  total_ticks: number;
+  opening_auction_price: number | null;
+  closing_auction_price: number | null;
+  halt_reason: string | null;
+  halt_until: string | null;
+  volatility_pause_count: number;
+}
+
+export interface MarketOrderBookLevel {
+  price: number;
+  quantity: number;
+}
+
+export interface MarketOrderBookResponse {
+  timeline_id: number;
+  company_id: number;
+  ticker: string;
+  sim_date: string;
+  tick_index: number;
+  tick_at: string;
+  phase: string;
+  mid_price: number;
+  bid_price: number;
+  ask_price: number;
+  spread_bps: number;
+  bid_size: number;
+  ask_size: number;
+  volume: number;
+  order_imbalance: number;
+  slippage_bps: number;
+  regime: string;
+  is_halted: boolean;
+  halt_reason: string | null;
+  depth: {
+    bids?: MarketOrderBookLevel[];
+    asks?: MarketOrderBookLevel[];
+    total_bid_depth?: number;
+    total_ask_depth?: number;
+  };
+}
+
+export interface MarketRegimeResponse {
+  timeline_id: number;
+  sim_date: string;
+  regime: string;
+  realized_volatility: number;
+  market_return: number;
+  breadth: number;
+  liquidity_index: number;
+  drawdown: number;
+  sector_leadership: Record<string, number>;
+}
+
+export interface MarketNewsBulletinResponse {
+  id: number;
+  timeline_id: number;
+  sim_date: string;
+  event_type: string;
+  headline: string;
+  body: string;
+  sentiment: string;
+  severity: number;
+  source: string;
+  source_event_id: number | null;
+  payload: Record<string, unknown>;
+}
+
 // ---------------------------------------------------------------------------
 // Trading
 // ---------------------------------------------------------------------------
 
 export type OrderSide = "buy" | "sell";
 export type OrderType = "market" | "limit";
-export type OrderStatus = "open" | "filled" | "cancelled";
+export type OrderStatus = "open" | "partially_filled" | "filled" | "cancelled";
 
 export interface OrderRequest {
   ticker: string;

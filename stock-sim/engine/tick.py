@@ -39,6 +39,8 @@ class TickState:
     market_factor_return: float
     companies: tuple[CompanyTickInput, ...] = field(default_factory=tuple)
     pressure_scale: float = 1.0
+    volatility_multiplier: float = 1.0
+    liquidity_multiplier: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -60,7 +62,8 @@ def run_tick(state: TickState, k_drift: float = 0.03) -> TickResult:
     # company during the same cycle phase) the raw move overshoots the circuit
     # breaker's r_cap and gets clipped identically for every company, producing
     # lockstep price action regardless of company-specific fundamentals.
-    price_pressures = state.pressure_scale * np.array(
+    liquidity_impact = 1.0 / max(0.10, float(state.liquidity_multiplier))
+    price_pressures = state.pressure_scale * liquidity_impact * np.array(
         [composite_price_pressure(c.driver_values, c.driver_weights) for c in state.companies]
     )
     y = np.array([c.y for c in state.companies])
@@ -68,7 +71,7 @@ def run_tick(state: TickState, k_drift: float = 0.03) -> TickResult:
     beta_m = np.array([c.beta_market for c in state.companies])
     beta_s = np.array([c.beta_sector for c in state.companies])
     f_s = np.array([c.sector_factor_return for c in state.companies])
-    sigma = np.array([c.sigma for c in state.companies])
+    sigma = np.array([c.sigma for c in state.companies]) * max(0.01, state.volatility_multiplier)
     epsilon = np.array([c.epsilon for c in state.companies])
     iv = np.array([c.intrinsic_value for c in state.companies])
 

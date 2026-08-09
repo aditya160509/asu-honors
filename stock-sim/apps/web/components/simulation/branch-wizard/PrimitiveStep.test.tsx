@@ -13,6 +13,7 @@ function baseState(overrides: Partial<BranchWizardState> = {}): BranchWizardStat
     scenarioTemplateId: null,
     overrides: [],
     fastForwardDays: 0,
+    rngSeed: null,
     ...overrides,
   };
 }

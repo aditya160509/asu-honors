@@ -34,6 +34,8 @@ from db.models import (
     ConCall,
     ConfigParameter,
     ConsensusEstimate,
+    CorporateAction,
+    EconomicCalendarEvent,
     EconomicCycleState,
     EventInstance,
     FactorDefinition,
@@ -48,14 +50,17 @@ from db.models import (
     Portfolio,
     PriceDriverScore,
     PriceHistory,
+    MarketRegimeState,
     SimulationState,
     Timeline,
+    TimelineCompanyState,
     TimelineOverride,
 )
 from db.timeline_resolver import (
     get_latest_intrinsic_values, get_latest_prices, get_latest_prices_and_ivs,
     get_timeline_chain, resolve_latest_cycle_state,
 )
+from apps.api.services import realism_service
 from engine.concalls import generate_concall
 from engine.cycle import advance_cycle_phase, compute_cycle_state, generate_sector_shocks
 from engine.drivers import (
@@ -115,6 +120,15 @@ from engine.scoring import (
     percentile_rank_scores,
 )
 from engine.tick import CompanyTickInput, CompanyTickOutput, TickResult, TickState, run_tick as engine_run_tick
+from engine.realism import (
+    MarketRegime,
+    classify_regime,
+    generate_flows,
+    generate_market_shock,
+    get_preset,
+    no_market_shock,
+    regime_parameters,
+)
 from engine.valuation import (
     DEFAULT_BASELINE_PE,
     DEFAULT_GROWTH_RATE_MAX,
@@ -278,6 +292,16 @@ class TickStateArrays:
     # Per-tick RNG (seeded from timeline.rng_seed + tick_count)
     rng_offset: int = 0
 
+    # Market-realism state.  Defaults preserve the legacy bulk price path until
+    # a profile is explicitly selected, while quote/flow/replay persistence is
+    # still enabled for every timeline.
+    realism_profile: object = None
+    realism_regime: MarketRegime = MarketRegime.SIDEWAYS
+    realism_multipliers: dict[str, float] = field(default_factory=lambda: {"drift": 1.0, "volatility": 1.0, "liquidity": 1.0})
+    legacy_pricing: bool = True
+    timeline_company_states: dict[int, TimelineCompanyState] = field(default_factory=dict)
+    market_shock: object = None
+
     # Quarter boundary tracking
     is_quarter_boundary: bool = False
 
@@ -372,6 +396,15 @@ def run_ticks(
                 datetime.now(timezone.utc), state.rng, tick_count,
                 sim_date, state.timeline.is_live,
             )
+            realism_service.evolve_timeline_fundamentals(
+                session,
+                timeline_id,
+                sim_date,
+                tick_count,
+                macro_growth=float(state.cycle_state.get("gdp_growth", 0.0)),
+                interest_rate=float(state.cycle_state.get("interest_rate", 0.0)),
+                event_surprise=sum(float(item["impact"].normalized_surprise) for item in state.macro_releases),
+            )
             _generate_concalls_for_quarter(
                 session, timeline_id, companies, state.latest_cfs, sim_date, state.rng, tick_count,
             )
@@ -454,16 +487,27 @@ def run_ticks(
 
         tick_state = TickState(
             sim_day=tick_count,
-            market_factor_return=state.f_m,
+            market_factor_return=state.f_m * float(state.realism_multipliers.get("drift", 1.0)),
             companies=tick_inputs,
             pressure_scale=float(state.params.get("k_drift", 0.03)),
+            volatility_multiplier=float(state.realism_multipliers.get("volatility", 1.0)),
+            liquidity_multiplier=float(state.realism_multipliers.get("liquidity", 1.0)),
         )
         tick_result = engine_run_tick(tick_state, k_drift=1.0)
 
         # -- Circuit breaker + OHLC + volume --------------------------------
         _t5 = time.perf_counter()
+        pricing_params = state.params
+        if not state.legacy_pricing:
+            from engine.realism import get_preset
+
+            pricing_params = dict(state.params)
+            pricing_params["r_cap"] = min(
+                float(state.params.get("r_cap", 0.20)),
+                get_preset(state.realism_profile.preset).circuit_breaker_pct,
+            )
         ohlc_results, volume_results, imbalance_results = _update_prices_and_ohlc(
-            companies, company_by_id, tick_result, state.params, state.prev_ns, company_ns, state.rng, tick_count,
+            companies, company_by_id, tick_result, pricing_params, state.prev_ns, company_ns, state.rng, tick_count,
             state.price_overlay,
         )
 
@@ -482,6 +526,25 @@ def run_ticks(
 
         # -- Mark to market -------------------------------------------------
         _mark_to_market(session, timeline_id, ohlc_results)
+
+        # -- Persist market-realism observations ---------------------------
+        # The daily bar remains the canonical historical price series.  This
+        # append-only layer records the quote/depth snapshot, regime, flow, and
+        # replay fingerprint that explain how that bar was produced.
+        realism_service.record_daily_market_state(
+            session,
+            timeline_id,
+            sim_date,
+            tick_count,
+            price_by_company={cid: float(values["close"]) for cid, values in ohlc_results.items()},
+            volume_by_company=volume_results,
+            liquidity_by_company={
+                cid: float(company_by_id[cid].market_liquidity_score or 50.0)
+                for cid in ohlc_results
+                if cid in company_by_id
+            },
+            market_shock=state.market_shock,
+        )
 
         # -- Fire events + generate news ------------------------------------
         _t8 = time.perf_counter()
@@ -621,6 +684,43 @@ def _load_tick_state(
         active_overrides.get("config", []),
     )
 
+    # Market realism state is timeline-local and created lazily so old seeded
+    # timelines remain valid.  The first use also installs a deterministic
+    # economic calendar; releases and corporate actions are applied only after
+    # the idempotency check in run_ticks, so a retry cannot double-apply them.
+    realism_profile = realism_service.get_or_create_profile(session, timeline_id)
+    if session.query(EconomicCalendarEvent).filter_by(timeline_id=timeline_id).count() == 0:
+        realism_service.create_default_economic_calendar(session, timeline_id, sim_date)
+    legacy_pricing = bool(realism_profile.parameters.get("legacy_pricing", True))
+    prior_regime_row = (
+        session.query(MarketRegimeState)
+        .filter_by(timeline_id=timeline_id)
+        .order_by(MarketRegimeState.sim_date.desc())
+        .first()
+    )
+    prior_regime = MarketRegime(prior_regime_row.regime) if prior_regime_row is not None else MarketRegime.SIDEWAYS
+    market_shock = (
+        no_market_shock()
+        if legacy_pricing
+        else generate_market_shock(
+            int(realism_profile.seed), timeline_id, sim_date, tick_count, realism_profile.preset, prior_regime,
+        )
+    )
+    macro_releases = (
+        []
+        if legacy_pricing
+        else realism_service.release_due_economic_events(
+            session, timeline_id, sim_date, int(realism_profile.seed),
+        )
+    )
+    corporate_actions_applied = realism_service.apply_due_corporate_actions(
+        session, timeline_id, sim_date,
+    )
+    macro_market_shock = sum(float(item["impact"].market_return_shock) for item in macro_releases) + market_shock.market_return_shock
+    macro_gdp_shock = sum(float(item["impact"].gdp_change) for item in macro_releases)
+    macro_rate_shock = sum(float(item["impact"].rate_change) for item in macro_releases)
+    macro_inflation_shock = sum(float(item["impact"].inflation_change) for item in macro_releases)
+
     cycle_transition_override: Optional[dict[str, list[tuple[str, float]]]] = None
     for row in active_overrides.get("cycle_transition", []):
         # target_key is the forced phase name; override_value is the shock
@@ -655,6 +755,10 @@ def _load_tick_state(
         prev_phase = prev_cycle.cycle_phase if prev_cycle else "expansion"
         cycle_phase = advance_cycle_phase(prev_phase, rng, cycle_transition_override)
         cycle_state = compute_cycle_state(cycle_phase, rng)
+        cycle_state["market_factor_return"] += macro_market_shock
+        cycle_state["gdp_growth"] += macro_gdp_shock
+        cycle_state["interest_rate"] += macro_rate_shock
+        cycle_state["market_sentiment"] += macro_inflation_shock * -0.05
         cycle_row = EconomicCycleState(
             timeline_id=timeline_id,
             sim_date=sim_date,
@@ -673,6 +777,10 @@ def _load_tick_state(
             "interest_rate": float(latest_cycle.interest_rate),
             "market_sentiment": float(latest_cycle.market_sentiment),
         }
+        cycle_state["market_factor_return"] += macro_market_shock
+        cycle_state["gdp_growth"] += macro_gdp_shock
+        cycle_state["interest_rate"] += macro_rate_shock
+        cycle_state["market_sentiment"] += macro_inflation_shock * -0.05
 
     f_m = cycle_state["market_factor_return"]
 
@@ -710,6 +818,17 @@ def _load_tick_state(
     iv_overlay: dict[int, float] = {
         cid: float(iv) for cid, iv in iv_overlay_raw.items()
     }
+    # Corporate actions are applied before the day's pricing inputs are
+    # computed.  The action service stores the post-action quote in its
+    # payload so the timeline-local price overlay can reflect dividends,
+    # splits, mergers, IPOs, and delistings without mutating shared Company
+    # reference data.
+    for action in session.query(CorporateAction).filter_by(
+        timeline_id=timeline_id, effective_date=sim_date, status="applied"
+    ).all():
+        post_price = (action.payload or {}).get("post_action_price")
+        if post_price is not None:
+            price_overlay[action.company_id] = float(post_price)
 
     sector_shocks = generate_sector_shocks(
         industry_ids=industry_ids,
@@ -803,6 +922,25 @@ def _load_tick_state(
         session, timeline_id, sim_date,
     )
 
+    latest_regime = (
+        session.query(MarketRegimeState)
+        .filter_by(timeline_id=timeline_id)
+        .order_by(MarketRegimeState.sim_date.desc())
+        .first()
+    )
+    realism_regime = MarketRegime(latest_regime.regime) if latest_regime is not None else MarketRegime.SIDEWAYS
+    realism_multipliers = (
+        {"drift": 1.0, "volatility": 1.0, "liquidity": 1.0}
+        if legacy_pricing
+        else {
+            **regime_parameters(realism_regime),
+            "liquidity": regime_parameters(realism_regime)["liquidity"] * market_shock.liquidity_multiplier,
+        }
+    )
+    timeline_company_states = {
+        row.company_id: row
+        for row in session.query(TimelineCompanyState).filter_by(timeline_id=timeline_id).all()
+    }
     is_quarter_boundary = tick_count > 0 and tick_count % QUARTER_LENGTH == 0
 
     return SimpleNamespace(
@@ -835,6 +973,14 @@ def _load_tick_state(
         industry_events=industry_events,
         company_events=company_events,
         event_defs=event_defs,
+        realism_profile=realism_profile,
+        realism_regime=realism_regime,
+        realism_multipliers=realism_multipliers,
+        legacy_pricing=legacy_pricing,
+        macro_releases=macro_releases,
+        corporate_actions_applied=corporate_actions_applied,
+        market_shock=market_shock,
+        timeline_company_states=timeline_company_states,
         is_quarter_boundary=is_quarter_boundary,
     )
 
@@ -905,11 +1051,19 @@ def _compute_drivers(
         return None  # pragma: no cover
 
     y = np.log(max(prev_close, 0.01) / max(iv, 0.01))
+    timeline_company_state = getattr(state, "timeline_company_states", {}).get(company.id)
+    if timeline_company_state is not None and not timeline_company_state.is_listed:
+        return None
+    shares_outstanding = (
+        int(timeline_company_state.shares_outstanding)
+        if timeline_company_state is not None
+        else int(company.shares_outstanding)
+    )
     # market_cap = price * shares_outstanding is re-derived from the
     # timeline-scoped price_overlay here rather than read from
     # company.market_cap (shared/timeline-agnostic cache -- see
     # db/timeline_resolver.py's module docstring).
-    _mcap = max(prev_close * float(company.shares_outstanding), 1e6)
+    _mcap = max(prev_close * float(shares_outstanding), 1e6)
     _log_mcap = math.log(_mcap / 1e9)
     theta_base = float(state.params.get("theta_default", 0.05))
     theta = theta_base * (0.3 + 1.2 * (1 + math.tanh(_log_mcap / 2)) / 2)
@@ -935,7 +1089,8 @@ def _compute_drivers(
     mcap = _mcap
     log_mcap = math.log(mcap / 1e9)
     f_size = 1.3 - 0.3 * math.tanh(log_mcap / 1.5)
-    sigma_val = ind_base_vol * f_size
+    realism_multipliers = getattr(state, "realism_multipliers", {"volatility": 1.0})
+    sigma_val = ind_base_vol * f_size * float(realism_multipliers.get("volatility", 1.0))
     bal = state.latest_bal.get(company.id)
     if bal:
         td = float(bal.total_debt)
@@ -991,7 +1146,25 @@ def _compute_drivers(
         elif miss:
             gd = guidance("cut", min(abs(actual_eps - consensus_eps) / max(abs(consensus_eps), 0.01), 0.5), days_since_earnings, float(state.params.get("guidance_decay_rate", 0.15)))
 
-    ib = institutional_buying(state.rng.uniform(-0.1, 0.1) + state.cycle_state.get("market_sentiment", 0) * 0.05)
+    realism_profile = getattr(state, "realism_profile", None)
+    legacy_pricing = bool(getattr(state, "legacy_pricing", True))
+    if legacy_pricing:
+        ib = institutional_buying(state.rng.uniform(-0.1, 0.1) + state.cycle_state.get("market_sentiment", 0) * 0.05)
+    else:
+        realism_seed = int(getattr(realism_profile, "seed", timeline_id))
+        realism_preset = getattr(realism_profile, "preset", "realistic")
+        realism_regime = getattr(state, "realism_regime", MarketRegime.SIDEWAYS)
+        flow = generate_flows(
+            realism_seed,
+            timeline_id,
+            company.id,
+            tick_count,
+            realism_regime,
+            state.cycle_state.get("market_sentiment", 0.0),
+            float(company.market_liquidity_score or 50.0),
+            realism_preset,
+        )
+        ib = institutional_buying(flow.net_flow * 0.10)
 
     ns = 0.0
     active_events = _get_active_events_for_company(
@@ -3470,15 +3643,26 @@ def _bulk_tick_iteration(
 
     tick_state = TickState(
         sim_day=tick_count,
-        market_factor_return=arrays.f_m,
+        market_factor_return=arrays.f_m * float(arrays.realism_multipliers.get("drift", 1.0)),
         companies=tick_inputs,
         pressure_scale=float(arrays.params.get("k_drift", 0.03)),
+        volatility_multiplier=float(arrays.realism_multipliers.get("volatility", 1.0)),
+        liquidity_multiplier=float(arrays.realism_multipliers.get("liquidity", 1.0)),
     )
     tick_result = engine_run_tick(tick_state, k_drift=1.0)
 
     # ── Circuit breaker + OHLC + volume ──────────────────────────────────
+    price_params = arrays.params
+    if not arrays.legacy_pricing and arrays.realism_profile is not None:
+        price_params = {
+            **arrays.params,
+            "r_cap": min(
+                float(arrays.params.get("r_cap", 0.20)),
+                float(get_preset(arrays.realism_profile.preset).circuit_breaker_pct),
+            ),
+        }
     ohlc_results, volume_results, imbalance_results = _update_prices_and_ohlc(
-        arrays.companies, arrays.company_by_id, tick_result, arrays.params,
+        arrays.companies, arrays.company_by_id, tick_result, price_params,
         arrays.prev_ns, company_ns, rng, tick_count, arrays.price_overlay,
     )
 
@@ -3585,8 +3769,16 @@ def _bulk_compute_drivers(
     if ind is None:
         return None
 
+    timeline_company_state = arrays.timeline_company_states.get(company.id)
+    if timeline_company_state is not None and not timeline_company_state.is_listed:
+        return None
+    shares_outstanding = (
+        int(timeline_company_state.shares_outstanding)
+        if timeline_company_state is not None
+        else int(company.shares_outstanding)
+    )
     y = np.log(max(prev_close, 0.01) / max(iv, 0.01))
-    _mcap = max(prev_close * float(company.shares_outstanding), 1e6)
+    _mcap = max(prev_close * float(shares_outstanding), 1e6)
     _log_mcap = math.log(_mcap / 1e9)
     theta_base = float(arrays.params.get("theta_default", 0.05))
     theta = theta_base * (0.3 + 1.2 * (1 + math.tanh(_log_mcap / 2)) / 2)
@@ -3600,7 +3792,7 @@ def _bulk_compute_drivers(
     mcap = _mcap
     log_mcap = math.log(mcap / 1e9)
     f_size = 1.3 - 0.3 * math.tanh(log_mcap / 1.5)
-    sigma_val = ind_base_vol * f_size
+    sigma_val = ind_base_vol * f_size * float(arrays.realism_multipliers.get("volatility", 1.0))
     bal = arrays.latest_bal.get(company.id)
     if bal:
         td = float(bal.total_debt)
@@ -3645,7 +3837,20 @@ def _bulk_compute_drivers(
             gd = guidance("cut", min(abs(actual_eps - consensus_eps) / max(abs(consensus_eps), 0.01), 0.5),
                            days_since_earnings, float(arrays.params.get("guidance_decay_rate", 0.15)))
 
-    ib = institutional_buying(rng.uniform(-0.1, 0.1) + arrays.cycle_state.get("market_sentiment", 0) * 0.05)
+    if arrays.legacy_pricing:
+        ib = institutional_buying(rng.uniform(-0.1, 0.1) + arrays.cycle_state.get("market_sentiment", 0) * 0.05)
+    else:
+        flow = generate_flows(
+            int(arrays.realism_profile.seed),
+            arrays.timeline_id,
+            company.id,
+            tick_count,
+            arrays.realism_regime,
+            arrays.cycle_state.get("market_sentiment", 0.0),
+            float(company.market_liquidity_score or 50.0),
+            arrays.realism_profile.preset,
+        )
+        ib = institutional_buying(flow.net_flow * 0.10)
 
     ns = 0.0
     active_events = _get_active_events_for_company(
@@ -3831,8 +4036,29 @@ def bulk_run_ticks(
     if sim_state is None:
         raise ValueError(f"No SimulationState for timeline {timeline_id}")
 
+    realism_profile = realism_service.get_or_create_profile(session, timeline_id)
+    arrays_profile_legacy = bool(realism_profile.parameters.get("legacy_pricing", True))
+
     # Load static data
     arrays = _load_static_tick_state(session, timeline_id, timeline)
+    arrays.realism_profile = realism_profile
+    arrays.legacy_pricing = arrays_profile_legacy
+    arrays.timeline_company_states = {
+        row.company_id: row
+        for row in session.query(TimelineCompanyState).filter_by(timeline_id=timeline_id).all()
+    }
+    latest_regime = (
+        session.query(MarketRegimeState)
+        .filter_by(timeline_id=timeline_id)
+        .order_by(MarketRegimeState.sim_date.desc())
+        .first()
+    )
+    arrays.realism_regime = MarketRegime(latest_regime.regime) if latest_regime is not None else MarketRegime.SIDEWAYS
+    arrays.realism_multipliers = (
+        {"drift": 1.0, "volatility": 1.0, "liquidity": 1.0}
+        if arrays_profile_legacy
+        else regime_parameters(arrays.realism_regime)
+    )
 
     # Initialize mutable state from sim_state
     arrays.current_sim_date = sim_state.current_sim_date
@@ -3847,6 +4073,9 @@ def bulk_run_ticks(
         if seeded_baseline_exists:
             sim_date = sim_date + timedelta(days=1)
             arrays.current_sim_date = sim_date
+
+    if not arrays_profile_legacy:
+        realism_service.create_default_economic_calendar(session, timeline_id, sim_date)
 
     # Load price/IV overlays from DB
     latest_prices, latest_ivs = get_latest_prices_and_ivs(
@@ -3937,22 +4166,97 @@ def bulk_run_ticks(
     arrays.cycle_transition_override = cycle_transition_override
 
     results: list[dict] = []
+    realism_daily_outputs: list[
+        tuple[date, int, dict[int, float], dict[int, int], dict[int, float], object]
+    ] = []
 
     # ── Phase 2: Run N ticks in memory ──────────────────────────────────
     for _ in range(num_ticks):
         _t0 = time.perf_counter()
 
+        arrays.market_shock = no_market_shock()
+        if not arrays.legacy_pricing:
+            macro_releases = realism_service.release_due_economic_events(
+                session,
+                timeline_id,
+                arrays.current_sim_date,
+                int(arrays.realism_profile.seed),
+            )
+            for release in macro_releases:
+                impact = release["impact"]
+                arrays.cycle_state["market_factor_return"] += float(impact.market_return_shock)
+                arrays.cycle_state["gdp_growth"] += float(impact.gdp_change)
+                arrays.cycle_state["interest_rate"] += float(impact.rate_change)
+                arrays.cycle_state["market_sentiment"] -= float(impact.inflation_change) * 0.05
+            arrays.f_m = arrays.cycle_state["market_factor_return"]
+            realism_service.apply_due_corporate_actions(session, timeline_id, arrays.current_sim_date)
+            for action in session.query(CorporateAction).filter_by(
+                timeline_id=timeline_id,
+                effective_date=arrays.current_sim_date,
+                status="applied",
+            ).all():
+                post_price = (action.payload or {}).get("post_action_price")
+                if post_price is not None:
+                    arrays.price_overlay[action.company_id] = float(post_price)
+            arrays.market_shock = generate_market_shock(
+                int(arrays.realism_profile.seed),
+                timeline_id,
+                arrays.current_sim_date,
+                arrays.current_tick_count,
+                arrays.realism_profile.preset,
+                arrays.realism_regime,
+            )
+            arrays.cycle_state["market_factor_return"] += float(arrays.market_shock.market_return_shock)
+            arrays.f_m = arrays.cycle_state["market_factor_return"]
+            regime_config = regime_parameters(arrays.realism_regime)
+            arrays.realism_multipliers = {
+                **regime_config,
+                "liquidity": regime_config["liquidity"] * arrays.market_shock.liquidity_multiplier,
+            }
+
         # Quarter boundary: refresh financial statement caches
         if arrays.current_tick_count > 0 and arrays.current_tick_count % QUARTER_LENGTH == 0:
             _bulk_refresh_fundamentals(arrays, session)
+            realism_service.evolve_timeline_fundamentals(
+                session,
+                timeline_id,
+                arrays.current_sim_date,
+                arrays.current_tick_count,
+                macro_growth=float(arrays.cycle_state.get("gdp_growth", 0.0)),
+                interest_rate=float(arrays.cycle_state.get("interest_rate", 0.0)),
+            )
 
         # Apply skip logic: skip events/news/concalls during bulk
         # (handled naturally since we don't call _execute_events in the loop)
+        previous_prices = dict(arrays.price_overlay)
         output = _bulk_tick_iteration(arrays)
 
         # Accumulate deferred buffers
         arrays.price_history_buffer.extend(output.price_history_rows)
         arrays.driver_score_buffer.extend(output.driver_scores)
+        realism_daily_outputs.append(
+            (
+                output.sim_date,
+                output.tick_count,
+                {row["company_id"]: float(row["close"]) for row in output.price_history_rows},
+                {row["company_id"]: int(row["volume"]) for row in output.price_history_rows},
+                {
+                    company.id: float(company.market_liquidity_score or 50.0)
+                    for company in arrays.companies
+                },
+                arrays.market_shock,
+            )
+        )
+
+        if not arrays.legacy_pricing:
+            returns = [
+                (float(row["close"]) - previous_prices.get(row["company_id"], float(row["close"])))
+                / max(previous_prices.get(row["company_id"], float(row["close"])), 0.01)
+                for row in output.price_history_rows
+            ]
+            breadth = sum(1 if value > 0 else -1 if value < 0 else 0 for value in returns) / max(len(returns), 1)
+            snapshot = classify_regime(returns, breadth=breadth, liquidity_index=1.0)
+            arrays.realism_regime = snapshot.regime
 
         # Intermediate flush if flush_interval is set
         if flush_interval is not None and len(arrays.price_history_buffer) >= flush_interval * 150:
@@ -4007,6 +4311,23 @@ def bulk_run_ticks(
         conn = session.connection()
         conn.execute(text("PRAGMA synchronous=NORMAL"))
         conn.execute(text("PRAGMA cache_size=-1000000"))
+
+    # The bulk price path keeps its one-shot write advantage, but realism
+    # observations are still persisted for every completed day after the bars
+    # are durable.  Each service call is idempotent by timeline/date/tick.
+    for daily_date, daily_tick, prices, volumes, liquidities, daily_shock in realism_daily_outputs:
+        realism_service.record_daily_market_state(
+            session,
+            timeline_id,
+            daily_date,
+            daily_tick,
+            prices,
+            volumes,
+            liquidity_by_company=liquidities,
+            market_shock=daily_shock,
+        )
+    if realism_daily_outputs:
+        session.commit()
 
     # ── Phase 4: Post-bulk bookkeeping ──────────────────────────────────
     try:

@@ -118,7 +118,7 @@ def create_order(
 @router.get("/orders", response_model=list[OrderResponse])
 def get_orders(
     timeline_id: int = Query(default=settings.default_timeline_id),
-    status_filter: str | None = Query(default=None, alias="status", pattern="^(open|filled|cancelled)$"),
+    status_filter: str | None = Query(default=None, alias="status", pattern="^(open|partially_filled|filled|cancelled)$"),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[OrderResponse]:

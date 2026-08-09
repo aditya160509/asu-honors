@@ -4,6 +4,18 @@ from db.models.concalls import ConCall
 from db.models.events import EventInstance, MarketEvent, NewsFeed, NewsTemplate
 from db.models.factor_scores import CompanyFactorScore, FinancialQualitySubscore, MoatSubscore
 from db.models.financials import BalanceSheet, CashFlowStatement, ConsensusEstimate, IncomeStatement
+from db.models.market_realism import (
+    CorporateAction,
+    EconomicCalendarEvent,
+    InstitutionalFlow,
+    MarketMicroTick,
+    MarketNewsBulletin,
+    MarketRegimeState,
+    MarketSessionState,
+    ReplayLedger,
+    SimulationProfile,
+    TimelineCompanyState,
+)
 from db.models.price_alerts import PriceAlert
 from db.models.reference import (
     Company,
@@ -73,4 +85,14 @@ __all__ = [
     "UserSession",
     "PasswordResetToken",
     "OtpCode",
+    "SimulationProfile",
+    "MarketSessionState",
+    "MarketMicroTick",
+    "MarketNewsBulletin",
+    "MarketRegimeState",
+    "InstitutionalFlow",
+    "EconomicCalendarEvent",
+    "CorporateAction",
+    "ReplayLedger",
+    "TimelineCompanyState",
 ]

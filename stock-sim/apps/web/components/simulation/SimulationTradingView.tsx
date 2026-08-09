@@ -5,6 +5,7 @@ import { PriceChart } from "@/components/charts/PriceChart";
 import { IndicatorSubChart } from "@/components/charts/IndicatorSubChart";
 import { TickerTape } from "@/components/simulation/TickerTape";
 import { TickerSelector } from "@/components/simulation/TickerSelector";
+import { MarketRealismStrip } from "@/components/market/MarketRealismStrip";
 import { ReplayControls } from "@/components/simulation/ReplayControls";
 import { TimeRangeSelector } from "@/components/simulation/TimeRangeSelector";
 import { SentimentGauge } from "@/components/dashboard/SentimentGauge";
@@ -428,6 +429,12 @@ export function SimulationTradingView() {
           <QuoteStat label="Mkt Cap" value={currentCompany?.market_cap == null ? "--" : formatLarge(currentCompany.market_cap)} />
         </div>}
       </div>
+
+      <MarketRealismStrip
+        ticker={selectedTicker}
+        timelineId={timelineId}
+        simDate={grid?.sim_date ?? simState?.current_sim_date}
+      />
 
       {/* Main Content */}
       <div

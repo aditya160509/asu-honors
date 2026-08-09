@@ -19,16 +19,122 @@ from apps.api.schemas import (
     DriverHistoryItem,
     FinancialStatementResponse,
     MarketGridResponse,
+    MarketNewsBulletinResponse,
+    MarketOrderBookResponse,
+    MarketRegimeResponse,
+    MarketSessionResponse,
     PriceHistoryItem,
     ValuationResponse,
 )
-from apps.api.services import dividend_service, market_service
+from apps.api.services import dividend_service, market_service, realism_service
 from apps.api.services.pdf_service import generate_financial_report_pdf
 from db.models import BalanceSheet, CashFlowStatement, Company, IncomeStatement
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1", tags=["Market Data"])
+
+
+@router.get("/market/session", response_model=MarketSessionResponse)
+def get_market_session(
+    timeline_id: int = Query(default=settings.default_timeline_id),
+    sim_date: Optional[date] = Query(default=None),
+    db: Session = Depends(get_db),
+) -> MarketSessionResponse:
+    return realism_service.get_session_state(db, timeline_id, sim_date)
+
+
+@router.get("/market/regime", response_model=MarketRegimeResponse)
+def get_market_regime(
+    timeline_id: int = Query(default=settings.default_timeline_id),
+    db: Session = Depends(get_db),
+) -> MarketRegimeResponse:
+    return realism_service.get_latest_regime(db, timeline_id)
+
+
+@router.get("/market/order-book/{ticker}", response_model=MarketOrderBookResponse)
+def get_order_book(
+    ticker: str,
+    timeline_id: int = Query(default=settings.default_timeline_id),
+    sim_date: Optional[date] = Query(default=None),
+    tick_index: int = Query(default=0, ge=0, le=390),
+    db: Session = Depends(get_db),
+) -> MarketOrderBookResponse:
+    company = db.query(Company).filter_by(ticker=ticker.upper()).first()
+    if company is None:
+        raise HTTPException(status_code=404, detail=f"Company '{ticker}' not found")
+    row = realism_service.get_order_book_snapshot(db, timeline_id, company.id, sim_date, tick_index)
+    return MarketOrderBookResponse(
+        timeline_id=row.timeline_id,
+        company_id=row.company_id,
+        ticker=company.ticker,
+        sim_date=row.sim_date,
+        tick_index=row.tick_index,
+        tick_at=row.tick_at,
+        phase=row.phase,
+        mid_price=row.mid_price,
+        bid_price=row.bid_price,
+        ask_price=row.ask_price,
+        spread_bps=float(row.spread_bps),
+        bid_size=int(row.bid_size),
+        ask_size=int(row.ask_size),
+        volume=int(row.volume),
+        order_imbalance=float(row.order_imbalance),
+        slippage_bps=float(row.slippage_bps),
+        regime=row.regime,
+        is_halted=row.is_halted,
+        halt_reason=row.halt_reason,
+        depth=row.depth,
+    )
+
+
+@router.get("/companies/{ticker}/micro-ticks")
+def get_company_micro_ticks(
+    ticker: str,
+    timeline_id: int = Query(default=settings.default_timeline_id),
+    sim_date: Optional[date] = Query(default=None),
+    limit: int = Query(default=390, ge=1, le=390),
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    company = db.query(Company).filter_by(ticker=ticker.upper()).first()
+    if company is None:
+        raise HTTPException(status_code=404, detail=f"Company '{ticker}' not found")
+    rows = realism_service.list_micro_ticks(db, timeline_id, company.id, sim_date, limit)
+    return [
+        {
+            "timeline_id": row.timeline_id,
+            "company_id": row.company_id,
+            "ticker": company.ticker,
+            "sim_date": row.sim_date,
+            "tick_index": row.tick_index,
+            "tick_at": row.tick_at,
+            "phase": row.phase,
+            "mid_price": float(row.mid_price),
+            "bid_price": float(row.bid_price),
+            "ask_price": float(row.ask_price),
+            "spread_bps": float(row.spread_bps),
+            "bid_size": int(row.bid_size),
+            "ask_size": int(row.ask_size),
+            "volume": int(row.volume),
+            "order_imbalance": float(row.order_imbalance),
+            "slippage_bps": float(row.slippage_bps),
+            "regime": row.regime,
+            "is_halted": row.is_halted,
+            "halt_reason": row.halt_reason,
+            "depth": row.depth,
+        }
+        for row in rows
+    ]
+
+
+@router.get("/market/news/bulletins", response_model=list[MarketNewsBulletinResponse])
+def get_market_news_bulletins(
+    timeline_id: int = Query(default=settings.default_timeline_id),
+    sim_date: Optional[date] = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+    db: Session = Depends(get_db),
+) -> list:
+    return realism_service.list_market_news(db, timeline_id, sim_date, limit)
 
 
 @router.get("/market", response_model=MarketGridResponse)

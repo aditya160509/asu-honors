@@ -9,8 +9,10 @@ from sqlalchemy.orm import Session
 
 from apps.api.exceptions import ConflictError, InsufficientFundsError, InsufficientSharesError, NotFoundError
 from apps.api.schemas import OrderRequest, OrderResponse, PortfolioAnalyticsResponse, SectorAllocation
-from db.models import Company, ConfigParameter, Holding, Industry, Order, Portfolio, SimulationState, Transaction, User
+from db.models import Company, ConfigParameter, Holding, Industry, MarketMicroTick, Order, Portfolio, PriceHistory, SimulationState, Transaction, User
 from db.timeline_resolver import get_latest_price, get_latest_prices
+from engine.realism import FillResult, build_order_book, execute_market_order, get_preset, stable_seed
+from apps.api.services.realism_service import get_or_create_profile
 
 logger = logging.getLogger(__name__)
 
@@ -36,19 +38,86 @@ def _current_sim_date(db: Session, timeline_id: int) -> date:
 
 def _compute_execution_price(
     db: Session, company: Company, side: str, quantity: int, current_price: Decimal,
+    timeline_id: Optional[int] = None,
+    limit_price: Optional[Decimal] = None,
 ) -> tuple[Decimal, Decimal]:
-    """Return (current_price, 0) — no market-impact adjustment.
+    """Return a depth-aware average execution price and signed impact.
 
     `current_price` must be resolved via db.timeline_resolver.get_latest_price
     for the timeline this order belongs to (NOT company.current_price, which
     is a shared, timeline-agnostic cache overwritten by whichever timeline's
     tick ran most recently -- see db/timeline_resolver.py's module docstring).
-    Kept as a (db, company, side, quantity, current_price) signature -- same
-    shape the impact-adjusted version had -- purely so call sites don't need
-    their own timeline-aware price lookup duplicated; `db`/`side`/`quantity`
-    are currently unused now that there's no impact model to compute.
+    The optional arguments preserve compatibility for direct callers while
+    allowing the order path to enforce limit prices through the synthetic L2
+    book.
     """
-    return current_price, Decimal(0)
+    if timeline_id is None:
+        return current_price, Decimal(0)
+    fill = _book_fill(db, company, timeline_id, side, quantity, current_price, limit_price)
+    if fill.average_price is None:
+        return current_price, Decimal(0)
+    average = Decimal(str(fill.average_price))
+    return average, average - current_price
+
+
+def _book_fill(
+    db: Session,
+    company: Company,
+    timeline_id: int,
+    side: str,
+    quantity: int,
+    current_price: Decimal,
+    limit_price: Optional[Decimal] = None,
+):
+    """Build the latest deterministic book and walk it for one order."""
+
+    profile = get_or_create_profile(db, timeline_id)
+    preset = get_preset(profile.preset)
+    if bool(profile.parameters.get("legacy_pricing", True)):
+        # Preserve the original timeline's exact execution contract until the
+        # user explicitly opts into a realism preset.  New/opted-in timelines
+        # use the full depth walk below.
+        return FillResult(
+            status="filled",
+            requested_quantity=quantity,
+            filled_quantity=quantity,
+            remaining_quantity=0,
+            average_price=float(current_price),
+            total_notional=float(current_price) * quantity,
+            slippage_bps=0.0,
+            levels_consumed=1,
+        )
+    latest_volume = (
+        db.query(PriceHistory.volume)
+        .filter_by(timeline_id=timeline_id, company_id=company.id)
+        .order_by(PriceHistory.sim_date.desc())
+        .first()
+    )
+    volume = int(latest_volume[0]) if latest_volume and latest_volume[0] else 1_000
+    price_float = max(float(current_price), preset.price_floor)
+    adv_shares = max(1.0, volume / price_float)
+    liquidity = float(company.market_liquidity_score or 50.0)
+    volatility = float(company.volatility or 0.02)
+    seed = stable_seed(profile.seed, timeline_id, company.id, "execution_book")
+    book = build_order_book(
+        price_float,
+        adv_shares,
+        volatility,
+        liquidity,
+        seed,
+        preset,
+    )
+    latest_quote = (
+        db.query(MarketMicroTick)
+        .filter_by(timeline_id=timeline_id, company_id=company.id)
+        .order_by(MarketMicroTick.sim_date.desc(), MarketMicroTick.tick_index.desc())
+        .first()
+    )
+    if latest_quote is not None and latest_quote.is_halted:
+        from dataclasses import replace
+
+        book = replace(book, halted=True)
+    return execute_market_order(book, side, quantity, limit_price=limit_price)
 
 
 def _clamp_to_limit(side: str, execution_price: Decimal, limit_price: Decimal) -> Decimal:
@@ -153,13 +222,16 @@ def _fill_order(
     fees: Decimal,
     impact: Decimal,
     sim_date: date,
+    fill_quantity: Optional[int] = None,
 ) -> Optional[Decimal]:
     """Executes the cash/holding mutation + Transaction write for an order that
     is crossing right now (market, or a limit order whose price condition is
     met) — shared by immediate fills in place_order and later fills from
     check_and_fill_limit_orders."""
     realized_pnl: Optional[Decimal] = None
-    quantity = int(order.quantity)
+    quantity = int(fill_quantity if fill_quantity is not None else int(order.quantity) - int(order.filled_quantity))
+    if quantity <= 0:
+        return None
     if order.side == "buy":
         _execute_buy(db, portfolio, holding, company, quantity, execution_price, fees)
     else:
@@ -179,11 +251,19 @@ def _fill_order(
     )
     db.add(txn)
 
-    order.status = "filled"
-    order.filled_quantity = quantity
-    order.avg_fill_price = execution_price
-    order.fees = fees
-    order.filled_at = datetime.now(timezone.utc)
+    prior_filled = int(order.filled_quantity)
+    new_filled = prior_filled + quantity
+    prior_fees = Decimal(str(order.fees or 0))
+    prior_average = Decimal(str(order.avg_fill_price)) if order.avg_fill_price is not None else Decimal(0)
+    order.status = "filled" if new_filled >= int(order.quantity) else "partially_filled"
+    order.filled_quantity = new_filled
+    order.avg_fill_price = (
+        (prior_average * Decimal(prior_filled) + execution_price * Decimal(quantity)) / Decimal(new_filled)
+        if new_filled > 0
+        else execution_price
+    )
+    order.fees = prior_fees + fees
+    order.filled_at = datetime.now(timezone.utc) if order.status == "filled" else None
 
     db.flush()
     return realized_pnl
@@ -246,14 +326,25 @@ def place_order(db: Session, user: User, request: OrderRequest) -> OrderResponse
 
     realized_pnl: Optional[Decimal] = None
     if crosses_now:
-        execution_price, impact = _compute_execution_price(
-            db, company, request.side, request.quantity, current_price,
+        # Validate the user's full requested order against the displayed
+        # market so insufficient cash/shares never become a hidden partial
+        # position.  The actual fill then walks available depth and may leave
+        # a live remainder when the order is larger than the book.
+        _validate_order(portfolio, holding, request.side, request.quantity, current_price, _compute_fees(db, request.quantity, current_price))
+        fill = _book_fill(
+            db, company, timeline_id, request.side, request.quantity, current_price,
+            Decimal(str(request.limit_price)) if request.order_type == "limit" else None,
         )
-        if request.order_type == "limit":
-            execution_price = _clamp_to_limit(request.side, execution_price, Decimal(str(request.limit_price)))
-        fees = _compute_fees(db, request.quantity, execution_price)
-        _validate_order(portfolio, holding, request.side, request.quantity, execution_price, fees)
-        realized_pnl = _fill_order(db, order, portfolio, holding, company, execution_price, fees, impact, sim_date)
+        if fill.average_price is not None and fill.filled_quantity > 0:
+            execution_price = Decimal(str(fill.average_price))
+            if request.order_type == "limit":
+                execution_price = _clamp_to_limit(request.side, execution_price, Decimal(str(request.limit_price)))
+            fees = _compute_fees(db, fill.filled_quantity, execution_price)
+            impact = execution_price - current_price
+            realized_pnl = _fill_order(
+                db, order, portfolio, holding, company, execution_price, fees, impact, sim_date,
+                fill_quantity=fill.filled_quantity,
+            )
     else:
         # Non-crossing limit order: pre-check buying power/shares against the
         # limit price itself (the worst case the user has committed to). Cash
@@ -278,7 +369,7 @@ def cancel_order(db: Session, user: User, order_id: int) -> OrderResponse:
     )
     if order is None:
         raise NotFoundError("Order not found")
-    if order.status != "open":
+    if order.status not in {"open", "partially_filled"}:
         raise ConflictError(f"Order is already {order.status} — cannot cancel")
 
     order.status = "cancelled"
@@ -317,7 +408,7 @@ def check_and_fill_limit_orders(db: Session, timeline_id: int) -> int:
     open_orders = (
         db.query(Order)
         .join(Portfolio, Portfolio.id == Order.portfolio_id)
-        .filter(Portfolio.timeline_id == timeline_id, Order.status == "open", Order.order_type == "limit")
+        .filter(Portfolio.timeline_id == timeline_id, Order.status.in_(("open", "partially_filled")), Order.order_type == "limit")
         .all()
     )
 
@@ -335,21 +426,53 @@ def check_and_fill_limit_orders(db: Session, timeline_id: int) -> int:
 
         portfolio = db.query(Portfolio).filter_by(id=order.portfolio_id).first()
         holding = db.query(Holding).filter_by(portfolio_id=portfolio.id, company_id=company.id).first()
-        execution_price, impact = _compute_execution_price(
-            db, company, order.side, int(order.quantity), current_price,
-        )
-        execution_price = _clamp_to_limit(order.side, execution_price, Decimal(str(order.limit_price)))
-        fees = _compute_fees(db, int(order.quantity), execution_price)
-
+        remaining_quantity = int(order.quantity) - int(order.filled_quantity)
+        if remaining_quantity <= 0:
+            continue
         try:
-            _validate_order(portfolio, holding, order.side, int(order.quantity), execution_price, fees)
+            _validate_order(
+                portfolio,
+                holding,
+                order.side,
+                remaining_quantity,
+                current_price,
+                _compute_fees(db, remaining_quantity, current_price),
+            )
         except (InsufficientFundsError, InsufficientSharesError):
             # Portfolio state changed since the order was placed — leave it
             # open rather than silently cancelling; the user can cancel
             # manually if they no longer want it.
             continue
 
-        _fill_order(db, order, portfolio, holding, company, execution_price, fees, impact, sim_date)
+        fill = _book_fill(
+            db,
+            company,
+            timeline_id,
+            order.side,
+            remaining_quantity,
+            current_price,
+            Decimal(str(order.limit_price)),
+        )
+        if fill.average_price is None or fill.filled_quantity <= 0:
+            continue
+        execution_price = _clamp_to_limit(
+            order.side,
+            Decimal(str(fill.average_price)),
+            Decimal(str(order.limit_price)),
+        )
+        fees = _compute_fees(db, fill.filled_quantity, execution_price)
+        _fill_order(
+            db,
+            order,
+            portfolio,
+            holding,
+            company,
+            execution_price,
+            fees,
+            execution_price - current_price,
+            sim_date,
+            fill_quantity=fill.filled_quantity,
+        )
         filled_count += 1
 
     return filled_count

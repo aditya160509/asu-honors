@@ -3,6 +3,7 @@
 import * as React from "react";
 import { TerminalShell } from "@/components/layout/TerminalShell";
 import { MarketExplorer } from "@/components/market/MarketExplorer";
+import { MarketRealismStrip } from "@/components/market/MarketRealismStrip";
 import { TimeMachineControl } from "@/components/market/TimeMachineControl";
 import { useMarketGrid, useCycleState } from "@/lib/api/hooks/useMarket";
 
@@ -19,18 +20,23 @@ export default function MarketPage() {
 
   return (
     <TerminalShell noPadding>
-      <MarketExplorer
-        companies={data?.companies ?? []}
-        loading={isLoading}
-        error={isError}
-        onRetry={() => refetch()}
-        historicalDate={asOfDate}
-        timeMachine={
-          cycle.data?.sim_date ? (
-            <TimeMachineControl asOfDate={asOfDate} maxDate={cycle.data.sim_date} onDateChange={setAsOfDate} />
-          ) : undefined
-        }
-      />
+      <div className="flex h-full min-h-0 flex-col">
+        <MarketRealismStrip ticker={data?.companies?.[0]?.ticker} simDate={asOfDate ?? cycle.data?.sim_date} compact />
+        <div className="min-h-0 flex-1">
+          <MarketExplorer
+            companies={data?.companies ?? []}
+            loading={isLoading}
+            error={isError}
+            onRetry={() => refetch()}
+            historicalDate={asOfDate}
+            timeMachine={
+              cycle.data?.sim_date ? (
+                <TimeMachineControl asOfDate={asOfDate} maxDate={cycle.data.sim_date} onDateChange={setAsOfDate} />
+              ) : undefined
+            }
+          />
+        </div>
+      </div>
     </TerminalShell>
   );
 }

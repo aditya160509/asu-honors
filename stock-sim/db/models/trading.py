@@ -89,7 +89,7 @@ class Order(Base, TimestampMixin):
     __table_args__ = (
         CheckConstraint("side in ('buy', 'sell')", name="ck_orders_side"),
         CheckConstraint("order_type in ('market', 'limit')", name="ck_orders_type"),
-        CheckConstraint("status in ('open', 'filled', 'cancelled')", name="ck_orders_status"),
+        CheckConstraint("status in ('open', 'partially_filled', 'filled', 'cancelled')", name="ck_orders_status"),
         CheckConstraint("quantity > 0", name="ck_orders_quantity_positive"),
         Index("ix_orders_open_limit", "portfolio_id", "status", "order_type"),
     )

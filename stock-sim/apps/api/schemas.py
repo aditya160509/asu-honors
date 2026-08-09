@@ -855,3 +855,215 @@ class PriceAlertResponse(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+# --------------------------------------------------------------------------
+# Market realism, microstructure, calendar, and replay
+# --------------------------------------------------------------------------
+
+
+class RealismProfileResponse(BaseModel):
+    id: int
+    timeline_id: int
+    preset: str
+    timezone_name: str
+    micro_ticks_per_session: int
+    seed: int
+    version: int
+    parameters: dict
+    is_enabled: bool
+
+    model_config = {"from_attributes": True}
+
+
+class RealismProfileUpdateRequest(BaseModel):
+    timeline_id: int = 1
+    preset: str
+
+    @field_validator("preset")
+    @classmethod
+    def preset_valid(cls, v: str) -> str:
+        allowed = {"educational", "realistic", "institutional", "crisis"}
+        if v not in allowed:
+            raise ValueError(f"preset must be one of {sorted(allowed)}")
+        return v
+
+
+class MarketSessionResponse(BaseModel):
+    id: int
+    timeline_id: int
+    sim_date: date
+    phase: str
+    status: str
+    session_start: datetime
+    session_end: datetime
+    current_tick: int
+    total_ticks: int
+    opening_auction_price: Optional[Decimal] = None
+    closing_auction_price: Optional[Decimal] = None
+    halt_reason: Optional[str] = None
+    halt_until: Optional[datetime] = None
+    volatility_pause_count: int
+
+    model_config = {"from_attributes": True}
+
+
+class MarketDepthLevelResponse(BaseModel):
+    price: float
+    quantity: int
+
+
+class MarketOrderBookResponse(BaseModel):
+    timeline_id: int
+    company_id: int
+    ticker: str
+    sim_date: date
+    tick_index: int
+    tick_at: datetime
+    phase: str
+    mid_price: Decimal
+    bid_price: Decimal
+    ask_price: Decimal
+    spread_bps: float
+    bid_size: int
+    ask_size: int
+    volume: int
+    order_imbalance: float
+    slippage_bps: float
+    regime: str
+    is_halted: bool
+    halt_reason: Optional[str] = None
+    depth: dict
+
+
+class MarketRegimeResponse(BaseModel):
+    timeline_id: int
+    sim_date: date
+    regime: str
+    realized_volatility: float
+    market_return: float
+    breadth: float
+    liquidity_index: float
+    drawdown: float
+    sector_leadership: dict
+
+    model_config = {"from_attributes": True}
+
+
+class IntradaySimulationRequest(BaseModel):
+    timeline_id: int = 1
+    sim_date: date
+    tick_count: Optional[int] = Field(default=None, ge=1, le=390)
+    company_ids: Optional[list[int]] = None
+
+
+class IntradaySimulationResponse(BaseModel):
+    timeline_id: int
+    sim_date: date
+    ticks_created: int
+
+
+class EconomicCalendarCreateRequest(BaseModel):
+    timeline_id: int = 1
+    event_type: str
+    title: str = Field(min_length=1, max_length=240)
+    scheduled_date: date
+    consensus_value: Optional[float] = None
+    importance: float = Field(default=1.0, ge=0.0, le=3.0)
+    source: str = "simulation"
+
+    @field_validator("event_type")
+    @classmethod
+    def event_type_valid(cls, v: str) -> str:
+        allowed = {"interest_rate", "inflation", "employment", "gdp"}
+        if v not in allowed:
+            raise ValueError(f"event_type must be one of {sorted(allowed)}")
+        return v
+
+
+class EconomicCalendarEventResponse(BaseModel):
+    id: int
+    timeline_id: int
+    event_type: str
+    title: str
+    scheduled_date: date
+    scheduled_at: Optional[datetime] = None
+    consensus_value: Optional[Decimal] = None
+    actual_value: Optional[Decimal] = None
+    importance: Decimal
+    surprise: Optional[Decimal] = None
+    status: str
+    source: str
+    payload: dict
+
+    model_config = {"from_attributes": True}
+
+
+class CorporateActionCreateRequest(BaseModel):
+    timeline_id: int = 1
+    company_id: int
+    action_type: str
+    effective_date: date
+    ratio: float = Field(default=1.0, gt=0.0)
+    cash_per_share: float = Field(default=0.0, ge=0.0)
+    settlement_price: Optional[float] = Field(default=None, ge=0.0)
+    target_company_id: Optional[int] = None
+    source: str = "simulation"
+
+    @field_validator("action_type")
+    @classmethod
+    def action_type_valid(cls, v: str) -> str:
+        allowed = {"dividend", "split", "buyback", "merger", "ipo", "delisting"}
+        if v not in allowed:
+            raise ValueError(f"action_type must be one of {sorted(allowed)}")
+        return v
+
+
+class CorporateActionResponse(BaseModel):
+    id: int
+    timeline_id: int
+    company_id: int
+    target_company_id: Optional[int] = None
+    action_type: str
+    announced_date: date
+    effective_date: date
+    ratio: Decimal
+    cash_per_share: Decimal
+    settlement_price: Optional[Decimal] = None
+    status: str
+    source: str
+    payload: dict
+
+    model_config = {"from_attributes": True}
+
+
+class MarketNewsBulletinResponse(BaseModel):
+    id: int
+    timeline_id: int
+    sim_date: date
+    event_type: str
+    headline: str
+    body: str
+    sentiment: str
+    severity: Decimal
+    source: str
+    source_event_id: Optional[int] = None
+    payload: dict
+
+    model_config = {"from_attributes": True}
+
+
+class ReplayLedgerResponse(BaseModel):
+    id: int
+    timeline_id: int
+    sim_date: date
+    tick_index: int
+    sequence: int
+    event_type: str
+    entity_type: Optional[str] = None
+    entity_id: Optional[int] = None
+    deterministic_seed: int
+    fingerprint: str
+    payload: dict
+
+    model_config = {"from_attributes": True}

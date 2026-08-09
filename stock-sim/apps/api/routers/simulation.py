@@ -4,6 +4,7 @@ import csv
 import io
 import json
 import logging
+from datetime import date
 from typing import Optional
 
 import asyncio
@@ -23,10 +24,19 @@ from apps.api.schemas import (
     BranchCostEstimateResponse,
     ConfigParameterResponse,
     ConfigUpdateRequest,
+    CorporateActionCreateRequest,
+    CorporateActionResponse,
     DistributionResponse,
+    EconomicCalendarCreateRequest,
+    EconomicCalendarEventResponse,
     EventInjectRequest,
     EventInstanceResponse,
     SimulationStateResponse,
+    IntradaySimulationRequest,
+    IntradaySimulationResponse,
+    RealismProfileResponse,
+    RealismProfileUpdateRequest,
+    ReplayLedgerResponse,
     TimelineCreateRequest,
     EnsembleCreateRequest,
     EnsembleCreateResponse,
@@ -37,12 +47,123 @@ from apps.api.schemas import (
     TimelineResponse,
     TimelineStatusResponse,
 )
-from apps.api.services import audit_service, branch_service, notification_service, result_service, sim_service, timeline_group_service
+from apps.api.services import audit_service, branch_service, notification_service, realism_service, result_service, sim_service, timeline_group_service
 from db.models import AuditLog, Company, ConfigParameter, EventInstance, PriceDriverScore, PriceHistory, SimulationState, Timeline, TimelineOverride, User
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/sim", tags=["Simulation Control"])
+
+
+@router.get("/realism/profile", response_model=RealismProfileResponse)
+def get_realism_profile(
+    timeline_id: int = Query(default=settings.default_timeline_id),
+    db: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
+) -> RealismProfileResponse:
+    return realism_service.get_or_create_profile(db, timeline_id)
+
+
+@router.put("/admin/realism-profile", response_model=RealismProfileResponse)
+def update_realism_profile(
+    request: RealismProfileUpdateRequest,
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+) -> RealismProfileResponse:
+    profile = realism_service.set_profile(db, request.timeline_id, request.preset)
+    db.commit()
+    response_cache.invalidate_timeline(request.timeline_id)
+    return profile
+
+
+@router.post("/intraday", response_model=IntradaySimulationResponse)
+def simulate_intraday(
+    request: IntradaySimulationRequest,
+    db: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
+) -> IntradaySimulationResponse:
+    try:
+        created = realism_service.run_intraday_ticks(
+            db,
+            request.timeline_id,
+            request.sim_date,
+            request.company_ids,
+            request.tick_count,
+        )
+    except (ValueError, NotFoundError) as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    db.commit()
+    response_cache.invalidate_timeline(request.timeline_id)
+    return IntradaySimulationResponse(timeline_id=request.timeline_id, sim_date=request.sim_date, ticks_created=created)
+
+
+@router.get("/calendar", response_model=list[EconomicCalendarEventResponse])
+def get_economic_calendar(
+    timeline_id: int = Query(default=settings.default_timeline_id),
+    from_date: Optional[date] = Query(default=None),
+    to_date: Optional[date] = Query(default=None),
+    db: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
+) -> list:
+    return realism_service.list_economic_calendar(db, timeline_id, from_date, to_date)
+
+
+@router.post("/admin/calendar", response_model=EconomicCalendarEventResponse, status_code=status.HTTP_201_CREATED)
+def create_economic_calendar_event(
+    request: EconomicCalendarCreateRequest,
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+) -> EconomicCalendarEventResponse:
+    event = realism_service.schedule_economic_event(
+        db,
+        request.timeline_id,
+        request.event_type,
+        request.title,
+        request.scheduled_date,
+        request.consensus_value,
+        request.importance,
+        request.source,
+    )
+    db.commit()
+    return event
+
+
+@router.post("/admin/corporate-actions", response_model=CorporateActionResponse, status_code=status.HTTP_201_CREATED)
+def create_corporate_action(
+    request: CorporateActionCreateRequest,
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+) -> CorporateActionResponse:
+    if db.query(Company).filter_by(id=request.company_id).first() is None:
+        raise NotFoundError("Company not found")
+    if request.target_company_id is not None and db.query(Company).filter_by(id=request.target_company_id).first() is None:
+        raise NotFoundError("Target company not found")
+    action = realism_service.schedule_corporate_action(
+        db,
+        request.timeline_id,
+        request.company_id,
+        request.action_type,
+        request.effective_date,
+        request.ratio,
+        request.cash_per_share,
+        request.settlement_price,
+        request.target_company_id,
+        request.source,
+    )
+    db.commit()
+    return action
+
+
+@router.get("/replay", response_model=list[ReplayLedgerResponse])
+def get_replay_ledger(
+    timeline_id: int = Query(default=settings.default_timeline_id),
+    sim_date: Optional[date] = Query(default=None),
+    limit: int = Query(default=500, ge=1, le=5000),
+    db: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
+) -> list:
+    return realism_service.list_replay_ledger(db, timeline_id, sim_date, limit)
 
 
 @router.post("/advance", response_model=AdvanceResponse)

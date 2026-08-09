@@ -2,7 +2,14 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { get } from "@/lib/api/client";
-import type { CycleStateResponse, MarketGridResponse } from "@/lib/api/types";
+import type {
+  CycleStateResponse,
+  MarketGridResponse,
+  MarketNewsBulletinResponse,
+  MarketOrderBookResponse,
+  MarketRegimeResponse,
+  MarketSessionResponse,
+} from "@/lib/api/types";
 
 /** `asOfDate` (YYYY-MM-DD) fetches a historical snapshot instead of the live
  * grid — powers the Market Explorer's "time machine" view. Omit for live. */
@@ -26,5 +33,53 @@ export function useCycleState(timelineId?: number) {
     refetchInterval: false,
     staleTime: 120_000,
     refetchOnWindowFocus: false,
+  });
+}
+
+export function useMarketSession(timelineId?: number, simDate?: string | null) {
+  return useQuery({
+    queryKey: ["market-session", timelineId, simDate ?? null],
+    queryFn: () => get<MarketSessionResponse>("/market/session", { timeline_id: timelineId, sim_date: simDate ?? undefined }),
+    refetchInterval: 4000,
+    staleTime: 1500,
+    refetchOnWindowFocus: true,
+  });
+}
+
+export function useMarketRegime(timelineId?: number) {
+  return useQuery({
+    queryKey: ["market-regime", timelineId],
+    queryFn: () => get<MarketRegimeResponse>("/market/regime", { timeline_id: timelineId }),
+    refetchInterval: 5000,
+    staleTime: 2000,
+    refetchOnWindowFocus: true,
+  });
+}
+
+export function useMarketOrderBook(ticker: string | null | undefined, timelineId?: number, simDate?: string | null) {
+  return useQuery({
+    queryKey: ["market-order-book", ticker, timelineId, simDate ?? null],
+    queryFn: () => get<MarketOrderBookResponse>(`/market/order-book/${ticker}`, {
+      timeline_id: timelineId,
+      sim_date: simDate ?? undefined,
+    }),
+    enabled: Boolean(ticker),
+    refetchInterval: 2500,
+    staleTime: 1000,
+    refetchOnWindowFocus: true,
+  });
+}
+
+export function useMarketNewsBulletins(timelineId?: number, simDate?: string | null, limit = 3) {
+  return useQuery({
+    queryKey: ["market-news-bulletins", timelineId, simDate ?? null, limit],
+    queryFn: () => get<MarketNewsBulletinResponse[]>("/market/news/bulletins", {
+      timeline_id: timelineId,
+      sim_date: simDate ?? undefined,
+      limit,
+    }),
+    refetchInterval: 7000,
+    staleTime: 3000,
+    refetchOnWindowFocus: true,
   });
 }
