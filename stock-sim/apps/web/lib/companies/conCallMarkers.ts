@@ -1,4 +1,4 @@
-import type { ConCallItem, PriceHistoryItem } from "@/lib/api/types";
+import type { ConCallItem, PriceHistoryItem, ScreenerEventImpact } from "@/lib/api/types";
 import type { EventMarker, EventSentiment } from "@/components/charts/EventMarkers";
 
 const SENTIMENT_BY_BUCKET: Record<ConCallItem["performance_bucket"], EventSentiment> = {
@@ -34,5 +34,19 @@ export function buildConCallMarkers(conCalls: ConCallItem[], data: PriceHistoryI
     label: `${call.fiscal_period} · ${call.performance_bucket.toUpperCase()}`,
     sentiment: SENTIMENT_BY_BUCKET[call.performance_bucket],
     detail: call.statements.guidance ?? call.statements.opening ?? undefined,
+  }));
+}
+
+/** Maps server-calculated event impacts onto the same chart marker layer as
+ * earnings. The tooltip keeps the observed forward returns beside the event
+ * so the overlay is analytical evidence, not just decoration. */
+export function buildEventImpactMarkers(events: ScreenerEventImpact[], data: PriceHistoryItem[]): EventMarker[] {
+  if (data.length === 0) return [];
+  return events.map((event) => ({
+    time: nearestBarIndex(event.sim_date, data),
+    type: event.category.toLowerCase().includes("macro") ? "economic" : "news",
+    label: `${event.name} · ${event.sentiment}`,
+    sentiment: event.sentiment.toLowerCase() === "positive" ? "positive" : event.sentiment.toLowerCase() === "negative" ? "negative" : "neutral",
+    detail: `1D ${event.return_1d_pct == null ? "—" : `${event.return_1d_pct.toFixed(1)}%`} · 5D ${event.return_5d_pct == null ? "—" : `${event.return_5d_pct.toFixed(1)}%`} · 20D ${event.return_20d_pct == null ? "—" : `${event.return_20d_pct.toFixed(1)}%`}`,
   }));
 }

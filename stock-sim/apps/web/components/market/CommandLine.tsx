@@ -3,6 +3,7 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
 import { CAP_ALIASES, parseCommandLine, type ParsedToken } from "@/lib/market/commandGrammar";
+import type { ScreenerViewMode } from "@/lib/api/types";
 
 export interface CommandLineProps {
   value: string;
@@ -11,8 +12,8 @@ export interface CommandLineProps {
   industries: string[];
   resultCount: number;
   totalCount: number;
-  viewMode: "table" | "heatmap";
-  onViewModeChange: (mode: "table" | "heatmap") => void;
+  viewMode: ScreenerViewMode;
+  onViewModeChange: (mode: ScreenerViewMode) => void;
   inputRef: React.RefObject<HTMLInputElement | null>;
 }
 
@@ -191,6 +192,48 @@ export function CommandLine({
           className={cn("transition-all duration-fast ease-out-expo", viewMode === "heatmap" ? "text-[var(--term-ink)]" : "text-[var(--term-ink-tertiary)] hover:text-[var(--term-ink-secondary)]")}
         >
           HMP
+        </button>
+        <button
+          type="button"
+          onClick={() => onViewModeChange("rank")}
+          className={cn("transition-all duration-fast ease-out-expo", viewMode === "rank" ? "text-[var(--term-ink)]" : "text-[var(--term-ink-tertiary)] hover:text-[var(--term-ink-secondary)]")}
+        >
+          RANK
+        </button>
+        <button
+          type="button"
+          onClick={() => onViewModeChange("research")}
+          className={cn("transition-all duration-fast ease-out-expo", viewMode === "research" ? "text-[var(--term-ink)]" : "text-[var(--term-ink-tertiary)] hover:text-[var(--term-ink-secondary)]")}
+        >
+          RSRCH
+        </button>
+        <button
+          type="button"
+          onClick={() => onViewModeChange("notebook")}
+          className={cn("transition-all duration-fast ease-out-expo", viewMode === "notebook" ? "text-[var(--term-ink)]" : "text-[var(--term-ink-tertiary)] hover:text-[var(--term-ink-secondary)]")}
+        >
+          NOTE
+        </button>
+        <button
+          type="button"
+          onClick={() => onViewModeChange("correlation")}
+          className={cn("transition-all duration-fast ease-out-expo", viewMode === "correlation" ? "text-[var(--term-ink)]" : "text-[var(--term-ink-tertiary)] hover:text-[var(--term-ink-secondary)]")}
+        >
+          CORR
+        </button>
+        <button
+          type="button"
+          onClick={() => onViewModeChange("breadth")}
+          className={cn("transition-all duration-fast ease-out-expo", viewMode === "breadth" ? "text-[var(--term-ink)]" : "text-[var(--term-ink-tertiary)] hover:text-[var(--term-ink-secondary)]")}
+        >
+          BRDTH
+        </button>
+        <button
+          type="button"
+          onClick={() => onViewModeChange("exposure")}
+          className={cn("transition-all duration-fast ease-out-expo", viewMode === "exposure" ? "text-[var(--term-ink)]" : "text-[var(--term-ink-tertiary)] hover:text-[var(--term-ink-secondary)]")}
+        >
+          EXP
         </button>
       </div>
 

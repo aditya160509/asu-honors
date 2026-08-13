@@ -89,6 +89,324 @@ export interface MarketGridResponse {
   cycle_phase: string;
 }
 
+// ---------------------------------------------------------------------------
+// Market Explorer / Screener workspace
+// ---------------------------------------------------------------------------
+
+export type ScreenerOperator = "=" | "!=" | ">" | ">=" | "<" | "<=" | "contains" | "in" | "is_null" | "not_null";
+
+export interface ScreenerUniverse {
+  type: "all" | "industry" | "watchlist" | "tickers";
+  industry_names?: string[];
+  tickers?: string[];
+  watchlist_id?: number | null;
+}
+
+export interface ScreenerClause {
+  metric: string;
+  operator: ScreenerOperator;
+  value?: string | number | boolean | Array<string | number> | null;
+}
+
+export interface ScreenerSort {
+  metric: string;
+  direction: "asc" | "desc";
+}
+
+export interface ScreenerQuery {
+  version: number;
+  timeline_id: number;
+  as_of_date?: string | null;
+  universe: ScreenerUniverse;
+  logic: "all" | "any";
+  clauses: ScreenerClause[];
+  sort: ScreenerSort[];
+  columns: string[];
+  page_size: number;
+  offset: number;
+  query_text?: string | null;
+}
+
+export interface ScreenerMetric {
+  key: string;
+  label: string;
+  aliases: string[];
+  category: string;
+  unit: string;
+  value_type: "number" | "text";
+  timeframe: string;
+  null_policy: string;
+  calculation_version: string;
+  operators: string[];
+}
+
+export interface ScreenerProvenance {
+  source: string;
+  source_ids: string[];
+  formula?: string | null;
+  calculation_version: string;
+  timeline_id: number;
+  as_of_date: string;
+  generated_at: string;
+  missing_reason?: string | null;
+}
+
+export interface ScreenerRow {
+  company: CompanyGridItem;
+  metrics: Record<string, string | number | null>;
+  ranks: Record<string, number>;
+  provenance: Record<string, ScreenerProvenance>;
+}
+
+export interface ScreenerQueryResponse {
+  rows: ScreenerRow[];
+  total: number;
+  offset: number;
+  page_size: number;
+  query: ScreenerQuery;
+  query_fingerprint: string;
+  timeline_id: number;
+  as_of_date: string;
+}
+
+export interface ScreenerPreset {
+  id: string;
+  name: string;
+  description: string;
+  query: ScreenerQuery;
+}
+
+export interface ScreenerHeatmapCell {
+  key: string;
+  label: string;
+  count: number;
+  size_value: number | null;
+  color_value: number | null;
+  color_metric: string;
+  size_metric: string;
+  query_fingerprint: string;
+}
+
+export interface ScreenerRanking {
+  ticker: string;
+  name: string;
+  industry_name: string;
+  metric: string;
+  value: string | number | null;
+  rank: number;
+  percentile: number | null;
+  provenance: ScreenerProvenance | null;
+}
+
+export interface ScreenerHeatmapRequest {
+  query: ScreenerQuery;
+  color_metric: string;
+  size_metric: string;
+}
+
+export interface ScreenerRankingRequest {
+  query: ScreenerQuery;
+  metric: string;
+  direction: "asc" | "desc";
+  limit: number;
+}
+
+export interface ScreenerExposurePoint {
+  ticker: string;
+  name: string;
+  industry_name: string;
+  exposures: Record<string, number | null>;
+  provenance: Record<string, ScreenerProvenance>;
+}
+
+export interface ScreenerNewsCluster {
+  theme: string;
+  label: string;
+  count: number;
+  average_severity: number | null;
+  sentiment_counts: Record<string, number>;
+  first_date: string;
+  last_date: string;
+  sample_headlines: string[];
+  source_ids: string[];
+}
+
+export interface ScreenerNewsClustersResponse {
+  clusters: ScreenerNewsCluster[];
+  timeline_id: number;
+  as_of_date: string;
+  provenance: ScreenerProvenance;
+}
+
+export interface ScreenerTranscriptMatch {
+  call_id: number;
+  fiscal_period: string;
+  call_date: string;
+  tone: string;
+  tone_score: number;
+  section: string;
+  snippet: string;
+  matched_terms: string[];
+  source_ids: string[];
+}
+
+export interface ScreenerTranscriptSearchResponse {
+  ticker: string;
+  query: string;
+  matches: ScreenerTranscriptMatch[];
+  timeline_id: number;
+  as_of_date: string;
+  provenance: ScreenerProvenance;
+}
+
+export interface ScreenerEventImpact {
+  event_instance_id: number;
+  event_id: number;
+  name: string;
+  category: string;
+  sentiment: string;
+  sim_date: string;
+  severity: number;
+  return_1d_pct: number | null;
+  return_5d_pct: number | null;
+  return_20d_pct: number | null;
+  source_ids: string[];
+}
+
+export interface ScreenerEventImpactResponse {
+  ticker: string;
+  events: ScreenerEventImpact[];
+  timeline_id: number;
+  as_of_date: string;
+  provenance: ScreenerProvenance;
+}
+
+export interface FormulaValue {
+  ticker: string;
+  value: number | null;
+  missing_reason: string | null;
+}
+
+export interface FormulaEvaluateResponse {
+  formula: string;
+  values: FormulaValue[];
+  provenance: ScreenerProvenance;
+}
+
+export type ScreenerViewMode = "table" | "heatmap" | "rank" | "research" | "notebook" | "correlation" | "breadth" | "exposure";
+
+export interface SavedScreenResponse {
+  id: number;
+  name: string;
+  description: string | null;
+  query: ScreenerQuery;
+  columns: string[];
+  sort: ScreenerSort[];
+  view_mode: ScreenerViewMode;
+  timeline_id: number;
+  as_of_date: string | null;
+  visibility: "private" | "shared";
+  version: number;
+  fingerprint: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DcfRequest {
+  revenue_growth?: number;
+  ebitda_margin?: number;
+  tax_rate?: number;
+  reinvestment_rate?: number;
+  wacc?: number;
+  terminal_growth?: number;
+  projection_years?: number;
+  net_debt?: number;
+  shares_outstanding?: number | null;
+  sensitivity_step?: number;
+}
+
+export interface DcfSensitivityCell {
+  wacc: number;
+  terminal_growth: number;
+  per_share_value: number | null;
+}
+
+export interface DcfResponse {
+  ticker: string;
+  base_revenue: number;
+  enterprise_value: number;
+  equity_value: number;
+  per_share_value: number | null;
+  projected_free_cash_flows: number[];
+  assumptions: Required<Omit<DcfRequest, "shares_outstanding">> & { shares_outstanding: number | null };
+  sensitivity: DcfSensitivityCell[];
+  provenance: ScreenerProvenance;
+}
+
+export interface CorrelationResponse {
+  tickers: string[];
+  dates: string[];
+  matrix: Array<Array<number | null>>;
+  method: string;
+  lookback: number;
+  provenance: ScreenerProvenance;
+}
+
+export interface BreadthPoint {
+  sim_date: string;
+  advances: number;
+  declines: number;
+  unchanged: number;
+  new_highs: number;
+  new_lows: number;
+  above_sma20: number;
+  total: number;
+}
+
+export interface BreadthResponse {
+  points: BreadthPoint[];
+  timeline_id: number;
+  as_of_date: string;
+  provenance: ScreenerProvenance;
+}
+
+export interface ResearchNotebookBlockResponse {
+  id: number;
+  notebook_id: number;
+  block_type: string;
+  position: number;
+  payload: Record<string, unknown>;
+  provenance: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ResearchNotebookResponse {
+  id: number;
+  title: string;
+  description: string | null;
+  query: Record<string, unknown>;
+  visibility: "private" | "shared";
+  version: number;
+  blocks: ResearchNotebookBlockResponse[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChartAnnotationResponse {
+  id: number;
+  ticker: string;
+  timeline_id: number;
+  timeframe: string;
+  tool: string;
+  anchors: Array<Record<string, unknown>>;
+  style: Record<string, unknown>;
+  evidence: Record<string, unknown>;
+  version: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface PriceHistoryItem {
   sim_date: string;
   open: number;

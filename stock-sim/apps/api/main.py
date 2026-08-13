@@ -25,6 +25,7 @@ from apps.api.routers import (
     notifications,
     portfolio,
     scenario_library,
+    screener,
     simulation,
     trading,
     ws,
@@ -79,6 +80,7 @@ def create_app() -> FastAPI:
     application.include_router(portfolio.router)
     application.include_router(simulation.router)
     application.include_router(scenario_library.router)
+    application.include_router(screener.router)
     application.include_router(audit_log.router)
     application.include_router(news.router)
     application.include_router(concalls.router)

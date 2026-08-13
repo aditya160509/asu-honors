@@ -65,6 +65,10 @@ export interface PriceChartProps {
   externalRange?: VisibleRange;
   /** Emits viewport changes so lower panes can stay aligned. */
   onRangeChange?: (range: VisibleRange) => void;
+  /** Shared candle index used by linked comparison charts. */
+  externalCrosshairIndex?: number | null;
+  /** Emits the hovered candle index so another chart can mirror its crosshair. */
+  onCrosshairIndexChange?: (index: number | null) => void;
   /** When enabled, next chart click selects a replay start candle instead of panning/drawing. */
   replayPickMode?: boolean;
   onReplayPointSelect?: (localIndex: number, item: PriceHistoryItem) => void;
@@ -106,6 +110,8 @@ export function PriceChart({
   events = [],
   externalRange,
   onRangeChange,
+  externalCrosshairIndex,
+  onCrosshairIndexChange,
   replayPickMode = false,
   onReplayPointSelect,
 }: PriceChartProps) {
@@ -124,6 +130,8 @@ export function PriceChart({
   const lastReportedRangeRef = React.useRef(range);
   const onRangeChangeRef = React.useRef(onRangeChange);
   onRangeChangeRef.current = onRangeChange;
+  const onCrosshairIndexChangeRef = React.useRef(onCrosshairIndexChange);
+  onCrosshairIndexChangeRef.current = onCrosshairIndexChange;
   rangeRef.current = range;
   const animatedCrosshair = React.useRef({ x: 0, y: 0 });
 
@@ -588,6 +596,7 @@ export function PriceChart({
 
       const hov = hoverRef.current;
       const anim = animatedCrosshair.current;
+      const linkedIndex = externalCrosshairIndex == null ? null : Math.max(0, Math.min(ohlc.length - 1, externalCrosshairIndex));
       if (hov && !activeDrawingTool) {
         // Smooth follow: lerp crosshair position toward cursor
         anim.x += (hov.x - anim.x) * 0.28;
@@ -598,17 +607,19 @@ export function PriceChart({
         anim.y += (-999 - anim.y) * 0.06;
       }
  
-      if (hov && !activeDrawingTool) {
-        drawCrosshair({ ctx, width, height: h, dpr, padding: pricePadding, x: anim.x, y: anim.y });
+      if ((hov || linkedIndex != null) && !activeDrawingTool) {
         const plotW = width - PADDING.left - PADDING.right;
-        const idx = range.from + Math.round(((hov.x - PADDING.left) / plotW) * (range.to - range.from));
+        const idx = linkedIndex ?? (range.from + Math.round(((hov!.x - PADDING.left) / plotW) * (range.to - range.from)));
         const candle = ohlc[Math.max(0, Math.min(ohlc.length - 1, idx))];
         const item = data[candle?.time ?? 0];
         if (candle && item) {
+          const crosshairX = linkedIndex == null ? anim.x : PADDING.left + (idx - range.from + 0.5) * Math.min(12, plotW / Math.max(1, range.to - range.from));
+          const crosshairY = linkedIndex == null ? anim.y : pricePadding.top + priceAreaHeight * 0.5;
+          if (linkedIndex != null) drawCrosshair({ ctx, width, height: h, dpr, padding: pricePadding, x: crosshairX, y: crosshairY });
           drawCrosshairTooltip({
             ctx,
-            x: anim.x,
-            y: anim.y,
+            x: crosshairX,
+            y: crosshairY,
             lines: [
               item.sim_date,
               `O ${candle.open.toFixed(2)}  H ${candle.high.toFixed(2)}`,
@@ -619,7 +630,7 @@ export function PriceChart({
         }
       }
     },
-    [ohlc, range, data, indicatorSeries, bollingerSeries, vwapSeries, ichimokuSeries, superTrendSeries, showVolumeProfile, chartType, drawingManager, placingPoints, previewPoint, activeDrawingTool, events]
+    [ohlc, range, data, indicatorSeries, bollingerSeries, vwapSeries, ichimokuSeries, superTrendSeries, showVolumeProfile, chartType, drawingManager, placingPoints, previewPoint, activeDrawingTool, events, externalCrosshairIndex]
   );
 
   function handleWheel(deltaY: number, x: number) {
@@ -708,6 +719,10 @@ export function PriceChart({
 
   function handlePointerMove(x: number, y: number) {
     setHover({ x, y });
+    const plotW = Math.max(1, widthRef.current - PADDING.left - PADDING.right);
+    const visibleCount = Math.max(1, range.to - range.from);
+    const hoveredIndex = Math.max(0, Math.min(ohlc.length - 1, range.from + Math.round(((x - PADDING.left) / plotW) * visibleCount)));
+    onCrosshairIndexChangeRef.current?.(hoveredIndex);
 
     if (events.length > 0) {
       const priceAreaHeight = height - PADDING.bottom - PADDING.top - VOLUME_HEIGHT;
@@ -767,6 +782,7 @@ export function PriceChart({
           setHover(null);
           setHoveredEvent(null);
           setHoveredEventPos(null);
+          onCrosshairIndexChangeRef.current?.(null);
           isPanning.current = false;
         }}
         onPointerDown={handlePointerDown}

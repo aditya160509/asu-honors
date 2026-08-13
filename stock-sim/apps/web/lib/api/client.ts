@@ -209,3 +209,27 @@ export async function download(path: string, params?: Record<string, unknown>): 
   const filename = disposition.match(/filename="([^"]+)"/)?.[1];
   return { blob: await res.blob(), filename };
 }
+
+/** POST variant used for query-driven exports. It keeps the same auth header
+ * and one-time refresh behavior as the typed JSON helpers while preserving a
+ * binary response body. */
+export async function downloadPost(path: string, body: unknown): Promise<{ blob: Blob; filename?: string }> {
+  const options: RequestInit = { method: "POST", body: JSON.stringify(body) };
+  let res = await rawRequest(path, options);
+  if (res.status === 401 && !NO_REFRESH_PATHS.some((p) => path.startsWith(p))) {
+    const refreshed = await tryRefresh();
+    if (refreshed) res = await rawRequest(path, options);
+    else {
+      redirectToExpiredLogin();
+      throw new ApiError("Session expired", 401);
+    }
+  }
+  if (!res.ok) {
+    const bodyJson = await res.json().catch(() => ({}));
+    const detail = typeof bodyJson?.detail === "string" ? bodyJson.detail : `Download failed (HTTP ${res.status})`;
+    throw new ApiError(detail, res.status);
+  }
+  const disposition = res.headers.get("content-disposition") ?? "";
+  const filename = disposition.match(/filename="([^"]+)"/)?.[1];
+  return { blob: await res.blob(), filename };
+}

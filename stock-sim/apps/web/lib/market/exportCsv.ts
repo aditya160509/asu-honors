@@ -5,6 +5,17 @@ function csvEscape(value: string): string {
   return value;
 }
 
+export function downloadBlobFile(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 /** Client-side CSV export of the currently filtered/sorted/visible-column result set. */
 export function exportCompaniesCsv(rows: EnrichedCompany[], columns: ColumnDef[], filename = "market-screen.csv") {
   const headers = ["Ticker", "Name", ...columns.map((c) => c.header)];
@@ -23,12 +34,5 @@ export function exportCompaniesCsv(rows: EnrichedCompany[], columns: ColumnDef[]
   }
 
   const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  downloadBlobFile(blob, filename);
 }

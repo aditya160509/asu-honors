@@ -25,7 +25,9 @@ from db.models.reference import (
     IndustryFactorWeight,
     IndustryPillarWeight,
 )
+from db.models.research import ChartAnnotation, ResearchNotebook, ResearchNotebookBlock
 from db.models.scenario_lab import AuditLog, IndustryCrossEffect, ScenarioTemplate, TimelineOverride
+from db.models.screener import SavedScreen
 from db.models.simulation import SimulationState, Timeline, TimelineGroup
 from db.models.timeseries import EconomicCycleState, PriceDriverScore, PriceHistory
 from db.models.trading import (
@@ -95,4 +97,8 @@ __all__ = [
     "CorporateAction",
     "ReplayLedger",
     "TimelineCompanyState",
+    "SavedScreen",
+    "ResearchNotebook",
+    "ResearchNotebookBlock",
+    "ChartAnnotation",
 ]

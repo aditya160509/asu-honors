@@ -5,6 +5,9 @@ import Link from "next/link";
 import { ArrowDown, ArrowUp, X } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { PriceChart } from "@/components/charts/PriceChart";
+import { usePriceHistory } from "@/lib/api/hooks/useCompany";
+import type { VisibleRange } from "@/lib/charts/types";
 import { cn, formatLarge, formatPct, formatPrice } from "@/lib/utils";
 import { scaleIn } from "@/lib/motion";
 import type { EnrichedCompany } from "@/lib/market/types";
@@ -61,6 +64,53 @@ const METRICS: MetricRow[] = [
   },
   { label: "Industry", render: (c) => c.industry_name },
 ];
+
+function LinkedComparisonChart({
+  ticker,
+  primary,
+  range,
+  crosshairIndex,
+  onRangeChange,
+  onCrosshairIndexChange,
+}: {
+  ticker: string;
+  primary: boolean;
+  range?: VisibleRange;
+  crosshairIndex: number | null;
+  onRangeChange: (range: VisibleRange) => void;
+  onCrosshairIndexChange: (index: number | null) => void;
+}) {
+  const history = usePriceHistory(ticker);
+  return (
+    <div className="min-w-[280px] flex-1 border border-border/60 bg-bg-secondary/20 p-2">
+      <div className="mb-1 flex items-center justify-between"><span className="num text-small font-semibold text-text-primary">{ticker}</span><span className="text-micro text-text-tertiary">linked timeline</span></div>
+      <PriceChart
+        data={history.data ?? []}
+        loading={history.isLoading}
+        error={history.isError}
+        onRetry={() => history.refetch()}
+        ticker={ticker}
+        height={220}
+        chartType="line"
+        externalRange={range}
+        onRangeChange={primary ? onRangeChange : undefined}
+        externalCrosshairIndex={crosshairIndex}
+        onCrosshairIndexChange={onCrosshairIndexChange}
+      />
+    </div>
+  );
+}
+
+function LinkedComparisonCharts({ tickers }: { tickers: string[] }) {
+  const [range, setRange] = React.useState<VisibleRange | undefined>();
+  const [crosshairIndex, setCrosshairIndex] = React.useState<number | null>(null);
+  return (
+    <div className="border-t border-border px-4 py-3">
+      <div className="mb-2 flex items-center justify-between"><span className="text-micro font-medium uppercase tracking-wide text-text-secondary">Linked price charts</span><span className="text-micro text-text-tertiary">zoom, viewport, and crosshair stay synchronized</span></div>
+      <div className="flex gap-2 overflow-x-auto">{tickers.map((ticker, index) => <LinkedComparisonChart key={ticker} ticker={ticker} primary={index === 0} range={range} crosshairIndex={crosshairIndex} onRangeChange={setRange} onCrosshairIndexChange={setCrosshairIndex} />)}</div>
+    </div>
+  );
+}
 
 export function CompareDrawer({ open, onClose, tickers, companies, onRemove }: CompareDrawerProps) {
   const contentRef = React.useRef<HTMLDivElement>(null);
@@ -140,6 +190,8 @@ export function CompareDrawer({ open, onClose, tickers, companies, onRemove }: C
               </table>
             </div>
           )}
+
+          {selected.length > 1 && <LinkedComparisonCharts tickers={selected.map((company) => company.ticker)} />}
 
           <div className="flex justify-end border-t border-border px-5 py-3">
             <Button variant="outline" size="sm" onClick={onClose}>

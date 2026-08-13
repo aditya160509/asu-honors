@@ -2,7 +2,7 @@
 
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -111,6 +111,398 @@ class MarketGridResponse(BaseModel):
     companies: list[CompanyGridItem]
     sim_date: date
     cycle_phase: str
+
+
+# --------------------------------------------------------------------------
+# Market Explorer / Screener workspace
+# --------------------------------------------------------------------------
+
+
+class ScreenerUniverse(BaseModel):
+    """Allowlisted universe selectors shared by UI, saved screens, and API."""
+
+    type: Literal["all", "industry", "watchlist", "tickers"] = "all"
+    industry_names: list[str] = Field(default_factory=list, max_length=100)
+    tickers: list[str] = Field(default_factory=list, max_length=500)
+    watchlist_id: Optional[int] = None
+
+
+class ScreenerClause(BaseModel):
+    metric: str = Field(min_length=1, max_length=80)
+    operator: Literal["=", "!=", ">", ">=", "<", "<=", "contains", "in", "is_null", "not_null"]
+    value: Any = None
+
+
+class ScreenerSort(BaseModel):
+    metric: str = Field(min_length=1, max_length=80)
+    direction: Literal["asc", "desc"] = "desc"
+
+
+class ScreenerQuery(BaseModel):
+    version: int = Field(default=1, ge=1, le=10)
+    timeline_id: int = Field(default=1, ge=1)
+    as_of_date: Optional[date] = None
+    universe: ScreenerUniverse = Field(default_factory=ScreenerUniverse)
+    logic: Literal["all", "any"] = "all"
+    clauses: list[ScreenerClause] = Field(default_factory=list, max_length=50)
+    sort: list[ScreenerSort] = Field(default_factory=list, max_length=5)
+    columns: list[str] = Field(default_factory=list, max_length=80)
+    page_size: int = Field(default=100, ge=1, le=500)
+    offset: int = Field(default=0, ge=0)
+    query_text: Optional[str] = Field(default=None, max_length=1000)
+
+
+class ScreenerMetric(BaseModel):
+    key: str
+    label: str
+    aliases: list[str]
+    category: str
+    unit: str
+    value_type: Literal["number", "text"]
+    timeframe: str
+    null_policy: str
+    calculation_version: str
+    operators: list[str]
+
+
+class ScreenerProvenance(BaseModel):
+    source: str
+    source_ids: list[str] = Field(default_factory=list)
+    formula: Optional[str] = None
+    calculation_version: str
+    timeline_id: int
+    as_of_date: date
+    generated_at: datetime
+    missing_reason: Optional[str] = None
+
+
+class ScreenerRow(BaseModel):
+    company: CompanyGridItem
+    metrics: dict[str, Any] = Field(default_factory=dict)
+    ranks: dict[str, float] = Field(default_factory=dict)
+    provenance: dict[str, ScreenerProvenance] = Field(default_factory=dict)
+
+
+class ScreenerQueryResponse(BaseModel):
+    rows: list[ScreenerRow]
+    total: int
+    offset: int
+    page_size: int
+    query: ScreenerQuery
+    query_fingerprint: str
+    timeline_id: int
+    as_of_date: date
+
+
+class ScreenerPreset(BaseModel):
+    id: str
+    name: str
+    description: str
+    query: ScreenerQuery
+
+
+class ScreenerHeatmapCell(BaseModel):
+    key: str
+    label: str
+    count: int
+    size_value: Optional[float] = None
+    color_value: Optional[float] = None
+    color_metric: str
+    size_metric: str
+    query_fingerprint: str
+
+
+class ScreenerRanking(BaseModel):
+    ticker: str
+    name: str
+    industry_name: str
+    metric: str
+    value: Any = None
+    rank: int
+    percentile: Optional[float] = None
+    provenance: Optional[ScreenerProvenance] = None
+
+
+class ScreenerHeatmapRequest(BaseModel):
+    query: ScreenerQuery
+    color_metric: str = Field(default="day_change_pct", min_length=1, max_length=80)
+    size_metric: str = Field(default="market_cap", min_length=1, max_length=80)
+
+
+class ScreenerRankingRequest(BaseModel):
+    query: ScreenerQuery
+    metric: str = Field(default="market_cap", min_length=1, max_length=80)
+    direction: Literal["asc", "desc"] = "desc"
+    limit: int = Field(default=50, ge=1, le=500)
+
+
+class ScreenerExposureRequest(BaseModel):
+    query: ScreenerQuery
+    factors: list[str] = Field(default_factory=lambda: ["management_quality", "moat_score", "financial_quality", "fcf_quality", "growth_potential", "intrinsic_score"], max_length=12)
+
+
+class ScreenerExposurePoint(BaseModel):
+    ticker: str
+    name: str
+    industry_name: str
+    exposures: dict[str, Optional[float]]
+    provenance: dict[str, ScreenerProvenance]
+
+
+class ScreenerNewsCluster(BaseModel):
+    theme: str
+    label: str
+    count: int
+    average_severity: Optional[float] = None
+    sentiment_counts: dict[str, int] = Field(default_factory=dict)
+    first_date: date
+    last_date: date
+    sample_headlines: list[str] = Field(default_factory=list)
+    source_ids: list[str] = Field(default_factory=list)
+
+
+class ScreenerNewsClustersResponse(BaseModel):
+    clusters: list[ScreenerNewsCluster]
+    timeline_id: int
+    as_of_date: date
+    provenance: ScreenerProvenance
+
+
+class ScreenerEventImpact(BaseModel):
+    event_instance_id: int
+    event_id: int
+    name: str
+    category: str
+    sentiment: str
+    sim_date: date
+    severity: float
+    return_1d_pct: Optional[float] = None
+    return_5d_pct: Optional[float] = None
+    return_20d_pct: Optional[float] = None
+    source_ids: list[str] = Field(default_factory=list)
+
+
+class ScreenerEventImpactResponse(BaseModel):
+    ticker: str
+    events: list[ScreenerEventImpact]
+    timeline_id: int
+    as_of_date: date
+    provenance: ScreenerProvenance
+
+
+class ScreenerTranscriptMatch(BaseModel):
+    call_id: int
+    fiscal_period: str
+    call_date: date
+    tone: str
+    tone_score: float
+    section: str
+    snippet: str
+    matched_terms: list[str] = Field(default_factory=list)
+    source_ids: list[str] = Field(default_factory=list)
+
+
+class ScreenerTranscriptSearchResponse(BaseModel):
+    ticker: str
+    query: str
+    matches: list[ScreenerTranscriptMatch]
+    timeline_id: int
+    as_of_date: date
+    provenance: ScreenerProvenance
+
+
+class SavedScreenCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    description: Optional[str] = Field(default=None, max_length=500)
+    query: ScreenerQuery
+    columns: list[str] = Field(default_factory=list, max_length=80)
+    sort: list[ScreenerSort] = Field(default_factory=list, max_length=5)
+    view_mode: Literal["table", "heatmap", "rank", "research", "notebook", "correlation", "breadth", "exposure"] = "table"
+    visibility: Literal["private", "shared"] = "private"
+
+
+class SavedScreenUpdateRequest(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    description: Optional[str] = Field(default=None, max_length=500)
+    query: Optional[ScreenerQuery] = None
+    columns: Optional[list[str]] = Field(default=None, max_length=80)
+    sort: Optional[list[ScreenerSort]] = Field(default=None, max_length=5)
+    view_mode: Optional[Literal["table", "heatmap", "rank", "research", "notebook", "correlation", "breadth", "exposure"]] = None
+    visibility: Optional[Literal["private", "shared"]] = None
+
+
+class SavedScreenResponse(BaseModel):
+    id: int
+    name: str
+    description: Optional[str] = None
+    query: ScreenerQuery
+    columns: list[str]
+    sort: list[ScreenerSort]
+    view_mode: str
+    timeline_id: int
+    as_of_date: Optional[date] = None
+    visibility: str
+    version: int
+    fingerprint: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class DcfRequest(BaseModel):
+    revenue_growth: float = Field(default=0.08, ge=-0.9, le=5)
+    ebitda_margin: float = Field(default=0.22, ge=-2, le=2)
+    tax_rate: float = Field(default=0.21, ge=0, le=1)
+    reinvestment_rate: float = Field(default=0.25, ge=-2, le=2)
+    wacc: float = Field(default=0.09, gt=0.001, le=1)
+    terminal_growth: float = Field(default=0.025, ge=-0.5, le=0.5)
+    projection_years: int = Field(default=5, ge=1, le=15)
+    net_debt: float = 0.0
+    shares_outstanding: Optional[float] = Field(default=None, gt=0)
+    sensitivity_step: float = Field(default=0.01, gt=0, le=0.1)
+
+    @model_validator(mode="after")
+    def terminal_growth_below_wacc(self) -> "DcfRequest":
+        if self.terminal_growth >= self.wacc:
+            raise ValueError("terminal_growth must be lower than wacc")
+        return self
+
+
+class DcfSensitivityCell(BaseModel):
+    wacc: float
+    terminal_growth: float
+    per_share_value: Optional[float]
+
+
+class DcfResponse(BaseModel):
+    ticker: str
+    base_revenue: float
+    enterprise_value: float
+    equity_value: float
+    per_share_value: Optional[float]
+    projected_free_cash_flows: list[float]
+    assumptions: DcfRequest
+    sensitivity: list[DcfSensitivityCell]
+    provenance: ScreenerProvenance
+
+
+class CorrelationResponse(BaseModel):
+    tickers: list[str]
+    dates: list[date]
+    matrix: list[list[Optional[float]]]
+    method: str
+    lookback: int
+    provenance: ScreenerProvenance
+
+
+class BreadthPoint(BaseModel):
+    sim_date: date
+    advances: int
+    declines: int
+    unchanged: int
+    new_highs: int
+    new_lows: int
+    above_sma20: int
+    total: int
+
+
+class BreadthResponse(BaseModel):
+    points: list[BreadthPoint]
+    timeline_id: int
+    as_of_date: date
+    provenance: ScreenerProvenance
+
+
+class FormulaEvaluateRequest(BaseModel):
+    formula: str = Field(min_length=1, max_length=240)
+    query: ScreenerQuery = Field(default_factory=ScreenerQuery)
+
+
+class FormulaValue(BaseModel):
+    ticker: str
+    value: Optional[float] = None
+    missing_reason: Optional[str] = None
+
+
+class FormulaEvaluateResponse(BaseModel):
+    formula: str
+    values: list[FormulaValue]
+    provenance: ScreenerProvenance
+
+
+class ResearchNotebookBlockInput(BaseModel):
+    block_type: Literal["text", "query", "table", "chart", "comparison", "dcf", "evidence"]
+    position: int = Field(default=0, ge=0)
+    payload: dict[str, Any] = Field(default_factory=dict)
+    provenance: dict[str, Any] = Field(default_factory=dict)
+
+
+class ResearchNotebookCreateRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=160)
+    description: Optional[str] = Field(default=None, max_length=800)
+    query: dict[str, Any] = Field(default_factory=dict)
+    visibility: Literal["private", "shared"] = "private"
+
+
+class ResearchNotebookUpdateRequest(BaseModel):
+    title: Optional[str] = Field(default=None, min_length=1, max_length=160)
+    description: Optional[str] = Field(default=None, max_length=800)
+    query: Optional[dict[str, Any]] = None
+    visibility: Optional[Literal["private", "shared"]] = None
+
+
+class ResearchNotebookBlockResponse(BaseModel):
+    id: int
+    notebook_id: int
+    block_type: str
+    position: int
+    payload: dict[str, Any]
+    provenance: dict[str, Any]
+    created_at: datetime
+    updated_at: datetime
+
+
+class ResearchNotebookResponse(BaseModel):
+    id: int
+    title: str
+    description: Optional[str]
+    query: dict[str, Any]
+    visibility: str
+    version: int
+    blocks: list[ResearchNotebookBlockResponse]
+    created_at: datetime
+    updated_at: datetime
+
+
+class ChartAnnotationCreateRequest(BaseModel):
+    ticker: str = Field(min_length=1, max_length=16)
+    timeline_id: int = Field(default=1, ge=1)
+    timeframe: str = Field(default="1D", min_length=1, max_length=20)
+    tool: str = Field(min_length=1, max_length=30)
+    anchors: list[dict[str, Any]] = Field(default_factory=list, max_length=50)
+    style: dict[str, Any] = Field(default_factory=dict)
+    evidence: dict[str, Any] = Field(default_factory=dict)
+
+
+class ChartAnnotationUpdateRequest(BaseModel):
+    timeframe: Optional[str] = Field(default=None, min_length=1, max_length=20)
+    tool: Optional[str] = Field(default=None, min_length=1, max_length=30)
+    anchors: Optional[list[dict[str, Any]]] = Field(default=None, max_length=50)
+    style: Optional[dict[str, Any]] = None
+    evidence: Optional[dict[str, Any]] = None
+
+
+class ChartAnnotationResponse(BaseModel):
+    id: int
+    ticker: str
+    timeline_id: int
+    timeframe: str
+    tool: str
+    anchors: list[dict[str, Any]]
+    style: dict[str, Any]
+    evidence: dict[str, Any]
+    version: int
+    created_at: datetime
+    updated_at: datetime
 
 
 class PriceHistoryItem(BaseModel):

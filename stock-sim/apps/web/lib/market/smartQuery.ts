@@ -5,8 +5,10 @@ import type { EnrichedCompany } from "@/lib/market/types";
  * Unlike commandGrammar's compact tokens (`cap:mega`, `chg>5`), this accepts
  * free sentences like:
  *   "market cap less than $500 Mil and day change > 5 and volatility < 30"
- * It compiles the text into a list of clauses (metric, operator, value), all
- * ANDed together, then exposes a single predicate over EnrichedCompany.
+ * It compiles the text into a list of clauses (metric, operator, value), with
+ * explicit top-level AND/OR logic, then exposes a single predicate over EnrichedCompany. The
+ * parsed clauses are also fed into the versioned server query object by the
+ * Market Explorer, so natural language and manual controls share execution.
  */
 
 export type ComparisonOp = ">" | ">=" | "<" | "<=" | "=";
@@ -31,6 +33,7 @@ export type SmartQueryToken = SmartQueryClause | SmartQueryError;
 export interface SmartQueryResult {
   clauses: SmartQueryClause[];
   errors: SmartQueryError[];
+  logic: "all" | "any";
   predicate: (c: EnrichedCompany) => boolean;
 }
 
@@ -41,7 +44,20 @@ export type MetricKey =
   | "volatility"
   | "ivGapPct"
   | "intrinsicValue"
-  | "volume";
+  | "volume"
+  | "rsi14"
+  | "sma20Pct"
+  | "return1mPct"
+  | "relativeStrengthPct"
+  | "managementQuality"
+  | "moatScore"
+  | "financialQuality"
+  | "fcfQuality"
+  | "growthPotential"
+  | "intrinsicScore"
+  | "fairPe";
+
+export const SMART_QUERY_METRIC_KEYS = ["marketCap", "price", "dayChangePct", "volatility", "ivGapPct", "intrinsicValue", "volume", "rsi14", "sma20Pct", "return1mPct", "relativeStrengthPct", "managementQuality", "moatScore", "financialQuality", "fcfQuality", "growthPotential", "intrinsicScore", "fairPe"] as const;
 
 interface MetricDef {
   key: MetricKey;
@@ -103,7 +119,33 @@ const METRICS: MetricDef[] = [
     accessor: (c) => (c.avg_volume_20d == null ? null : Number(c.avg_volume_20d)),
     unitScaled: true,
   },
+  ...([
+    ["rsi14", "RSI (14)", ["rsi", "rsi 14"], "rsi_14"],
+    ["sma20Pct", "Distance from SMA 20", ["sma", "sma 20", "distance from sma"], "sma_20_pct"],
+    ["return1mPct", "1M Return", ["1m return", "monthly return", "one month return"], "return_1m_pct"],
+    ["relativeStrengthPct", "Relative Strength", ["relative strength", "rs"], "relative_strength_pct"],
+    ["managementQuality", "Management Quality", ["management quality", "management"], "management_quality"],
+    ["moatScore", "Moat", ["moat", "moat score"], "moat_score"],
+    ["financialQuality", "Financial Quality", ["financial quality", "quality"], "financial_quality"],
+    ["fcfQuality", "FCF Quality", ["fcf quality", "cash flow quality"], "fcf_quality"],
+    ["growthPotential", "Growth Potential", ["growth", "growth potential"], "growth_potential"],
+    ["intrinsicScore", "Intrinsic Score", ["intrinsic score", "value score"], "intrinsic_score"],
+    ["fairPe", "Fair P/E", ["fair pe", "fair p/e"], "fair_pe"],
+  ] as Array<[MetricKey, string, string[], string]>).map(([key, label, aliases, serverKey]) => ({
+    key,
+    label,
+    aliases,
+    accessor: (c: EnrichedCompany) => {
+      const value = c.screenerMetrics?.[serverKey];
+      return value == null ? null : Number(value);
+    },
+    unitScaled: false,
+  })),
 ];
+
+const SERVER_ONLY_METRICS = new Set<MetricKey>([
+  "rsi14", "sma20Pct", "return1mPct", "relativeStrengthPct", "managementQuality", "moatScore", "financialQuality", "fcfQuality", "growthPotential", "intrinsicScore", "fairPe",
+]);
 
 // Longest alias first so "market cap" matches before a hypothetical "market".
 const SORTED_METRICS = [...METRICS].sort(
@@ -142,9 +184,10 @@ function findMetric(text: string): MetricDef | null {
 
 /** Splits "market cap less than $500 Mil and day change > 5 and volatility < 30"
  * into clause fragments on top-level `and`/`&&`/`,` boundaries. */
-function splitClauses(text: string): string[] {
+function splitClauses(text: string, logic: "all" | "any"): string[] {
+  const boundary = logic === "any" ? /\s*(?:,|\|\||\bor\b)\s*/i : /\s*(?:,|&&|\band\b)\s*/i;
   return text
-    .split(/\s*(?:,|&&|\band\b)\s*/i)
+    .split(boundary)
     .map((s) => s.trim())
     .filter(Boolean);
 }
@@ -214,26 +257,38 @@ function compare(actual: number, op: ComparisonOp, target: number): boolean {
 export function parseSmartQuery(text: string): SmartQueryResult {
   const clauses: SmartQueryClause[] = [];
   const errors: SmartQueryError[] = [];
+  const hasOr = /\s*(?:\|\||\bor\b)\s*/i.test(text);
+  const hasAnd = /\s*(?:&&|\band\b)\s*/i.test(text);
+  // Mixed precedence requires nested groups, which are not represented in
+  // the v1 query contract. Report it instead of silently changing meaning;
+  // a pure OR expression is supported end-to-end through logic="any".
+  const logic: "all" | "any" = hasOr && !hasAnd ? "any" : "all";
 
   if (text.trim()) {
-    for (const fragment of splitClauses(text)) {
+    for (const fragment of splitClauses(text, logic)) {
       const token = parseClause(fragment);
       if (token.valid) clauses.push(token);
       else errors.push(token);
     }
+    if (hasOr && hasAnd) errors.push({ raw: text, valid: false, reason: "Mixing AND and OR requires explicit groups; use one connector per query." });
   }
 
   const metricByKey = new Map(METRICS.map((m) => [m.key, m]));
-  const predicate = (c: EnrichedCompany): boolean =>
-    clauses.every((clause) => {
+  const predicate = (c: EnrichedCompany): boolean => {
+    const matches = clauses.map((clause) => {
       const metric = metricByKey.get(clause.metricKey);
       if (!metric) return true;
       const actual = metric.accessor(c);
+      // Before the server response arrives, preserve the legacy optimistic
+      // grid instead of flashing an empty table for a server-only metric.
+      if (actual == null && SERVER_ONLY_METRICS.has(clause.metricKey) && !c.screenerMetrics) return true;
       if (actual == null) return false;
       return compare(actual, clause.op, clause.value);
     });
+    return logic === "any" ? matches.some(Boolean) : matches.every(Boolean);
+  };
 
-  return { clauses, errors, predicate };
+  return { clauses, errors, logic, predicate };
 }
 
 export function smartQueryMetricLabels(): string[] {

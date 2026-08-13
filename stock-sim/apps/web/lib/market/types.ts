@@ -48,6 +48,9 @@ export interface EnrichedCompany extends CompanyGridItem {
   ivGapPct: number | null;
   marketCapCategory: string;
   pctOffHigh: number | null;
+  /** Server-only metric observations attached when the shared screener query
+   * has returned. The legacy market grid intentionally remains lean. */
+  screenerMetrics?: Record<string, number | string | null>;
 }
 
 export interface SortEntry {

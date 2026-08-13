@@ -14,6 +14,9 @@ import { DetailPanel } from "@/components/market/DetailPanel";
 import { CompareDrawer } from "@/components/market/CompareDrawer";
 import { ColumnManager } from "@/components/market/ColumnManager";
 import { HeatmapView } from "@/components/market/HeatmapView";
+import { ScreenerResearchWorkspace } from "@/components/market/ScreenerResearchWorkspace";
+import { ScreenerSavedScreensBar } from "@/components/market/ScreenerSavedScreensBar";
+import { SmartQueryBar } from "@/components/market/SmartQueryBar";
 import { ExplorerTable, type SortState } from "@/components/market/ExplorerTable";
 import { ExplorerSkeleton, ExplorerErrorState, ExplorerEmptyFiltered, ExplorerEmptyUniverse } from "@/components/market/ExplorerStates";
 import { COLUMN_DEFS, DEFAULT_HIDDEN_KEYS } from "@/lib/market/columns";
@@ -29,8 +32,12 @@ import { useColumnVisibility } from "@/lib/market/useColumnVisibility";
 import { useSavedScreens } from "@/lib/market/useSavedScreens";
 import { useWatchlistToggle } from "@/lib/market/useWatchlistToggle";
 import { useScreenerKeyboard } from "@/lib/market/useScreenerKeyboard";
-import { exportCompaniesCsv } from "@/lib/market/exportCsv";
-import type { CompanyGridItem } from "@/lib/api/types";
+import { useSavedScreenerScreens, useScreenerHeatmap, useScreenerPresets, useScreenerQuery } from "@/lib/api/hooks/useScreener";
+import { downloadPost } from "@/lib/api/client";
+import { marketFiltersToQuery, screenerQueryToCommandText } from "@/lib/market/screenerQuery";
+import { parseSmartQuery } from "@/lib/market/smartQuery";
+import { downloadBlobFile, exportCompaniesCsv } from "@/lib/market/exportCsv";
+import type { CompanyGridItem, ScreenerViewMode } from "@/lib/api/types";
 import type { ColumnKey, Density, EnrichedCompany } from "@/lib/market/types";
 
 const DENSITY_KEY = "market-explorer:density";
@@ -122,7 +129,7 @@ export function MarketExplorer({ companies, loading, error, onRetry, historicalD
   const [density, setDensity] = React.useState<Density>(() => readLocal(DENSITY_KEY, "compact" as Density));
   const [selectedTickers, setSelectedTickers] = React.useState<Set<string>>(new Set());
   const [detailTicker, setDetailTicker] = React.useState<string | null>(null);
-  const [viewMode, setViewMode] = React.useState<"table" | "heatmap">("table");
+  const [viewMode, setViewMode] = React.useState<ScreenerViewMode>("table");
   const [focusedIndex, setFocusedIndex] = React.useState(0);
   const [filterOverlayOpen, setFilterOverlayOpen] = React.useState(false);
   const [helpOpen, setHelpOpen] = React.useState(false);
@@ -132,8 +139,14 @@ export function MarketExplorer({ companies, loading, error, onRetry, historicalD
   const [toolbarQuery, setToolbarQuery] = React.useState("");
   const [showHighlights, setShowHighlights] = React.useState(false);
   const [showSentiment, setShowSentiment] = React.useState(false);
+  const [rankMetric, setRankMetric] = React.useState("financial_quality");
+  const [smartQueryText, setSmartQueryText] = React.useState("");
+  const [serverQueryOverride, setServerQueryOverride] = React.useState<import("@/lib/api/types").ScreenerQuery | null>(null);
+  const [serverOffset, setServerOffset] = React.useState(0);
 
   const savedScreens = useSavedScreens();
+  const savedServerScreens = useSavedScreenerScreens();
+  const screenerPresets = useScreenerPresets();
   const columnState = useColumnVisibility(COLUMN_DEFS, DEFAULT_HIDDEN_KEYS);
   const watchlist = useWatchlistToggle();
 
@@ -153,6 +166,7 @@ export function MarketExplorer({ companies, loading, error, onRetry, historicalD
   // Overlay) fixes both: a `>` landing within the window cancels the
   // pending commit before it ever applies.
   const parsed = React.useMemo(() => parseCommandLine(commandText, industries), [commandText, industries]);
+  const smartQueryResult = React.useMemo(() => parseSmartQuery(smartQueryText), [smartQueryText]);
   const isCommandMode = commandText.trim().startsWith(">");
   const [activeFilters, setActiveFilters] = React.useState(emptyFilterState());
   const [freeText, setFreeText] = React.useState("");
@@ -174,6 +188,7 @@ export function MarketExplorer({ companies, loading, error, onRetry, historicalD
     return enriched.filter((c) => {
       if (q && !(c.ticker.toLowerCase().startsWith(q) || c.name.toLowerCase().includes(q))) return false;
       if (tq && !(c.ticker.toLowerCase().startsWith(tq) || c.name.toLowerCase().includes(tq))) return false;
+      if (!smartQueryResult.predicate(c)) return false;
       if (activeFilters.industries.length > 0 && !activeFilters.industries.includes(c.industry_name)) return false;
       if (activeFilters.marketCapCategory.length > 0 && !activeFilters.marketCapCategory.includes(c.marketCapCategory)) return false;
       const inRange = (value: number | null, range: { min: number; max: number } | null) =>
@@ -187,15 +202,13 @@ export function MarketExplorer({ companies, loading, error, onRetry, historicalD
       if (!inRange(c.avg_volume_20d == null ? null : Number(c.avg_volume_20d), activeFilters.volume)) return false;
       return true;
     });
-  }, [enriched, activeFilters, freeText, toolbarQuery]);
+  }, [enriched, activeFilters, freeText, toolbarQuery, smartQueryResult]);
 
   const sorted = React.useMemo(() => sortRows(filtered, sort), [filtered, sort]);
 
   React.useEffect(() => {
     setFocusedIndex((i) => Math.min(i, Math.max(sorted.length - 1, 0)));
   }, [sorted.length]);
-
-  const rowGetter = React.useCallback((index: number) => sorted[index] ?? null, [sorted]);
 
   // Screen name / modified-dot in the status line.
   const activeScreen = savedScreens.screens.find((s) => s.id === savedScreens.activeId) ?? savedScreens.screens[0];
@@ -208,6 +221,7 @@ export function MarketExplorer({ companies, loading, error, onRetry, historicalD
   function loadScreen(id: string) {
     const screen = savedScreens.screens.find((s) => s.id === id);
     if (!screen) return;
+    setServerQueryOverride(null);
     savedScreens.setActiveId(id);
     setCommandText(filtersToCommandText(screen.filters));
     setSort({ key: screen.sortKey ?? null, direction: screen.sortDirection ?? null });
@@ -232,7 +246,7 @@ export function MarketExplorer({ companies, loading, error, onRetry, historicalD
         setColumnManagerOpen(true);
         break;
       case "export":
-        exportCompaniesCsv(sorted, columnState.orderedVisible);
+        void handleServerExport();
         break;
       case "hmp":
         setViewMode("heatmap");
@@ -253,11 +267,13 @@ export function MarketExplorer({ companies, loading, error, onRetry, historicalD
   }
 
   function handleRemoveToken(raw: string) {
+    setServerQueryOverride(null);
     setCommandText((t) => removeTokenFromText(t, raw));
   }
 
   function handleSectorClick(industryName: string) {
     if (activeFilters.industries.includes(industryName)) return;
+    setServerQueryOverride(null);
     setCommandText((t) => upsertTokensOfKey(t, "sector", [...activeFilters.industries, industryName].map((i) => `sector:${sectorToken(i)}`)));
   }
 
@@ -311,10 +327,59 @@ export function MarketExplorer({ companies, loading, error, onRetry, historicalD
     return () => window.removeEventListener("keydown", handleKey);
   }, [sortLetterMode, columnState.orderedVisible]);
 
+  const visibleColumns = columnState.orderedVisible;
+
+  const screenerQuery = React.useMemo(
+    () => marketFiltersToQuery(activeFilters, sort, visibleColumns.map((column) => column.key), { asOfDate: historicalDate, freeText: freeText || toolbarQuery, pageSize: 100, smartClauses: smartQueryResult.clauses, smartLogic: smartQueryResult.logic === "any" && activeFilterGroupCount(activeFilters, bounds) === 0 ? "any" : "all", extraColumns: [rankMetric] }),
+    [activeFilters, sort, visibleColumns, historicalDate, freeText, toolbarQuery, smartQueryResult.clauses, smartQueryResult.logic, rankMetric, bounds],
+  );
+  const effectiveServerQuery = serverQueryOverride ?? screenerQuery;
+  const queryIdentity = React.useMemo(() => JSON.stringify({ ...effectiveServerQuery, offset: 0 }), [effectiveServerQuery]);
+  React.useEffect(() => {
+    setServerOffset(0);
+  }, [queryIdentity]);
+  const serverExecutionQuery = React.useMemo(
+    () => ({
+      ...effectiveServerQuery,
+      offset: viewMode === "table" ? serverOffset : 0,
+      page_size: viewMode === "table" ? 100 : Math.min(effectiveServerQuery.page_size, 500),
+    }),
+    [effectiveServerQuery, serverOffset, viewMode],
+  );
+  const serverQueryEnabled = viewMode !== "notebook";
+  const serverQuery = useScreenerQuery(serverExecutionQuery, serverQueryEnabled);
+  const serverHeatmap = useScreenerHeatmap(effectiveServerQuery, { enabled: viewMode === "heatmap" });
+
+  async function handleServerExport() {
+    try {
+      const { blob, filename } = await downloadPost("/screener/export", effectiveServerQuery);
+      downloadBlobFile(blob, filename ?? "market-screen.csv");
+    } catch {
+      // Preserve the existing local export as an offline/unauthenticated
+      // fallback while the server export is unavailable.
+      exportCompaniesCsv(displaySorted, columnState.orderedVisible);
+    }
+  }
+
+  // The legacy table remains the immediate optimistic view while the shared
+  // query executes. Once the response arrives, every table/research surface
+  // reads the same server-filtered rows, including factor and technical
+  // clauses that do not exist on the original CompanyGridItem shape.
+  const serverCompanies = React.useMemo(
+    () => serverQuery.data ? serverQuery.data.rows.map((row) => ({ ...enrichCompanies([row.company])[0], screenerMetrics: row.metrics })) : null,
+    [serverQuery.data],
+  );
+  const displayCompanies = serverCompanies ?? enriched;
+  const displaySorted = serverCompanies ? sortRows(serverCompanies, sort) : sorted;
+  const rowGetter = React.useCallback((index: number) => displaySorted[index] ?? null, [displaySorted]);
+  React.useEffect(() => {
+    setFocusedIndex((index) => Math.min(index, Math.max(displaySorted.length - 1, 0)));
+  }, [displaySorted.length]);
+
   useScreenerKeyboard({
     focusedIndex,
     setFocusedIndex,
-    totalRows: sorted.length,
+    totalRows: displaySorted.length,
     onActivateRow: setDetailTicker,
     onToggleSelect: toggleSelect,
     onToggleWatch: watchlist.toggle,
@@ -333,33 +398,55 @@ export function MarketExplorer({ companies, loading, error, onRetry, historicalD
     onToggleFilters: () => setFilterOverlayOpen((v) => !v),
   });
 
-  const visibleColumns = columnState.orderedVisible;
+  function saveServerScreen(name: string) {
+    savedServerScreens.create.mutate({
+      name,
+      query: effectiveServerQuery,
+      columns: effectiveServerQuery.columns,
+      sort: effectiveServerQuery.sort,
+      view_mode: viewMode,
+    });
+  }
+
+  function loadServerScreen(query: import("@/lib/api/types").ScreenerQuery, mode: import("@/lib/api/types").ScreenerViewMode) {
+    setServerQueryOverride(query);
+    const command = screenerQueryToCommandText(query);
+    setCommandText(command);
+    setViewMode(mode);
+  }
+
+  function loadPreset(query: import("@/lib/api/types").ScreenerQuery) {
+    setServerQueryOverride(query);
+    setCommandText(screenerQueryToCommandText(query));
+    setViewMode("table");
+  }
 
   const showSkeleton = Boolean(loading);
   const showError = Boolean(error) && !loading;
   const isTrulyEmpty = !loading && !error && enriched.length === 0;
-  const isFilteredEmpty = !loading && !error && enriched.length > 0 && sorted.length === 0;
+  const isFilteredEmpty = !loading && !error && enriched.length > 0 && displaySorted.length === 0 && !serverQuery.isLoading;
 
   return (
     <div className="mv-terminal relative flex flex-1 flex-col overflow-hidden bg-[var(--term-bg)]">
       <CommandLine
         value={commandText}
-        onChange={setCommandText}
+        onChange={(next) => { setServerQueryOverride(null); setCommandText(next); }}
         onCommand={handleCommand}
         industries={industries}
-        resultCount={sorted.length}
+        resultCount={displaySorted.length}
         totalCount={enriched.length}
         viewMode={viewMode}
         onViewModeChange={setViewMode}
         inputRef={searchInputRef}
       />
       <div className="flex shrink-0 items-center justify-between border-b border-[var(--term-hairline)] bg-[linear-gradient(90deg,var(--term-bg),rgba(30,41,59,.22),var(--term-bg))] px-4 py-2 text-[11px] text-[var(--term-muted)]">
-        <div className="flex items-center gap-4"><span className="font-semibold uppercase tracking-[0.16em] text-[var(--term-text)]">Equity screener</span><span className="font-mono tabular-nums text-[var(--term-amber)]">{sorted.length.toLocaleString()} matches</span><span>{activeFilterGroupCount(activeFilters, bounds)} filter groups active</span></div>
+        <div className="flex items-center gap-4"><span className="font-semibold uppercase tracking-[0.16em] text-[var(--term-text)]">Equity screener</span><span className="font-mono tabular-nums text-[var(--term-amber)]">{(serverQuery.data?.total ?? displaySorted.length).toLocaleString()} matches</span><span>{activeFilterGroupCount(activeFilters, bounds)} filter groups active</span></div>
         <Link href="/future-lab" className="hidden items-center gap-1.5 text-[var(--term-accent)] transition-colors hover:text-white sm:flex">Open Future Lab <span aria-hidden>↗</span></Link>
       </div>
+      <div className="flex shrink-0 items-center border-b border-[var(--term-hairline)] px-4 py-1.5"><SmartQueryBar value={smartQueryText} onChange={(next) => { setServerQueryOverride(null); setSmartQueryText(next); }} resultCount={displaySorted.length} /></div>
       <ScreenerToolbar
         query={toolbarQuery}
-        onQueryChange={setToolbarQuery}
+        onQueryChange={(next) => { setServerQueryOverride(null); setToolbarQuery(next); }}
         searchInputRef={toolbarSearchInputRef}
         columns={COLUMN_DEFS}
         columnOrder={columnState.order}
@@ -369,7 +456,7 @@ export function MarketExplorer({ companies, loading, error, onRetry, historicalD
         onResetColumns={columnState.reset}
         density={density}
         onDensityChange={setDensity}
-        onExport={() => exportCompaniesCsv(sorted, columnState.orderedVisible)}
+        onExport={() => { void handleServerExport(); }}
         compareCount={selectedTickers.size}
         onOpenCompare={() => setCompareOpen(true)}
         sort={sort}
@@ -389,13 +476,24 @@ export function MarketExplorer({ companies, loading, error, onRetry, historicalD
         onRemoveToken={handleRemoveToken}
         screenName={activeScreen?.name ?? "All"}
         screenModified={screenModified}
-        companies={sorted}
+        companies={displaySorted}
         compareCount={selectedTickers.size}
         onOpenCompare={() => setCompareOpen(true)}
         stale={Boolean(historicalDate)}
         staleSince={historicalDate ?? null}
         staleLabel="HISTORICAL"
       /></div>
+
+      <ScreenerSavedScreensBar
+        screens={savedServerScreens.data ?? []}
+        authenticated={savedServerScreens.authenticated}
+        saving={savedServerScreens.create.isPending}
+        onSave={saveServerScreen}
+        onLoad={loadServerScreen}
+        onRemove={(id) => savedServerScreens.remove.mutate(id)}
+        presets={screenerPresets.data ?? []}
+        onLoadPreset={loadPreset}
+      />
 
       {showHighlights && (
         <>
@@ -418,7 +516,7 @@ export function MarketExplorer({ companies, loading, error, onRetry, historicalD
             bounds={bounds}
             filters={activeFilters}
             commandText={commandText}
-            onCommandTextChange={setCommandText}
+            onCommandTextChange={(next) => { setServerQueryOverride(null); setCommandText(next); }}
           />
         )}
 
@@ -433,22 +531,72 @@ export function MarketExplorer({ companies, loading, error, onRetry, historicalD
             ) : isFilteredEmpty ? (
               <ExplorerEmptyFiltered onReset={() => setCommandText("")} />
             ) : viewMode === "heatmap" ? (
-              <HeatmapView companies={sorted} onActivateRow={setDetailTicker} />
-            ) : (
-              <ExplorerTable
-                rows={sorted}
-                columns={visibleColumns}
-                density={density}
-                sort={sort}
-                onSort={toggleSort}
-                selectedTickers={selectedTickers}
-                onToggleSelect={toggleSelect}
-                watchedTickers={watchlist.watchedTickers}
-                onToggleWatch={watchlist.toggle}
+              <ScreenerResearchWorkspace
+                mode="heatmap"
+                query={effectiveServerQuery}
+                heatmap={serverHeatmap.data}
+                rankMetric={rankMetric}
+                onRankMetricChange={setRankMetric}
+                companies={displaySorted}
+                selectedTickers={Array.from(selectedTickers)}
                 onActivateRow={setDetailTicker}
-                changedTickers={changedTickers}
-                onSectorClick={handleSectorClick}
               />
+            ) : viewMode === "rank" || viewMode === "research" || viewMode === "notebook" || viewMode === "correlation" || viewMode === "breadth" || viewMode === "exposure" ? (
+              <ScreenerResearchWorkspace
+                mode={viewMode}
+                query={effectiveServerQuery}
+                result={serverQuery.data}
+                rankMetric={rankMetric}
+                onRankMetricChange={setRankMetric}
+                companies={displaySorted}
+                selectedTickers={Array.from(selectedTickers)}
+                onActivateRow={setDetailTicker}
+              />
+            ) : (
+              <>
+                <ExplorerTable
+                  rows={displaySorted}
+                  columns={visibleColumns}
+                  density={density}
+                  sort={sort}
+                  onSort={toggleSort}
+                  selectedTickers={selectedTickers}
+                  onToggleSelect={toggleSelect}
+                  watchedTickers={watchlist.watchedTickers}
+                  onToggleWatch={watchlist.toggle}
+                  onActivateRow={setDetailTicker}
+                  changedTickers={changedTickers}
+                  onSectorClick={handleSectorClick}
+                />
+                <div className="flex shrink-0 items-center justify-between border-t border-[var(--term-hairline)] bg-[var(--term-bg)] px-4 py-2 text-[11px] text-[var(--term-muted)]">
+                  <span className="font-mono tabular-nums">
+                    {serverQuery.data && serverQuery.data.total > 0
+                      ? `Rows ${serverQuery.data.offset + 1}–${Math.min(serverQuery.data.offset + displaySorted.length, serverQuery.data.total)} of ${serverQuery.data.total}`
+                      : "No rows on this page"}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      className="rounded border border-[var(--term-hairline)] px-2 py-1 transition-colors hover:border-[var(--term-accent)] disabled:cursor-not-allowed disabled:opacity-40"
+                      disabled={serverOffset <= 0 || serverQuery.isFetching}
+                      onClick={() => setServerOffset((offset) => Math.max(0, offset - 100))}
+                    >
+                      Previous
+                    </button>
+                    <span className="min-w-[72px] text-center font-mono tabular-nums text-[var(--term-text)]">
+                      Page {Math.floor(serverOffset / 100) + 1}
+                    </span>
+                    <button
+                      type="button"
+                      className="rounded border border-[var(--term-hairline)] px-2 py-1 transition-colors hover:border-[var(--term-accent)] disabled:cursor-not-allowed disabled:opacity-40"
+                      disabled={!serverQuery.data || serverOffset + 100 >= serverQuery.data.total || serverQuery.isFetching}
+                      onClick={() => setServerOffset((offset) => offset + 100)}
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              </>
             )}
           </div>
 
@@ -459,7 +607,8 @@ export function MarketExplorer({ companies, loading, error, onRetry, historicalD
                 watched={watchlist.watchedTickers.has(detailTicker)}
                 onToggleWatch={watchlist.toggle}
                 onClose={() => setDetailTicker(null)}
-                gridRow={enriched.find((c) => c.ticker === detailTicker)}
+                gridRow={displayCompanies.find((c) => c.ticker === detailTicker)}
+                asOfDate={historicalDate}
               />
             </div>
           )}
